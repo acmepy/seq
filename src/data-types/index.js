@@ -4,6 +4,9 @@ import { NumberType } from './NumberType.js';
 import { StringType } from './StringType.js';
 import { BooleanType } from './BooleanType.js';
 import { DateType } from './DateType.js';
+import { ArrayType } from './ArrayType.js';
+import { ObjectType } from './ObjectType.js';
+import { JSONType } from './JSONType.js';
 
 /**
  * Factory object exposing all available data types.
@@ -21,10 +24,16 @@ export const DataTypes = {
     return new StringType(length);
   },
   BOOLEAN: new BooleanType(),
-  DATE: new DateType()
+  DATE: new DateType(),
+  ARRAY(itemType) {
+    return new ArrayType(itemType);
+  },
+  OBJECT: new ObjectType(),
+  JSON: new JSONType()
 };
 
-// Pre-create common instances for direct access
 DataTypes._INTEGER = new IntegerType();
 DataTypes._BOOLEAN = new BooleanType();
 DataTypes._DATE = new DateType();
+DataTypes._OBJECT = new ObjectType();
+DataTypes._JSON = new JSONType();

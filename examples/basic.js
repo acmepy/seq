@@ -32,6 +32,21 @@ class User extends Model {
           type: DataTypes.BOOLEAN,
           allowNull: false,
           defaultValue: true
+        },
+        tags: {
+          type: DataTypes.ARRAY(DataTypes.STRING(50)),
+          allowNull: true,
+          defaultValue: () => []
+        },
+        settings: {
+          type: DataTypes.OBJECT,
+          allowNull: true,
+          defaultValue: () => ({})
+        },
+        metadata: {
+          type: DataTypes.JSON,
+          allowNull: true,
+          defaultValue: () => ({})
         }
       },
       {
@@ -58,37 +73,22 @@ console.log('Sync:', syncResult);
 const ana = await User.create({
   name: 'Ana',
   email: 'ana@example.com',
-  balance: 150.50
+  balance: 150.50,
+  tags: ['admin', 'dev'],
+  settings: { theme: 'dark', lang: 'es' },
+  metadata: { loginCount: 5, lastIp: '192.168.1.1' }
 });
 
-await User.create({
-  name: 'Juan',
-  email: 'juan@example.com'
-});
+await User.create({ name: 'Juan', email: 'juan@example.com', tags: ['user'], metadata: { loginCount: 1 }});
 
-console.log(
-  'Usuarios:',
-  (await User.findAll()).map(user => user.toJSON())
-);
+console.log( 'Usuarios:', (await User.findAll()).map(u => u.toJSON()) );
 
-await ana.update({
-  balance: 200
-});
+await ana.update({ balance: 200, tags: ['admin', 'dev', 'ops'], metadata: { loginCount: 6, lastIp: '10.0.0.1' } });
 
-console.log(
-  'Ana actualizada:',
-  ana.toJSON()
-);
+console.log( 'Ana actualizada:', ana.toJSON() );
 
-await User.destroy({
-  where: {
-    name: 'Juan'
-  }
-});
+await User.destroy({ where: { name: 'Juan' } });
 
-console.log(
-  'Resultado final:',
-  (await User.findAll()).map(user => user.toJSON())
-);
+console.log( 'Resultado final:', (await User.findAll()).map(u => u.toJSON()) );
 
 await seq.close();

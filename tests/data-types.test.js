@@ -7,6 +7,9 @@ import { DecimalType } from '../src/data-types/DecimalType.js';
 import { StringType } from '../src/data-types/StringType.js';
 import { BooleanType } from '../src/data-types/BooleanType.js';
 import { DateType } from '../src/data-types/DateType.js';
+import { ArrayType } from '../src/data-types/ArrayType.js';
+import { ObjectType } from '../src/data-types/ObjectType.js';
+import { JSONType } from '../src/data-types/JSONType.js';
 
 describe('DataTypes', () => {
   describe('AbstractDataType', () => {
@@ -221,6 +224,144 @@ describe('DataTypes', () => {
 
     it('accepts null', () => {
       assert.ok(DataTypes.DATE.validate(null).valid);
+    });
+  });
+
+  describe('ARRAY', () => {
+    it('creates an ArrayType with no item type', () => {
+      const type = DataTypes.ARRAY();
+      assert.ok(type instanceof ArrayType);
+      assert.equal(type.key, 'ARRAY');
+    });
+
+    it('creates an ArrayType with an item type', () => {
+      const type = DataTypes.ARRAY(DataTypes.STRING(50));
+      assert.ok(type._itemType instanceof StringType);
+    });
+
+    it('accepts any array when no item type', () => {
+      const type = DataTypes.ARRAY();
+      assert.ok(type.validate([1, 'two', true]).valid);
+      assert.ok(type.validate([]).valid);
+    });
+
+    it('accepts arrays with matching item type', () => {
+      const type = DataTypes.ARRAY(DataTypes.INTEGER);
+      assert.ok(type.validate([1, 2, 3]).valid);
+      assert.ok(type.validate([]).valid);
+    });
+
+    it('rejects arrays with invalid item types', () => {
+      const type = DataTypes.ARRAY(DataTypes.INTEGER);
+      const result = type.validate([1, 'two', 3]);
+      assert.ok(!result.valid);
+      assert.ok(result.message.includes('index 1'));
+    });
+
+    it('rejects non-arrays', () => {
+      const type = DataTypes.ARRAY();
+      assert.ok(!type.validate('not an array').valid);
+      assert.ok(!type.validate(42).valid);
+      assert.ok(!type.validate({}).valid);
+    });
+
+    it('accepts null', () => {
+      const type = DataTypes.ARRAY();
+      assert.ok(type.validate(null).valid);
+    });
+
+    it('toString returns ARRAY', () => {
+      const type = DataTypes.ARRAY();
+      assert.equal(type.toString(), 'ARRAY');
+    });
+
+    it('toString includes itemType key', () => {
+      const type = DataTypes.ARRAY(DataTypes.INTEGER);
+      assert.ok(type.toString().includes('INTEGER'));
+    });
+  });
+
+  describe('OBJECT', () => {
+    it('is an instance of ObjectType and AbstractDataType', () => {
+      assert.ok(DataTypes.OBJECT instanceof ObjectType);
+      assert.ok(DataTypes.OBJECT instanceof AbstractDataType);
+    });
+
+    it('has key OBJECT', () => {
+      assert.equal(DataTypes.OBJECT.key, 'OBJECT');
+    });
+
+    it('accepts plain objects', () => {
+      assert.ok(DataTypes.OBJECT.validate({}).valid);
+      assert.ok(DataTypes.OBJECT.validate({ a: 1, b: 'two' }).valid);
+    });
+
+    it('rejects arrays', () => {
+      assert.ok(!DataTypes.OBJECT.validate([]).valid);
+    });
+
+    it('rejects Date instances', () => {
+      assert.ok(!DataTypes.OBJECT.validate(new Date()).valid);
+    });
+
+    it('rejects non-objects', () => {
+      assert.ok(!DataTypes.OBJECT.validate('hello').valid);
+      assert.ok(!DataTypes.OBJECT.validate(42).valid);
+      assert.ok(!DataTypes.OBJECT.validate(true).valid);
+    });
+
+    it('rejects class instances', () => {
+      class Foo {}
+      assert.ok(!DataTypes.OBJECT.validate(new Foo()).valid);
+    });
+
+    it('accepts null', () => {
+      assert.ok(DataTypes.OBJECT.validate(null).valid);
+    });
+
+    it('toString returns OBJECT', () => {
+      assert.equal(DataTypes.OBJECT.toString(), 'OBJECT');
+    });
+  });
+
+  describe('JSON', () => {
+    it('is an instance of JSONType, ObjectType and AbstractDataType', () => {
+      assert.ok(DataTypes.JSON instanceof JSONType);
+      assert.ok(DataTypes.JSON instanceof ObjectType);
+      assert.ok(DataTypes.JSON instanceof AbstractDataType);
+    });
+
+    it('has key JSON', () => {
+      assert.equal(DataTypes.JSON.key, 'JSON');
+    });
+
+    it('accepts JSON-serializable objects', () => {
+      assert.ok(DataTypes.JSON.validate({}).valid);
+      assert.ok(DataTypes.JSON.validate({ a: 1, b: 'two' }).valid);
+      assert.ok(DataTypes.JSON.validate({ nested: { deep: true } }).valid);
+      assert.ok(DataTypes.JSON.validate({ arr: [1, 2, 3] }).valid);
+    });
+
+    it('rejects objects with non-serializable values', () => {
+      assert.ok(!DataTypes.JSON.validate({ fn: () => {} }).valid);
+      assert.ok(!DataTypes.JSON.validate({ undef: undefined }).valid);
+    });
+
+    it('rejects arrays (inherits from ObjectType)', () => {
+      assert.ok(!DataTypes.JSON.validate([1, 2, 3]).valid);
+    });
+
+    it('rejects non-objects', () => {
+      assert.ok(!DataTypes.JSON.validate('hello').valid);
+      assert.ok(!DataTypes.JSON.validate(42).valid);
+    });
+
+    it('accepts null', () => {
+      assert.ok(DataTypes.JSON.validate(null).valid);
+    });
+
+    it('toString returns JSON', () => {
+      assert.equal(DataTypes.JSON.toString(), 'JSON');
     });
   });
 });
