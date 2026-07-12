@@ -1,15 +1,19 @@
 import { AdapterError } from '../../core/errors/AdapterError.js';
+import { DDLAbstract } from '../abstract/DDLAbstract.js';
 
 /**
  * DDL operations for the MapAdapter.
  * Handles table creation, dropping, inspection and alteration.
+ *
+ * Extends DDLStatements which provides adapter-agnostic helpers:
+ * normalizeDefinition, diffColumns.
  */
-export class MapDDL {
+export class MapDDL extends DDLAbstract {
   /**
    * @param {import('./MapAdapter.js').MapAdapter} adapter
    */
   constructor(adapter) {
-    this._adapter = adapter;
+    super(adapter);
   }
 
   /**
@@ -18,29 +22,17 @@ export class MapDDL {
    * @param {object} [options]
    */
   async createTable(definition, options = {}) {
-    const { tableName, columns, primaryKey, autoIncrement, timestamps, createdAt, updatedAt, attrToColumn, columnToAttr, primaryKeyAttribute, autoIncrementAttribute } = definition;
+    const def = this.normalizeDefinition(definition);
 
-    if (this._adapter.database.has(tableName)) {
-      throw new AdapterError(`Table "${tableName}" already exists`, {
+    if (this._adapter.database.has(def.tableName)) {
+      throw new AdapterError(`Table "${def.tableName}" already exists`, {
         code: 'SEQ_ADAPTER_TABLE_EXISTS'
       });
     }
 
-    this._adapter.database.set(tableName, new Map());
-    this._adapter.schemas.set(tableName, {
-      tableName,
-      columns: { ...columns },
-      primaryKey: primaryKey || null,
-      autoIncrement: autoIncrement || null,
-      primaryKeyAttribute: primaryKeyAttribute || null,
-      autoIncrementAttribute: autoIncrementAttribute || null,
-      timestamps: timestamps || false,
-      createdAt: createdAt || 'createdAt',
-      updatedAt: updatedAt || 'updatedAt',
-      attrToColumn: attrToColumn || {},
-      columnToAttr: columnToAttr || {}
-    });
-    this._adapter.sequences.set(tableName, 1);
+    this._adapter.database.set(def.tableName, new Map());
+    this._adapter.schemas.set(def.tableName, def);
+    this._adapter.sequences.set(def.tableName, 1);
   }
 
   /**
@@ -98,15 +90,16 @@ export class MapDDL {
       });
     }
 
-    let altered = false;
-    const newColumns = definition.columns || {};
+    const missing = this.diffColumns(schema, definition);
+    const hasChanges = Object.keys(missing).length > 0;
 
-    for (const [name, colDef] of Object.entries(newColumns)) {
-      if (!(name in schema.columns)) {
-        schema.columns[name] = colDef;
-        altered = true;
-        // Add default value to existing records
-        const table = this._adapter.database.get(tableName);
+    for (const [name, colDef] of Object.entries(missing)) {
+      schema.columns[name] = colDef;
+    }
+
+    if (hasChanges) {
+      const table = this._adapter.database.get(tableName);
+      for (const [name, colDef] of Object.entries(missing)) {
         for (const [, record] of table) {
           if (!(name in record)) {
             record[name] = colDef.defaultValue !== undefined
@@ -117,7 +110,7 @@ export class MapDDL {
       }
     }
 
-    return altered;
+    return hasChanges;
   }
 
   /**

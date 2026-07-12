@@ -1,4 +1,4 @@
-import { AdapterError } from '../../core/errors/AdapterError.js';
+import { TCLAbstract } from '../abstract/TCLAbstract.js';
 import { clone } from '../../utils/clone.js';
 
 /**
@@ -9,6 +9,8 @@ let transactionIdCounter = 0;
 /**
  * TCL operations for the MapAdapter.
  *
+ * Extends TCLStatements which provides _validateTransaction.
+ *
  * Transaction strategy:
  * - begin: snapshot all main tables and sequences
  * - commit: discard snapshots (changes already in main tables)
@@ -17,12 +19,12 @@ let transactionIdCounter = 0;
  * DML operations always write directly to the main tables.
  * This is a simple optimistic approach suitable for an in-memory adapter.
  */
-export class MapTCL {
+export class MapTCL extends TCLAbstract {
   /**
    * @param {import('./MapAdapter.js').MapAdapter} adapter
    */
   constructor(adapter) {
-    this._adapter = adapter;
+    super(adapter);
   }
 
   /**
@@ -39,7 +41,6 @@ export class MapTCL {
       sequences: new Map()
     };
 
-    // Snapshot all tables (deep copy)
     for (const [tableName, table] of this._adapter.database) {
       const snapshot = new Map();
       for (const [key, record] of table) {
@@ -48,7 +49,6 @@ export class MapTCL {
       transaction.snapshots.set(tableName, snapshot);
     }
 
-    // Snapshot sequences
     for (const [tableName, seq] of this._adapter.sequences) {
       transaction.sequences.set(tableName, seq);
     }
@@ -62,11 +62,7 @@ export class MapTCL {
    * @param {object} transaction
    */
   async commit(transaction) {
-    if (!transaction || !transaction.active) {
-      throw new AdapterError('Transaction is not active or already finished', {
-        code: 'SEQ_ADAPTER_TRANSACTION_INVALID'
-      });
-    }
+    this._validateTransaction(transaction);
     transaction.active = false;
     transaction.snapshots.clear();
     transaction.sequences.clear();
@@ -78,18 +74,12 @@ export class MapTCL {
    * @param {object} transaction
    */
   async rollback(transaction) {
-    if (!transaction || !transaction.active) {
-      throw new AdapterError('Transaction is not active or already finished', {
-        code: 'SEQ_ADAPTER_TRANSACTION_INVALID'
-      });
-    }
+    this._validateTransaction(transaction);
 
-    // Restore all tables from snapshots
     for (const [tableName, snapshot] of transaction.snapshots) {
       this._adapter.database.set(tableName, snapshot);
     }
 
-    // Restore sequences
     for (const [tableName, seq] of transaction.sequences) {
       this._adapter.sequences.set(tableName, seq);
     }
