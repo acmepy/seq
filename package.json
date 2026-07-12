@@ -1,6 +1,6 @@
 {
   "name": "seq",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "seq es un micro orm, modular, flexible y de facil integracion",
   "type": "module",
   "main": "src/index.js",

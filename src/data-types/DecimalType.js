@@ -1,29 +1,16 @@
-import { AbstractDataType } from './AbstractDataType.js';
+import { NumberType } from './NumberType.js';
 
 /**
  * Represents a decimal/numeric data type with precision and scale.
+ * Extends NumberType with a different default scale.
  */
-export class DecimalType extends AbstractDataType {
+export class DecimalType extends NumberType {
   /**
    * @param {number} [precision=10] - Total number of digits
    * @param {number} [scale=2] - Number of digits after decimal point
    */
   constructor(precision = 10, scale = 2) {
-    super('DECIMAL', { precision, scale });
-  }
-
-  /**
-   * Validates that a value is a valid number.
-   * @param {*} value
-   * @returns {{ valid: boolean, message: string }}
-   */
-  validate(value) {
-    if (value === null || value === undefined) {
-      return { valid: true, message: '' };
-    }
-    if (typeof value !== 'number' || isNaN(value)) {
-      return { valid: false, message: `Expected a valid number, got ${typeof value}` };
-    }
-    return { valid: true, message: '' };
+    super(precision, scale);
+    this.key = 'DECIMAL';
   }
 }
