@@ -18,7 +18,7 @@ export class MapDDL {
    * @param {object} [options]
    */
   async createTable(definition, options = {}) {
-    const { tableName, columns, primaryKey, autoIncrement, timestamps, createdAt, updatedAt } = definition;
+    const { tableName, columns, primaryKey, autoIncrement, timestamps, createdAt, updatedAt, attrToColumn, columnToAttr, primaryKeyAttribute, autoIncrementAttribute } = definition;
 
     if (this._adapter.database.has(tableName)) {
       throw new AdapterError(`Table "${tableName}" already exists`, {
@@ -32,9 +32,13 @@ export class MapDDL {
       columns: { ...columns },
       primaryKey: primaryKey || null,
       autoIncrement: autoIncrement || null,
+      primaryKeyAttribute: primaryKeyAttribute || null,
+      autoIncrementAttribute: autoIncrementAttribute || null,
       timestamps: timestamps || false,
       createdAt: createdAt || 'createdAt',
-      updatedAt: updatedAt || 'updatedAt'
+      updatedAt: updatedAt || 'updatedAt',
+      attrToColumn: attrToColumn || {},
+      columnToAttr: columnToAttr || {}
     });
     this._adapter.sequences.set(tableName, 1);
   }

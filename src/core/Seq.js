@@ -188,8 +188,14 @@ export class Seq {
   _buildTableDefinition(modelClass) {
     const attributes = modelClass.rawAttributes || {};
     const columns = {};
+    const attrToColumn = {};
+    const columnToAttr = {};
 
     for (const [name, def] of Object.entries(attributes)) {
+      const columnName = def.field || name;
+      attrToColumn[name] = columnName;
+      columnToAttr[columnName] = name;
+
       columns[name] = {
         type: def.type,
         primaryKey: def.primaryKey || false,
@@ -197,19 +203,26 @@ export class Seq {
         allowNull: def.allowNull !== undefined ? def.allowNull : true,
         defaultValue: def.defaultValue,
         unique: def.unique || false,
-        field: def.field || name
+        field: columnName
       };
     }
+
+    const pkAttr = modelClass.primaryKeyAttribute;
+    const aiAttr = modelClass.autoIncrementAttribute;
 
     return {
       modelName: modelClass.modelName,
       tableName: modelClass.tableName,
       columns,
-      primaryKey: modelClass.primaryKeyAttribute,
-      autoIncrement: modelClass.autoIncrementAttribute,
+      primaryKey: pkAttr ? attrToColumn[pkAttr] : null,
+      autoIncrement: aiAttr ? attrToColumn[aiAttr] : null,
+      primaryKeyAttribute: pkAttr || null,
+      autoIncrementAttribute: aiAttr || null,
       timestamps: modelClass.options?.timestamps || false,
       createdAt: modelClass.options?.createdAt || 'createdAt',
-      updatedAt: modelClass.options?.updatedAt || 'updatedAt'
+      updatedAt: modelClass.options?.updatedAt || 'updatedAt',
+      attrToColumn,
+      columnToAttr
     };
   }
 

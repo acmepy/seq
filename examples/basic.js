@@ -1,67 +1,10 @@
-import {
-  Seq,
-  Model,
-  DataTypes,
-  MapAdapter
-} from '../src/index.js';
-
-class User extends Model {
-  static define(seq) {
-    return this.init(
-      {
-        id: {
-          type: DataTypes.INTEGER,
-          primaryKey: true,
-          autoIncrement: true,
-          allowNull: false
-        },
-        name: {
-          type: DataTypes.STRING(100),
-          allowNull: false
-        },
-        email: {
-          type: DataTypes.STRING(150),
-          allowNull: false
-        },
-        balance: {
-          type: DataTypes.DECIMAL(12, 2),
-          allowNull: false,
-          defaultValue: 0
-        },
-        active: {
-          type: DataTypes.BOOLEAN,
-          allowNull: false,
-          defaultValue: true
-        },
-        tags: {
-          type: DataTypes.ARRAY(DataTypes.STRING(50)),
-          allowNull: true,
-          defaultValue: () => []
-        },
-        settings: {
-          type: DataTypes.OBJECT,
-          allowNull: true,
-          defaultValue: () => ({})
-        },
-        metadata: {
-          type: DataTypes.JSON,
-          allowNull: true,
-          defaultValue: () => ({})
-        }
-      },
-      {
-        seq,
-        modelName: 'User',
-        tableName: 'users',
-        timestamps: true
-      }
-    );
-  }
-}
+import { Seq, MapAdapter } from '../src/index.js';
+import { User } from './models/User.js';
+import { Product } from './models/Product.js';
 
 const seq = new Seq({
   adapter: new MapAdapter(),
-  models: [User],
+  models: [User, Product],
   logging: console.log
 });
 
@@ -75,20 +18,38 @@ const ana = await User.create({
   email: 'ana@example.com',
   balance: 150.50,
   tags: ['admin', 'dev'],
-  settings: { theme: 'dark', lang: 'es' },
-  metadata: { loginCount: 5, lastIp: '192.168.1.1' }
+  settings: { theme: 'dark' },
+  metadata: { loginCount: 5 }
 });
 
-await User.create({ name: 'Juan', email: 'juan@example.com', tags: ['user'], metadata: { loginCount: 1 }});
+console.log('Ana:', ana.toJSON());
 
-console.log( 'Usuarios:', (await User.findAll()).map(u => u.toJSON()) );
+const laptop = await Product.create({
+  productName: 'Laptop',
+  unitPrice: 999.99
+});
 
-await ana.update({ balance: 200, tags: ['admin', 'dev', 'ops'], metadata: { loginCount: 6, lastIp: '10.0.0.1' } });
+const mouse = await Product.create({
+  productName: 'Mouse',
+  unitPrice: 25.50,
+  inStock: false
+});
 
-console.log( 'Ana actualizada:', ana.toJSON() );
+console.log('Laptop (attr names):', laptop.toJSON());
 
-await User.destroy({ where: { name: 'Juan' } });
+const schema = seq._adapter.schemas.get('products');
+const table = seq._adapter.database.get('products');
+const raw = [...table.values()][0];
+console.log('Laptop (column names in DB):', raw);
+console.log('attrToColumn:', schema.attrToColumn);
 
-console.log( 'Resultado final:', (await User.findAll()).map(u => u.toJSON()) );
+const found = await Product.findOne({ where: { productName: 'Laptop' } });
+console.log('findOne by productName:', found.getDataValue('productName'), found.getDataValue('unitPrice'));
+
+await laptop.update({ unitPrice: 899.99 });
+console.log('Laptop updated:', laptop.toJSON());
+
+await Product.destroy({ where: { productName: 'Mouse' } });
+console.log('Products after destroy:', (await Product.findAll()).map(p => p.toJSON()));
 
 await seq.close();

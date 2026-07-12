@@ -308,4 +308,104 @@ describe('Model CRUD', () => {
       assert.equal(user.getDataValue('name'), 'Ana');
     });
   });
+
+  describe('field mapping', () => {
+    let seq2;
+    let Product;
+
+    beforeEach(async () => {
+      class _Product extends Model {}
+      _Product.init(
+        {
+          id: { type: DataTypes.INTEGER, primaryKey: true, autoIncrement: true, allowNull: false },
+          productName: { type: DataTypes.STRING(100), allowNull: false, field: 'product_name' },
+          unitPrice: { type: DataTypes.DECIMAL(10, 2), allowNull: false, defaultValue: 0, field: 'unit_price' },
+          inStock: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: true, field: 'in_stock' }
+        },
+        { modelName: 'Product', tableName: 'products', timestamps: false }
+      );
+      Product = _Product;
+
+      seq2 = new Seq({ adapter: new MapAdapter(), models: [Product], logging: false });
+      await seq2.init();
+      await seq2.sync();
+    });
+
+    it('stores records using column names', async () => {
+      await Product.create({ productName: 'Laptop', unitPrice: 999.99 });
+      const schema = seq2._adapter.schemas.get('products');
+      const table = seq2._adapter.database.get('products');
+      const raw = [...table.values()][0];
+      assert.ok('product_name' in raw);
+      assert.ok('unit_price' in raw);
+      assert.ok('in_stock' in raw);
+      assert.ok(!('productName' in raw));
+    });
+
+    it('returns model instances with attribute names', async () => {
+      const product = await Product.create({ productName: 'Laptop', unitPrice: 999.99 });
+      assert.equal(product.getDataValue('productName'), 'Laptop');
+      assert.equal(product.getDataValue('unitPrice'), 999.99);
+      assert.equal(product.getDataValue('inStock'), true);
+    });
+
+    it('findByPk works with field mapping', async () => {
+      const created = await Product.create({ productName: 'Mouse', unitPrice: 25.50 });
+      const found = await Product.findByPk(created.getDataValue('id'));
+      assert.ok(found);
+      assert.equal(found.getDataValue('productName'), 'Mouse');
+    });
+
+    it('findAll with where works with field mapping', async () => {
+      await Product.create({ productName: 'Laptop', unitPrice: 999.99, inStock: true });
+      await Product.create({ productName: 'Cable', unitPrice: 5.00, inStock: false });
+
+      const results = await Product.findAll({ where: { inStock: true } });
+      assert.equal(results.length, 1);
+      assert.equal(results[0].getDataValue('productName'), 'Laptop');
+    });
+
+    it('update works with field mapping', async () => {
+      await Product.create({ productName: 'Laptop', unitPrice: 999.99 });
+      await Product.update({ unitPrice: 899.99 }, { where: { productName: 'Laptop' } });
+
+      const found = await Product.findOne({ where: { productName: 'Laptop' } });
+      assert.equal(found.getDataValue('unitPrice'), 899.99);
+    });
+
+    it('destroy works with field mapping', async () => {
+      await Product.create({ productName: 'Laptop', unitPrice: 999.99 });
+      await Product.create({ productName: 'Mouse', unitPrice: 25.50 });
+
+      await Product.destroy({ where: { productName: 'Laptop' } });
+      const remaining = await Product.findAll();
+      assert.equal(remaining.length, 1);
+      assert.equal(remaining[0].getDataValue('productName'), 'Mouse');
+    });
+
+    it('count works with field mapping', async () => {
+      await Product.create({ productName: 'Laptop', unitPrice: 999.99, inStock: true });
+      await Product.create({ productName: 'Cable', unitPrice: 5.00, inStock: false });
+
+      const count = await Product.count({ where: { inStock: true } });
+      assert.equal(count, 1);
+    });
+
+    it('findAll with order works with field mapping', async () => {
+      await Product.create({ productName: 'Mouse', unitPrice: 25.50 });
+      await Product.create({ productName: 'Laptop', unitPrice: 999.99 });
+
+      const results = await Product.findAll({ order: [['productName', 'ASC']] });
+      assert.equal(results[0].getDataValue('productName'), 'Laptop');
+      assert.equal(results[1].getDataValue('productName'), 'Mouse');
+    });
+
+    it('instance.update works with field mapping', async () => {
+      const product = await Product.create({ productName: 'Laptop', unitPrice: 999.99 });
+      await product.update({ unitPrice: 799.99 });
+
+      const found = await Product.findByPk(product.getDataValue('id'));
+      assert.equal(found.getDataValue('unitPrice'), 799.99);
+    });
+  });
 });
