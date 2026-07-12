@@ -1,0 +1,26 @@
+{
+  "name": "seq",
+  "version": "0.1.0",
+  "description": "seq es un micro orm, modular, flexible y de facil integracion",
+  "type": "module",
+  "main": "src/index.js",
+  "exports": {
+    ".": "./src/index.js"
+  },
+  "scripts": {
+    "test": "node --test tests/*.test.js",
+    "test:watch": "node --test --watch tests/*.test.js",
+    "example": "node examples/basic.js"
+  },
+  "keywords": [
+    "orm",
+    "oracle",
+    "database",
+    "model"
+  ],
+  "author": "",
+  "license": "MIT",
+  "engines": {
+    "node": ">=22.0.0"
+  }
+}

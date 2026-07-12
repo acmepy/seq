@@ -1,0 +1,311 @@
+import { describe, it, beforeEach } from 'node:test';
+import assert from 'node:assert/strict';
+import { Seq } from '../src/core/Seq.js';
+import { Model } from '../src/core/Model.js';
+import { DataTypes } from '../src/data-types/index.js';
+import { MapAdapter } from '../src/adapters/map/MapAdapter.js';
+
+describe('Model CRUD', () => {
+  let seq;
+  let User;
+
+  beforeEach(async () => {
+    class _User extends Model {}
+    _User.init(
+      {
+        id: { type: DataTypes.INTEGER, primaryKey: true, autoIncrement: true },
+        name: { type: DataTypes.STRING(100), allowNull: false },
+        email: { type: DataTypes.STRING(150), allowNull: false },
+        balance: { type: DataTypes.DECIMAL(12, 2), allowNull: false, defaultValue: 0 },
+        active: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: true }
+      },
+      { modelName: 'User', tableName: 'users', timestamps: true }
+    );
+    User = _User;
+
+    seq = new Seq({
+      adapter: new MapAdapter(),
+      models: [User],
+      logging: false
+    });
+    await seq.init();
+    await seq.sync();
+  });
+
+  describe('create', () => {
+    it('creates a record and returns an instance', async () => {
+      const user = await User.create({ name: 'Ana', email: 'ana@test.com' });
+      assert.ok(user instanceof Model);
+      assert.equal(user.getDataValue('name'), 'Ana');
+      assert.equal(user.getDataValue('email'), 'ana@test.com');
+    });
+
+    it('generates auto-increment primary key', async () => {
+      const user1 = await User.create({ name: 'Ana', email: 'a@test.com' });
+      const user2 = await User.create({ name: 'Juan', email: 'j@test.com' });
+      assert.ok(user1.getDataValue('id') < user2.getDataValue('id'));
+    });
+
+    it('applies default values', async () => {
+      const user = await User.create({ name: 'Ana', email: 'a@test.com' });
+      assert.equal(user.getDataValue('balance'), 0);
+      assert.equal(user.getDataValue('active'), true);
+    });
+
+    it('applies timestamps', async () => {
+      const user = await User.create({ name: 'Ana', email: 'a@test.com' });
+      assert.ok(user.getDataValue('createdAt') instanceof Date);
+      assert.ok(user.getDataValue('updatedAt') instanceof Date);
+    });
+
+    it('validates allowNull', async () => {
+      await assert.rejects(
+        () => User.create({ name: null, email: 'a@test.com' }),
+        /does not allow null/
+      );
+    });
+
+    it('validates types', async () => {
+      await assert.rejects(
+        () => User.create({ name: 'Ana', email: 'a@test.com', active: 'yes' }),
+        /Expected a boolean/
+      );
+    });
+
+    it('validates string length', async () => {
+      const longName = 'A'.repeat(101);
+      await assert.rejects(
+        () => User.create({ name: longName, email: 'a@test.com' }),
+        /exceeds maximum/
+      );
+    });
+  });
+
+  describe('findByPk', () => {
+    it('finds a record by primary key', async () => {
+      const created = await User.create({ name: 'Ana', email: 'a@test.com' });
+      const found = await User.findByPk(created.getDataValue('id'));
+      assert.ok(found);
+      assert.equal(found.getDataValue('name'), 'Ana');
+    });
+
+    it('returns null for non-existent pk', async () => {
+      const found = await User.findByPk(999999);
+      assert.equal(found, null);
+    });
+  });
+
+  describe('findOne', () => {
+    it('finds one record matching where', async () => {
+      await User.create({ name: 'Ana', email: 'a@test.com' });
+      await User.create({ name: 'Juan', email: 'j@test.com' });
+
+      const found = await User.findOne({ where: { name: 'Ana' } });
+      assert.ok(found);
+      assert.equal(found.getDataValue('email'), 'a@test.com');
+    });
+
+    it('returns null when no match', async () => {
+      const found = await User.findOne({ where: { name: 'NonExistent' } });
+      assert.equal(found, null);
+    });
+  });
+
+  describe('findAll', () => {
+    it('returns all records', async () => {
+      await User.create({ name: 'Ana', email: 'a@test.com' });
+      await User.create({ name: 'Juan', email: 'j@test.com' });
+
+      const users = await User.findAll();
+      assert.equal(users.length, 2);
+    });
+
+    it('supports where clause', async () => {
+      await User.create({ name: 'Ana', email: 'a@test.com', active: true });
+      await User.create({ name: 'Juan', email: 'j@test.com', active: false });
+
+      const active = await User.findAll({ where: { active: true } });
+      assert.equal(active.length, 1);
+      assert.equal(active[0].getDataValue('name'), 'Ana');
+    });
+
+    it('supports limit', async () => {
+      await User.create({ name: 'Ana', email: 'a@test.com' });
+      await User.create({ name: 'Juan', email: 'j@test.com' });
+      await User.create({ name: 'Luis', email: 'l@test.com' });
+
+      const users = await User.findAll({ limit: 2 });
+      assert.equal(users.length, 2);
+    });
+
+    it('supports offset', async () => {
+      await User.create({ name: 'Ana', email: 'a@test.com' });
+      await User.create({ name: 'Juan', email: 'j@test.com' });
+      await User.create({ name: 'Luis', email: 'l@test.com' });
+
+      const users = await User.findAll({ offset: 1 });
+      assert.equal(users.length, 2);
+    });
+
+    it('supports order', async () => {
+      await User.create({ name: 'Juan', email: 'j@test.com' });
+      await User.create({ name: 'Ana', email: 'a@test.com' });
+
+      const users = await User.findAll({ order: [['name', 'ASC']] });
+      assert.equal(users[0].getDataValue('name'), 'Ana');
+      assert.equal(users[1].getDataValue('name'), 'Juan');
+    });
+
+    it('returns model instances', async () => {
+      await User.create({ name: 'Ana', email: 'a@test.com' });
+      const users = await User.findAll();
+      assert.ok(users[0] instanceof Model);
+    });
+  });
+
+  describe('count', () => {
+    it('returns correct count', async () => {
+      await User.create({ name: 'Ana', email: 'a@test.com' });
+      await User.create({ name: 'Juan', email: 'j@test.com' });
+
+      const count = await User.count();
+      assert.equal(count, 2);
+    });
+
+    it('counts with where clause', async () => {
+      await User.create({ name: 'Ana', email: 'a@test.com', active: true });
+      await User.create({ name: 'Juan', email: 'j@test.com', active: false });
+
+      const count = await User.count({ where: { active: true } });
+      assert.equal(count, 1);
+    });
+  });
+
+  describe('update', () => {
+    it('updates matching records', async () => {
+      await User.create({ name: 'Ana', email: 'a@test.com', balance: 100 });
+      await User.create({ name: 'Juan', email: 'j@test.com', balance: 200 });
+
+      await User.update({ balance: 0 }, { where: { name: 'Ana' } });
+
+      const ana = await User.findOne({ where: { name: 'Ana' } });
+      assert.equal(ana.getDataValue('balance'), 0);
+    });
+
+    it('updates updatedAt timestamp', async () => {
+      const user = await User.create({ name: 'Ana', email: 'a@test.com' });
+      const originalUpdatedAt = user.getDataValue('updatedAt');
+
+      await new Promise(r => setTimeout(r, 10));
+      await User.update({ balance: 100 }, { where: { name: 'Ana' } });
+
+      const updated = await User.findOne({ where: { name: 'Ana' } });
+      assert.ok(updated.getDataValue('updatedAt') >= originalUpdatedAt);
+    });
+
+    it('returns updated instances', async () => {
+      await User.create({ name: 'Ana', email: 'a@test.com', balance: 100 });
+      const results = await User.update({ balance: 200 }, { where: { name: 'Ana' } });
+      assert.equal(results.length, 1);
+      assert.equal(results[0].getDataValue('balance'), 200);
+    });
+  });
+
+  describe('destroy', () => {
+    it('deletes matching records', async () => {
+      await User.create({ name: 'Ana', email: 'a@test.com' });
+      await User.create({ name: 'Juan', email: 'j@test.com' });
+
+      const count = await User.destroy({ where: { name: 'Ana' } });
+      assert.equal(count, 1);
+
+      const remaining = await User.findAll();
+      assert.equal(remaining.length, 1);
+      assert.equal(remaining[0].getDataValue('name'), 'Juan');
+    });
+  });
+
+  describe('truncate', () => {
+    it('removes all records', async () => {
+      await User.create({ name: 'Ana', email: 'a@test.com' });
+      await User.create({ name: 'Juan', email: 'j@test.com' });
+
+      await User.truncate();
+
+      const count = await User.count();
+      assert.equal(count, 0);
+    });
+  });
+
+  describe('toJSON', () => {
+    it('returns a plain object', async () => {
+      const user = await User.create({ name: 'Ana', email: 'a@test.com' });
+      const json = user.toJSON();
+      assert.equal(typeof json, 'object');
+      assert.equal(json.name, 'Ana');
+      assert.equal(json.email, 'a@test.com');
+    });
+
+    it('returns a cloned object (no internal references)', async () => {
+      const user = await User.create({ name: 'Ana', email: 'a@test.com' });
+      const json = user.toJSON();
+      json.name = 'Modified';
+      assert.equal(user.getDataValue('name'), 'Ana');
+    });
+  });
+
+  describe('Model instances', () => {
+    it('save persists a new instance', async () => {
+      const user = User.build({ name: 'Ana', email: 'a@test.com' });
+      assert.ok(user._isNew);
+
+      await user.save();
+      assert.ok(!user._isNew);
+      assert.ok(user.getDataValue('id'));
+    });
+
+    it('save updates an existing instance', async () => {
+      const user = await User.create({ name: 'Ana', email: 'a@test.com', balance: 100 });
+      user.setDataValue('balance', 200);
+      await user.save();
+
+      const found = await User.findByPk(user.getDataValue('id'));
+      assert.equal(found.getDataValue('balance'), 200);
+    });
+
+    it('instance.update updates values and persists', async () => {
+      const user = await User.create({ name: 'Ana', email: 'a@test.com', balance: 100 });
+      await user.update({ balance: 300 });
+
+      const found = await User.findByPk(user.getDataValue('id'));
+      assert.equal(found.getDataValue('balance'), 300);
+    });
+
+    it('instance.destroy removes the record', async () => {
+      const user = await User.create({ name: 'Ana', email: 'a@test.com' });
+      const id = user.getDataValue('id');
+      await user.destroy();
+
+      const found = await User.findByPk(id);
+      assert.equal(found, null);
+    });
+
+    it('getDataValue returns a value', async () => {
+      const user = await User.create({ name: 'Ana', email: 'a@test.com' });
+      assert.equal(user.getDataValue('name'), 'Ana');
+    });
+
+    it('setDataValue modifies the local value', async () => {
+      const user = User.build({ name: 'Ana', email: 'a@test.com' });
+      user.setDataValue('name', 'Juan');
+      assert.equal(user.getDataValue('name'), 'Juan');
+    });
+
+    it('get returns a cloned object', async () => {
+      const user = await User.create({ name: 'Ana', email: 'a@test.com' });
+      const data = user.get();
+      data.name = 'Modified';
+      assert.equal(user.getDataValue('name'), 'Ana');
+    });
+  });
+});
