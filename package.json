@@ -1,6 +1,6 @@
 {
   "name": "seq",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "seq es un micro orm, modular, flexible y de facil integracion",
   "type": "module",
   "main": "src/index.js",
@@ -18,6 +18,9 @@
     "database",
     "model"
   ],
+  "dependencies": {
+    "yep": "github:acmepy/yep"
+  },
   "author": "",
   "license": "MIT",
   "engines": {
