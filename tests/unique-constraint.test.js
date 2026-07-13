@@ -45,7 +45,7 @@ describe('Unique Constraints', () => {
         () => User.create({ name: 'Juan', email: 'ana@test.com', username: 'juan' }),
         (err) => {
           assert.equal(err.code, 'SEQ_VALIDATION_UNIQUE');
-          assert.equal(err.details.field, 'email');
+          assert.deepEqual(err.details.columns, ['email']);
           return true;
         }
       );
@@ -82,7 +82,7 @@ describe('Unique Constraints', () => {
         () => User.create({ name: 'Juan', email: 'juan@test.com', username: 'ana' }),
         (err) => {
           assert.equal(err.code, 'SEQ_VALIDATION_UNIQUE');
-          assert.equal(err.details.field, 'username');
+          assert.deepEqual(err.details.columns, ['username']);
           return true;
         }
       );
@@ -109,7 +109,7 @@ describe('Unique Constraints', () => {
         () => juan.update({ email: 'ana@test.com' }),
         (err) => {
           assert.equal(err.code, 'SEQ_VALIDATION_UNIQUE');
-          assert.equal(err.details.field, 'email');
+          assert.deepEqual(err.details.columns, ['email']);
           return true;
         }
       );
@@ -124,7 +124,7 @@ describe('Unique Constraints', () => {
         () => User.create({ name: 'Juan', email: 'ana@test.com', username: 'juan' }),
         (err) => {
           assert.equal(err.code, 'SEQ_VALIDATION_UNIQUE');
-          assert.equal(err.details.field, 'email');
+          assert.deepEqual(err.details.columns, ['email']);
           return true;
         }
       );
@@ -133,7 +133,7 @@ describe('Unique Constraints', () => {
         () => User.create({ name: 'Juan', email: 'juan@test.com', username: 'ana' }),
         (err) => {
           assert.equal(err.code, 'SEQ_VALIDATION_UNIQUE');
-          assert.equal(err.details.field, 'username');
+          assert.deepEqual(err.details.columns, ['username']);
           return true;
         }
       );

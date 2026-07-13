@@ -247,8 +247,11 @@ export class Seq {
   _buildTableDefinition(modelClass) {
     const attributes = modelClass.rawAttributes || {};
     const columns = {};
+    const uniqueConstraints = [];
     const attrToColumn = {};
     const columnToAttr = {};
+
+    const sourceTable = modelClass._resolvedTableName || this._resolveTableName(modelClass);
 
     for (const [name, def] of Object.entries(attributes)) {
       const columnName = this._resolveColumnName(def, name);
@@ -261,9 +264,15 @@ export class Seq {
         autoIncrement: def.autoIncrement || false,
         allowNull: def.allowNull !== undefined ? def.allowNull : true,
         defaultValue: def.defaultValue,
-        unique: def.unique || false,
         field: columnName
       };
+
+      if (def.unique) {
+        uniqueConstraints.push({
+          columns: [columnName],
+          constraintName: `uk_${sourceTable}_${columnName}`
+        });
+      }
     }
 
     const pkAttr = modelClass.primaryKeyAttribute;
@@ -273,8 +282,10 @@ export class Seq {
 
     return {
       modelName: modelClass.modelName,
-      tableName: this._resolveTableName(modelClass),
+      tableName: sourceTable,
       columns,
+      uniqueConstraints,
+      indexes: [],
       foreignKeys,
       primaryKey: pkAttr ? attrToColumn[pkAttr] : null,
       autoIncrement: aiAttr ? attrToColumn[aiAttr] : null,

@@ -389,7 +389,7 @@ SeqError
 | `SEQ_VALIDATION_NOT_NULL` | El campo no permite valores nulos |
 | `SEQ_VALIDATION_TYPE` | Falló la validación de tipo |
 | `SEQ_VALIDATION_LENGTH` | La cadena excede la longitud máxima |
-| `SEQ_VALIDATION_UNIQUE` | Valor duplicado en columna única |
+| `SEQ_VALIDATION_UNIQUE` | Valor duplicado en constraint único |
 | `SEQ_VALIDATION_DUPLICATE_PK` | Valor duplicado de llave primaria |
 | `SEQ_VALIDATION_FK` | Violación de llave foránea (valor no existe en tabla referenciada) |
 | `SEQ_VALIDATION_FK_RESTRICT` | No se puede eliminar: registro referenciado por otro modelo |
@@ -438,10 +438,39 @@ class MyAdapter extends BaseAdapter {
 
 | Clase | Métodos | Helpers Compartidos |
 |-------|---------|---------------------|
-| `DDLAbstract` | `createTable`, `dropTable`, `hasTable`, `describeTable`, `alterTable`, `listTables` | `normalizeDefinition()`, `diffColumns()` |
+| `DDLAbstract` | `createTable`, `dropTable`, `hasTable`, `describeTable`, `alterTable`, `listTables`, `addUniqueConstraint`, `createIndex`, `addForeignKey` | `normalizeDefinition()`, `diffColumns()` |
 | `DMLAbstract` | `insert`, `bulkInsert`, `selectByPk`, `selectOne`, `selectAll`, `count`, `update`, `delete`, `truncate` | `_toColumnNames()`, `_toAttrNames()`, `_translateWhere()`, `_matchWhere()`, `_validateRecord()` |
 | `DCLAbstract` | `grant`, `revoke` | (lanza "no soportado" por defecto) |
 | `TCLAbstract` | `begin`, `commit`, `rollback` | `_validateTransaction()` |
+
+### Etapas de creación DDL
+
+`createTable()` recibe la definición completa de la tabla y la procesa en el siguiente orden:
+
+```
+1. CREATE TABLE        (columnas + PRIMARY KEY)
+2. ALTER TABLE ADD UNIQUE
+3. CREATE INDEX
+4. ALTER TABLE ADD FOREIGN KEY
+```
+
+La definición agrupada que recibe `createTable`:
+
+```js
+{
+  columns: { id: { type, primaryKey }, email: { type } },  // sin flag unique
+  primaryKey: 'id',
+  uniqueConstraints: [
+    { columns: ['email'], constraintName: 'uk_users_email' }
+  ],
+  indexes: [],                  // reservado para uso futuro
+  foreignKeys: [
+    { columnName: 'user_id', constraintName: 'fk_tasks_users', references: {...} }
+  ]
+}
+```
+
+El flag `unique: true` en los atributos del modelo se extrae automáticamente a `uniqueConstraints`. Las columnas en el schema ya no llevan el flag `unique`.
 
 ### Enforce de Unicidad
 
@@ -475,8 +504,8 @@ BaseAdapter (contrato: connect, close, inspect, mapDataType, caseStyle)
   │
   ▼
 MapAdapter (en memoria usando Map<tableName, Map<pk, record>>)
-  ├── MapDDL   (almacena schema en adapter.schemas, incluye foreignKeys)
-  ├── MapDML   (CRUD + validación unicidad + validación FK + cascade delete/update)
+  ├── MapDDL   (createTable en 4 fases: tabla → UK → index → FK)
+  ├── MapDML   (CRUD + validación unicidad via uniqueConstraints + FK + cascade)
   ├── MapDCL   (no soportado)
   └── MapTCL   (rollback basado en snapshots)
 ```

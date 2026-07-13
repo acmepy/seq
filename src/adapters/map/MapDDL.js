@@ -3,10 +3,7 @@ import { DDLAbstract } from '../abstract/DDLAbstract.js';
 
 /**
  * DDL operations for the MapAdapter.
- * Handles table creation, dropping, inspection and alteration.
- *
- * Extends DDLStatements which provides adapter-agnostic helpers:
- * normalizeDefinition, diffColumns.
+ * Implements low-level table operations; orchestration lives in DDLAbstract.
  */
 export class MapDDL extends DDLAbstract {
   /**
@@ -16,14 +13,11 @@ export class MapDDL extends DDLAbstract {
     super(adapter);
   }
 
-  /**
-   * Creates a new table.
-   * @param {object} definition - Table definition
-   * @param {object} [options]
-   */
-  async createTable(definition, options = {}) {
-    const def = this.normalizeDefinition(definition);
+  // ---------------------------------------------------------------------------
+  // Low-level implementations — called by DDLAbstract orchestration
+  // ---------------------------------------------------------------------------
 
+  async createTableStructure(def) {
     if (this._adapter.database.has(def.tableName)) {
       throw new AdapterError(`Table "${def.tableName}" already exists`, {
         code: 'SEQ_ADAPTER_TABLE_EXISTS'
@@ -31,15 +25,26 @@ export class MapDDL extends DDLAbstract {
     }
 
     this._adapter.database.set(def.tableName, new Map());
-    this._adapter.schemas.set(def.tableName, def);
     this._adapter.sequences.set(def.tableName, 1);
+    this._adapter.schemas.set(def.tableName, {
+      modelName: def.modelName,
+      tableName: def.tableName,
+      columns: def.columns,
+      primaryKey: def.primaryKey,
+      autoIncrement: def.autoIncrement,
+      primaryKeyAttribute: def.primaryKeyAttribute,
+      autoIncrementAttribute: def.autoIncrementAttribute,
+      timestamps: def.timestamps,
+      createdAt: def.createdAt,
+      updatedAt: def.updatedAt,
+      attrToColumn: def.attrToColumn,
+      columnToAttr: def.columnToAttr,
+      uniqueConstraints: [],
+      indexes: [],
+      foreignKeys: []
+    });
   }
 
-  /**
-   * Drops a table.
-   * @param {string} tableName
-   * @param {object} [options]
-   */
   async dropTable(tableName, options = {}) {
     if (!this._adapter.database.has(tableName)) {
       throw new AdapterError(`Table "${tableName}" does not exist`, {
@@ -51,20 +56,10 @@ export class MapDDL extends DDLAbstract {
     this._adapter.sequences.delete(tableName);
   }
 
-  /**
-   * Checks if a table exists.
-   * @param {string} tableName
-   * @returns {Promise<boolean>}
-   */
   async hasTable(tableName) {
     return this._adapter.database.has(tableName);
   }
 
-  /**
-   * Describes a table's schema.
-   * @param {string} tableName
-   * @returns {Promise<object>}
-   */
   async describeTable(tableName) {
     if (!this._adapter.schemas.has(tableName)) {
       throw new AdapterError(`Table "${tableName}" does not exist`, {
@@ -74,50 +69,48 @@ export class MapDDL extends DDLAbstract {
     return { ...this._adapter.schemas.get(tableName) };
   }
 
-  /**
-   * Alters a table to match a new definition.
-   * Adds missing columns; does not drop or modify existing ones.
-   * @param {string} tableName
-   * @param {object} definition - New table definition
-   * @param {object} [options]
-   * @returns {Promise<boolean>} Whether any changes were made
-   */
-  async alterTable(tableName, definition, options = {}) {
+  async alterTableColumns(tableName, missingColumns) {
     const schema = this._adapter.schemas.get(tableName);
-    if (!schema) {
-      throw new AdapterError(`Table "${tableName}" does not exist`, {
-        code: 'SEQ_ADAPTER_TABLE_NOT_FOUND'
-      });
-    }
-
-    const missing = this.diffColumns(schema, definition);
-    const hasChanges = Object.keys(missing).length > 0;
-
-    for (const [name, colDef] of Object.entries(missing)) {
+    for (const [name, colDef] of Object.entries(missingColumns)) {
       schema.columns[name] = colDef;
     }
-
-    if (hasChanges) {
-      const table = this._adapter.database.get(tableName);
-      for (const [name, colDef] of Object.entries(missing)) {
-        for (const [, record] of table) {
-          if (!(name in record)) {
-            record[name] = colDef.defaultValue !== undefined
-              ? (typeof colDef.defaultValue === 'function' ? colDef.defaultValue() : colDef.defaultValue)
-              : null;
-          }
+    const table = this._adapter.database.get(tableName);
+    for (const [name, colDef] of Object.entries(missingColumns)) {
+      for (const [, record] of table) {
+        if (!(name in record)) {
+          record[name] = colDef.defaultValue !== undefined
+            ? (typeof colDef.defaultValue === 'function' ? colDef.defaultValue() : colDef.defaultValue)
+            : null;
         }
       }
     }
-
-    return hasChanges;
   }
 
-  /**
-   * Lists all table names.
-   * @returns {Promise<string[]>}
-   */
   async listTables() {
     return [...this._adapter.database.keys()];
+  }
+
+  async addUniqueConstraint(tableName, constraint) {
+    const schema = this._adapter.schemas.get(tableName);
+    if (!schema) {
+      throw new AdapterError(`Table "${tableName}" does not exist`, { code: 'SEQ_ADAPTER_TABLE_NOT_FOUND' });
+    }
+    schema.uniqueConstraints.push({ ...constraint });
+  }
+
+  async createIndex(tableName, index) {
+    const schema = this._adapter.schemas.get(tableName);
+    if (!schema) {
+      throw new AdapterError(`Table "${tableName}" does not exist`, { code: 'SEQ_ADAPTER_TABLE_NOT_FOUND' });
+    }
+    schema.indexes.push({ ...index });
+  }
+
+  async addForeignKey(tableName, fk) {
+    const schema = this._adapter.schemas.get(tableName);
+    if (!schema) {
+      throw new AdapterError(`Table "${tableName}" does not exist`, { code: 'SEQ_ADAPTER_TABLE_NOT_FOUND' });
+    }
+    schema.foreignKeys.push({ ...fk });
   }
 }

@@ -340,22 +340,19 @@ export class MapDML extends DMLAbstract {
     const table = this._adapter.database.get(tableName);
     if (!table) return;
 
-    for (const [attrName, colDef] of Object.entries(schema.columns)) {
-      if (!colDef.unique) continue;
-
-      const colName = schema.attrToColumn[attrName] || attrName;
-      const value = colRecord[colName];
-
-      if (value === null || value === undefined) continue;
+    for (const uk of (schema.uniqueConstraints || [])) {
+      const colValues = uk.columns.map(col => colRecord[col]);
+      if (colValues.some(v => v === null || v === undefined)) continue;
 
       for (const [pk, existing] of table) {
         if (excludePk !== undefined && pk === excludePk) continue;
-        if (existing[colName] === value) {
+        const existingValues = uk.columns.map(col => existing[col]);
+        if (colValues.every((v, i) => v === existingValues[i])) {
           throw new ValidationError(
-            `Duplicate value "${value}" for unique field "${attrName}" in model "${schema.modelName || tableName}"`,
+            `Duplicate value for unique constraint "${uk.constraintName}" on [${uk.columns.join(', ')}] in model "${schema.modelName || tableName}"`,
             {
               code: 'SEQ_VALIDATION_UNIQUE',
-              details: { model: schema.modelName || tableName, field: attrName, value }
+              details: { model: schema.modelName || tableName, constraintName: uk.constraintName, columns: uk.columns, value: colValues.length === 1 ? colValues[0] : colValues }
             }
           );
         }
