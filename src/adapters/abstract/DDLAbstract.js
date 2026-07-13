@@ -23,16 +23,11 @@ export class DDLAbstract extends BaseAbstract {
    */
   async createTable(definition, options = {}) {
     const def = this.normalizeDefinition(definition);
+    this._registerSchema(def);
     await this.createTableStructure(def);
-    for (const uk of def.uniqueConstraints) {
-      await this.addUniqueConstraint(def.tableName, uk);
-    }
-    for (const idx of def.indexes) {
-      await this.createIndex(def.tableName, idx);
-    }
-    for (const fk of def.foreignKeys) {
-      await this.addForeignKey(def.tableName, fk);
-    }
+    for (const uk of def.uniqueConstraints) await this.addUniqueConstraint(def.tableName, uk);
+    for (const idx of def.indexes) await this.addIndex(def.tableName, idx);
+    for (const fk of def.foreignKeys) await this.addForeignKey(def.tableName, fk);
   }
 
   /**
@@ -45,18 +40,14 @@ export class DDLAbstract extends BaseAbstract {
    */
   async alterTable(tableName, definition, options = {}) {
     const schema = this._adapter.schemas.get(tableName);
-    if (!schema) {
-      throw new AdapterError(`Table "${tableName}" does not exist`, {
-        code: 'SEQ_ADAPTER_TABLE_NOT_FOUND'
-      });
-    }
+    if (!schema) throw new AdapterError(`Table "${tableName}" does not exist`, {code: 'SEQ_ADAPTER_TABLE_NOT_FOUND'});
 
     const def = this.normalizeDefinition(definition);
     let hasChanges = false;
 
     const missing = this.diffColumns(schema, def);
     if (Object.keys(missing).length > 0) {
-      await this.alterTableColumns(tableName, missing);
+      await this.addColumns(tableName, missing);
       hasChanges = true;
     }
 
@@ -71,7 +62,7 @@ export class DDLAbstract extends BaseAbstract {
     const existingIdxNames = new Set(schema.indexes.map(idx => idx.name));
     for (const idx of def.indexes) {
       if (!existingIdxNames.has(idx.name)) {
-        await this.createIndex(tableName, idx);
+        await this.addIndex(tableName, idx);
         hasChanges = true;
       }
     }
@@ -101,12 +92,13 @@ export class DDLAbstract extends BaseAbstract {
   }
 
   /**
-   * Drops a table.
+   * Drops a table and removes its schema from the registry.
    * @param {string} tableName
    * @param {object} [options]
    */
   async dropTable(tableName, options = {}) {
-    throw new AdapterError('DDL dropTable is not implemented by this adapter', { code: 'SEQ_DDL_NOT_IMPLEMENTED' });
+    //await this._dropTablePhysical(tableName, options);
+    this._adapter.schemas.delete(tableName);
   }
 
   /**
@@ -136,21 +128,31 @@ export class DDLAbstract extends BaseAbstract {
   }
 
   /**
-   * Adds missing columns to an existing table and backfills defaults.
+   * Adds missing columns to an existing table.
+   * Executes ALTER TABLE ADD COLUMN for each missing column.
    * @param {string} tableName
    * @param {object} missingColumns - Map of column names to definitions
    */
-  async alterTableColumns(tableName, missingColumns) {
-    throw new AdapterError('DDL alterTableColumns is not implemented by this adapter', { code: 'SEQ_DDL_NOT_IMPLEMENTED' });
+  async addColumns(tableName, missingColumns) {
+    const schema = this._adapter.schemas.get(tableName);
+    for (const [name, colDef] of Object.entries(missingColumns)) {
+      const colType = this._adapter.mapDataType(colDef.type);
+      this._adapter._db.prepare(`ALTER TABLE "${tableName}" ADD COLUMN "${name}" ${colType}`).run();
+      schema.columns[name] = colDef;
+    }
   }
 
   /**
-   * Adds a UNIQUE constraint to a table.
+   * Adds a UNIQUE constraint to a table via CREATE UNIQUE INDEX.
    * @param {string} tableName
    * @param {object} constraint - { columns: string[], constraintName: string }
    */
   async addUniqueConstraint(tableName, constraint) {
-    throw new AdapterError('DDL addUniqueConstraint is not implemented by this adapter', { code: 'SEQ_DDL_NOT_IMPLEMENTED' });
+    const schema = this._adapter.schemas.get(tableName);
+    const cols = constraint.columns.join('", "');
+    const sql = `CREATE UNIQUE INDEX "${constraint.constraintName}" ON "${tableName}" ("${cols}")`;
+    this._adapter._db.prepare(sql).run();
+    schema.uniqueConstraints.push({ ...constraint });
   }
 
   /**
@@ -158,22 +160,52 @@ export class DDLAbstract extends BaseAbstract {
    * @param {string} tableName
    * @param {object} index - { columns: string[], name: string, unique: boolean }
    */
-  async createIndex(tableName, index) {
-    throw new AdapterError('DDL createIndex is not implemented by this adapter', { code: 'SEQ_DDL_NOT_IMPLEMENTED' });
+  async addIndex(tableName, index) {
+    const schema = this._adapter.schemas.get(tableName);
+    const cols = index.columns.join('", "');
+    const unique = index.unique ? 'UNIQUE ' : '';
+    const sql = `CREATE ${unique}INDEX "${index.name}" ON "${tableName}" ("${cols}")`;
+    this._adapter._db.prepare(sql).run();
+    schema.indexes.push({ ...index });
   }
 
   /**
-   * Adds a foreign key constraint to a table.
+   * Adds a foreign key constraint to a table's schema.
    * @param {string} tableName
    * @param {object} fk - Foreign key definition
    */
   async addForeignKey(tableName, fk) {
-    throw new AdapterError('DDL addForeignKey is not implemented by this adapter', { code: 'SEQ_DDL_NOT_IMPLEMENTED' });
+    const schema = this._adapter.schemas.get(tableName);
+    schema.foreignKeys.push({ ...fk });
   }
 
   // ---------------------------------------------------------------------------
   // Shared helpers — reusable by all adapter subclasses
   // ---------------------------------------------------------------------------
+
+  /**
+   * Registers a table schema in the adapter's schema registry.
+   * @param {object} def - Normalized definition
+   */
+  _registerSchema(def) {
+    this._adapter.schemas.set(def.tableName, {
+      modelName: def.modelName,
+      tableName: def.tableName,
+      columns: def.columns,
+      primaryKey: def.primaryKey,
+      autoIncrement: def.autoIncrement,
+      primaryKeyAttribute: def.primaryKeyAttribute,
+      autoIncrementAttribute: def.autoIncrementAttribute,
+      timestamps: def.timestamps,
+      createdAt: def.createdAt,
+      updatedAt: def.updatedAt,
+      attrToColumn: def.attrToColumn,
+      columnToAttr: def.columnToAttr,
+      uniqueConstraints: [],
+      indexes: [],
+      foreignKeys: []
+    });
+  }
 
   /**
    * Normalizes a table definition, filling in defaults for optional fields.

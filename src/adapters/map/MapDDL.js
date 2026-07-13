@@ -26,33 +26,12 @@ export class MapDDL extends DDLAbstract {
 
     this._adapter.database.set(def.tableName, new Map());
     this._adapter.sequences.set(def.tableName, 1);
-    this._adapter.schemas.set(def.tableName, {
-      modelName: def.modelName,
-      tableName: def.tableName,
-      columns: def.columns,
-      primaryKey: def.primaryKey,
-      autoIncrement: def.autoIncrement,
-      primaryKeyAttribute: def.primaryKeyAttribute,
-      autoIncrementAttribute: def.autoIncrementAttribute,
-      timestamps: def.timestamps,
-      createdAt: def.createdAt,
-      updatedAt: def.updatedAt,
-      attrToColumn: def.attrToColumn,
-      columnToAttr: def.columnToAttr,
-      uniqueConstraints: [],
-      indexes: [],
-      foreignKeys: []
-    });
   }
 
   async dropTable(tableName, options = {}) {
-    if (!this._adapter.database.has(tableName)) {
-      throw new AdapterError(`Table "${tableName}" does not exist`, {
-        code: 'SEQ_ADAPTER_TABLE_NOT_FOUND'
-      });
-    }
+    if (!this._adapter.database.has(tableName)) throw new AdapterError(`Table "${tableName}" does not exist`, {code: 'SEQ_ADAPTER_TABLE_NOT_FOUND'});
+    await super.dropTable(tableName, options);
     this._adapter.database.delete(tableName);
-    this._adapter.schemas.delete(tableName);
     this._adapter.sequences.delete(tableName);
   }
 
@@ -69,7 +48,7 @@ export class MapDDL extends DDLAbstract {
     return { ...this._adapter.schemas.get(tableName) };
   }
 
-  async alterTableColumns(tableName, missingColumns) {
+  async addColumns(tableName, missingColumns) {
     const schema = this._adapter.schemas.get(tableName);
     for (const [name, colDef] of Object.entries(missingColumns)) {
       schema.columns[name] = colDef;
@@ -92,25 +71,13 @@ export class MapDDL extends DDLAbstract {
 
   async addUniqueConstraint(tableName, constraint) {
     const schema = this._adapter.schemas.get(tableName);
-    if (!schema) {
-      throw new AdapterError(`Table "${tableName}" does not exist`, { code: 'SEQ_ADAPTER_TABLE_NOT_FOUND' });
-    }
+    if (!schema) throw new AdapterError(`Table "${tableName}" does not exist`, { code: 'SEQ_ADAPTER_TABLE_NOT_FOUND' });
     schema.uniqueConstraints.push({ ...constraint });
   }
 
-  async createIndex(tableName, index) {
+  async addIndex(tableName, index) {
     const schema = this._adapter.schemas.get(tableName);
-    if (!schema) {
-      throw new AdapterError(`Table "${tableName}" does not exist`, { code: 'SEQ_ADAPTER_TABLE_NOT_FOUND' });
-    }
+    if (!schema) throw new AdapterError(`Table "${tableName}" does not exist`, { code: 'SEQ_ADAPTER_TABLE_NOT_FOUND' });
     schema.indexes.push({ ...index });
-  }
-
-  async addForeignKey(tableName, fk) {
-    const schema = this._adapter.schemas.get(tableName);
-    if (!schema) {
-      throw new AdapterError(`Table "${tableName}" does not exist`, { code: 'SEQ_ADAPTER_TABLE_NOT_FOUND' });
-    }
-    schema.foreignKeys.push({ ...fk });
   }
 }

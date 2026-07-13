@@ -438,7 +438,7 @@ class MyAdapter extends BaseAdapter {
 
 | Clase | Métodos | Helpers Compartidos |
 |-------|---------|---------------------|
-| `DDLAbstract` | `createTable`, `dropTable`, `hasTable`, `describeTable`, `alterTable`, `listTables`, `addUniqueConstraint`, `createIndex`, `addForeignKey` | `normalizeDefinition()`, `diffColumns()` |
+| `DDLAbstract` | `createTable`, `dropTable`, `hasTable`, `describeTable`, `alterTable`, `listTables`, `addColumns`, `addUniqueConstraint`, `addIndex`, `addForeignKey` | `normalizeDefinition()`, `diffColumns()` |
 | `DMLAbstract` | `insert`, `bulkInsert`, `selectByPk`, `selectOne`, `selectAll`, `count`, `update`, `delete`, `truncate` | `_toColumnNames()`, `_toAttrNames()`, `_translateWhere()`, `_matchWhere()`, `_validateRecord()` |
 | `DCLAbstract` | `grant`, `revoke` | (lanza "no soportado" por defecto) |
 | `TCLAbstract` | `begin`, `commit`, `rollback` | `_validateTransaction()` |

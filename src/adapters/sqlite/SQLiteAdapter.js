@@ -13,7 +13,6 @@ export class SQLiteAdapter extends BaseAdapter {
     this.dml = new SQLiteDML(this);
     this.dcl = null;
     this.tcl = new SQLiteTCL(this);
-    this.schemas = new Map();
   }
 
   get caseStyle() {

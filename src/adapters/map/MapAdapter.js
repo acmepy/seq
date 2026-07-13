@@ -14,8 +14,6 @@ export class MapAdapter extends BaseAdapter {
     super(options);
     /** @type {Map<string, Map<*|null, object>>} */
     this.database = new Map();
-    /** @type {Map<string, object>} */
-    this.schemas = new Map();
     /** @type {Map<string, number>} */
     this.sequences = new Map();
 

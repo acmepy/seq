@@ -160,7 +160,7 @@ describe('DDL Phases', () => {
       assert.equal(schema.uniqueConstraints[0].constraintName, 'uk_users_email');
     });
 
-    it('createIndex stores index on schema', async () => {
+    it('addIndex stores index on schema', async () => {
       class User extends Model {}
       User.init(
         { id: { type: DataTypes.INTEGER, primaryKey: true, autoIncrement: true }, name: { type: DataTypes.STRING(100) } },
@@ -171,7 +171,7 @@ describe('DDL Phases', () => {
       await seq.init();
       await seq.sync();
 
-      await seq._adapter.ddl.createIndex('users', { columns: ['name'], name: 'idx_users_name', unique: false });
+      await seq._adapter.ddl.addIndex('users', { columns: ['name'], name: 'idx_users_name', unique: false });
       const schema = seq._adapter.schemas.get('users');
       assert.equal(schema.indexes.length, 1);
       assert.equal(schema.indexes[0].name, 'idx_users_name');

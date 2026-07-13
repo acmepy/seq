@@ -5,6 +5,7 @@
 export class BaseAdapter {
   constructor(options = {}) {
     this.options = options;
+    this.schemas = new Map();
     this.ddl = null;
     this.dml = null;
     this.dcl = null;
