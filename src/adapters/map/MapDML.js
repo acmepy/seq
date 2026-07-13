@@ -93,6 +93,7 @@ export class MapDML extends DMLAbstract {
     }
 
     this._checkUniqueConstraint(tableName, schema, colRecord);
+    this._checkForeignKeyConstraint(schema, colRecord);
 
     const storedRecord = clone(colRecord);
     if (schema.primaryKey) {
@@ -265,7 +266,6 @@ export class MapDML extends DMLAbstract {
 
     for (const { key, record } of toUpdate) {
       for (const [colName, value] of Object.entries(colValues)) {
-        if (colName === schema?.primaryKey) continue;
         record[colName] = value;
       }
 
@@ -275,6 +275,8 @@ export class MapDML extends DMLAbstract {
       }
 
       this._checkUniqueConstraint(tableName, schema, record, key);
+      this._checkForeignKeyConstraint(schema, record);
+      this._handleCascadeOnUpdate(model, schema, record, key);
 
       if (schema) {
         this._validateRecord(record, schema, model.modelName);
@@ -313,6 +315,7 @@ export class MapDML extends DMLAbstract {
     }
 
     for (const key of keysToDelete) {
+      this._handleCascadeOnDelete(model, schema, key);
       table.delete(key);
       count++;
     }
@@ -355,6 +358,104 @@ export class MapDML extends DMLAbstract {
               details: { model: schema.modelName || tableName, field: attrName, value }
             }
           );
+        }
+      }
+    }
+  }
+
+  _checkForeignKeyConstraint(schema, colRecord) {
+    const foreignKeys = schema.foreignKeys || [];
+    for (const fk of foreignKeys) {
+      const value = colRecord[fk.columnName];
+      if (value === null || value === undefined) continue;
+
+      const refTable = this._adapter.database.get(fk.references.table);
+      if (!refTable) continue;
+
+      const refSchema = this._adapter.schemas.get(fk.references.table);
+      const refPkCol = fk.references.column;
+      let found = false;
+      for (const [, existing] of refTable) {
+        if (existing[refPkCol] === value) {
+          found = true;
+          break;
+        }
+      }
+      if (!found) {
+        throw new ValidationError(
+          `Foreign key constraint "${fk.constraintName}": value "${value}" for "${fk.attributeName}" does not exist in "${fk.references.model}.${fk.references.key}"`,
+          {
+            code: 'SEQ_VALIDATION_FK',
+            details: { model: schema.modelName, field: fk.attributeName, value, constraintName: fk.constraintName, referencesModel: fk.references.model, referencesKey: fk.references.key }
+          }
+        );
+      }
+    }
+  }
+
+  _handleCascadeOnDelete(model, schema, deletedPkValue) {
+    const fkTableName = this._getTableName(model);
+    for (const otherTableName of this._adapter.database.keys()) {
+      if (otherTableName === fkTableName) continue;
+      const otherSchema = this._adapter.schemas.get(otherTableName);
+      if (!otherSchema) continue;
+      const otherTable = this._adapter.database.get(otherTableName);
+
+      for (const fk of (otherSchema.foreignKeys || [])) {
+        if (fk.references.table !== fkTableName) continue;
+
+        const pkCol = schema.primaryKey;
+        if (!pkCol) continue;
+
+        for (const [pk, record] of otherTable) {
+          if (record[fk.columnName] === deletedPkValue) {
+            if (fk.onDelete === 'CASCADE') {
+              otherTable.delete(pk);
+            } else if (fk.onDelete === 'SET NULL') {
+              record[fk.columnName] = null;
+            } else {
+              throw new ValidationError(
+                `Cannot delete: record is referenced by "${otherSchema.modelName}" via constraint "${fk.constraintName}" on "${fk.attributeName}"`,
+                { code: 'SEQ_VALIDATION_FK_RESTRICT', details: { model: otherSchema.modelName, field: fk.attributeName, constraintName: fk.constraintName } }
+              );
+            }
+          }
+        }
+      }
+    }
+  }
+
+  _handleCascadeOnUpdate(model, schema, record, pkValue) {
+    const pkCol = schema.primaryKey;
+    if (!pkCol) return;
+
+    const oldPkValue = pkValue;
+    const newPkValue = record[pkCol];
+    if (oldPkValue === newPkValue) return;
+
+    const tableName = this._getTableName(model);
+    for (const otherTableName of this._adapter.database.keys()) {
+      if (otherTableName === tableName) continue;
+      const otherSchema = this._adapter.schemas.get(otherTableName);
+      if (!otherSchema) continue;
+      const otherTable = this._adapter.database.get(otherTableName);
+
+      for (const fk of (otherSchema.foreignKeys || [])) {
+        if (fk.references.table !== tableName) continue;
+
+        for (const [, otherRecord] of otherTable) {
+          if (otherRecord[fk.columnName] === oldPkValue) {
+            if (fk.onUpdate === 'CASCADE') {
+              otherRecord[fk.columnName] = newPkValue;
+            } else if (fk.onUpdate === 'SET NULL') {
+              otherRecord[fk.columnName] = null;
+            } else {
+              throw new ValidationError(
+                `Cannot update: record is referenced by "${otherSchema.modelName}" via constraint "${fk.constraintName}" on "${fk.attributeName}"`,
+                { code: 'SEQ_VALIDATION_FK_RESTRICT', details: { model: otherSchema.modelName, field: fk.attributeName, constraintName: fk.constraintName } }
+              );
+            }
+          }
         }
       }
     }

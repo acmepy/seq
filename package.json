@@ -1,6 +1,6 @@
 {
   "name": "seq",
-  "version": "0.1.8",
+  "version": "0.1.9",
   "description": "seq es un micro orm, modular, flexible y de facil integracion",
   "type": "module",
   "main": "src/index.js",
@@ -10,7 +10,8 @@
   "scripts": {
     "test": "node --test tests/*.test.js",
     "test:watch": "node --test --watch tests/*.test.js",
-    "example": "node examples/basic.js"
+    "basic": "node examples/basic.js",
+    "associations": "node examples/associations.js"
   },
   "keywords": [
     "orm",

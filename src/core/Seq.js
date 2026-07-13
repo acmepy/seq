@@ -269,10 +269,13 @@ export class Seq {
     const pkAttr = modelClass.primaryKeyAttribute;
     const aiAttr = modelClass.autoIncrementAttribute;
 
+    const foreignKeys = this._buildForeignKeys(modelClass, attrToColumn);
+
     return {
       modelName: modelClass.modelName,
       tableName: this._resolveTableName(modelClass),
       columns,
+      foreignKeys,
       primaryKey: pkAttr ? attrToColumn[pkAttr] : null,
       autoIncrement: aiAttr ? attrToColumn[aiAttr] : null,
       primaryKeyAttribute: pkAttr || null,
@@ -283,6 +286,90 @@ export class Seq {
       attrToColumn,
       columnToAttr
     };
+  }
+
+  _buildForeignKeys(modelClass, attrToColumn) {
+    const fkMap = new Map();
+
+    const sourceTable = modelClass._resolvedTableName || this._resolveTableName(modelClass);
+
+    const autoConstraintName = (refTable) => `fk_${sourceTable}_${refTable}`;
+
+    const upsertFK = (fkCol, entry) => {
+      const existing = fkMap.get(fkCol);
+      if (!existing) {
+        fkMap.set(fkCol, entry);
+      } else {
+        if (entry.onDelete && entry.onDelete !== 'RESTRICT') existing.onDelete = entry.onDelete;
+        if (entry.onUpdate && entry.onUpdate !== 'RESTRICT') existing.onUpdate = entry.onUpdate;
+        if (entry.constraintName) existing.constraintName = entry.constraintName;
+      }
+    };
+
+    for (const [attrName, def] of Object.entries(modelClass.rawAttributes || {})) {
+      if (def.references) {
+        const refModel = this.getModel(def.references.model);
+        if (!refModel) continue;
+        const refPkAttr = def.references.key || refModel.primaryKeyAttribute || 'id';
+        const refTable = refModel._resolvedTableName || this._resolveTableName(refModel);
+        const refPkCol = this._resolveColumnName(refModel.rawAttributes[refPkAttr] || {}, refPkAttr);
+        const fkCol = attrToColumn[attrName] || attrName;
+        const constraintName = def.references.constraintName || autoConstraintName(refTable);
+        upsertFK(fkCol, {
+          attributeName: attrName,
+          columnName: fkCol,
+          constraintName,
+          references: { model: def.references.model, table: refTable, key: refPkAttr, column: refPkCol },
+          onDelete: def.onDelete || 'RESTRICT',
+          onUpdate: def.onUpdate || 'RESTRICT'
+        });
+      }
+    }
+
+    const associations = modelClass.associations || {};
+    for (const assoc of Object.values(associations)) {
+      if (assoc.type === 'belongsTo') {
+        const fkAttr = assoc.foreignKey;
+        const refPkAttr = assoc.target.primaryKeyAttribute || 'id';
+        const refTable = assoc.target._resolvedTableName || this._resolveTableName(assoc.target);
+        const refPkCol = this._resolveColumnName(assoc.target.rawAttributes[refPkAttr] || {}, refPkAttr);
+        const fkCol = attrToColumn[fkAttr] || fkAttr;
+        const constraintName = assoc.constraintName || autoConstraintName(refTable);
+        upsertFK(fkCol, {
+          attributeName: fkAttr,
+          columnName: fkCol,
+          constraintName,
+          references: { model: assoc.target.modelName, table: refTable, key: refPkAttr, column: refPkCol },
+          onDelete: assoc.onDelete,
+          onUpdate: assoc.onUpdate
+        });
+      }
+    }
+
+    for (const otherModel of this._registry.all()) {
+      if (otherModel === modelClass) continue;
+      for (const assoc of Object.values(otherModel.associations || {})) {
+        if (assoc.type !== 'hasMany' && assoc.type !== 'hasOne') continue;
+        if (assoc.target !== modelClass) continue;
+        const fkAttr = assoc.foreignKey;
+        if (!modelClass.rawAttributes || !modelClass.rawAttributes[fkAttr]) continue;
+        const refPkAttr = assoc.source.primaryKeyAttribute || 'id';
+        const refTable = assoc.source._resolvedTableName || this._resolveTableName(assoc.source);
+        const refPkCol = this._resolveColumnName(assoc.source.rawAttributes[refPkAttr] || {}, refPkAttr);
+        const fkCol = attrToColumn[fkAttr] || fkAttr;
+        const constraintName = assoc.constraintName || autoConstraintName(refTable);
+        upsertFK(fkCol, {
+          attributeName: fkAttr,
+          columnName: fkCol,
+          constraintName,
+          references: { model: assoc.source.modelName, table: refTable, key: refPkAttr, column: refPkCol },
+          onDelete: assoc.onDelete,
+          onUpdate: assoc.onUpdate
+        });
+      }
+    }
+
+    return Array.from(fkMap.values());
   }
 
   /**

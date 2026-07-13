@@ -78,8 +78,10 @@ export class DDLAbstract extends BaseAbstract {
    */
   normalizeDefinition(definition) {
     return {
+      modelName: definition.modelName || null,
       tableName: definition.tableName,
       columns: { ...(definition.columns || {}) },
+      foreignKeys: [...(definition.foreignKeys || [])],
       primaryKey: definition.primaryKey || null,
       autoIncrement: definition.autoIncrement || null,
       primaryKeyAttribute: definition.primaryKeyAttribute || null,

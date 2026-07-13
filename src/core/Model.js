@@ -1,4 +1,6 @@
 import { clone } from '../utils/clone.js';
+import { Association } from './Association.js';
+import { ModelError } from './errors/ModelError.js';
 
 /**
  * Base Model class. All user-defined models must extend this.
@@ -100,6 +102,7 @@ export class Model {
     this.tableName = options.tableName || this.modelName;
     this._tableNameExplicit = options.tableName !== undefined;
     this.seq = options.seq || null;
+    this.associations = this.associations || {};
 
     return this;
   }
@@ -110,6 +113,78 @@ export class Model {
    * @param {import('./Seq.js').Seq} seq
    */
   static define(seq) {}
+
+  static _defaultForeignKeyName(referencedModelName, pkAttr) {
+    const ref = referencedModelName;
+    const pk = pkAttr.charAt(0).toUpperCase() + pkAttr.slice(1);
+    return ref.charAt(0).toLowerCase() + ref.slice(1) + pk;
+  }
+
+  static hasMany(target, options = {}) {
+    if (!target) {
+      throw new ModelError('hasMany requires a target model', { code: 'SEQ_ASSOCIATION_INVALID_TARGET' });
+    }
+    const fkAttr = options.foreignKey || this._defaultForeignKeyName(this.modelName, target.primaryKeyAttribute || 'id');
+    if (target.rawAttributes && !target.rawAttributes[fkAttr]) {
+      throw new ModelError(
+        `Target model "${target.modelName}" must have a "${fkAttr}" attribute for hasMany association`,
+        { code: 'SEQ_ASSOCIATION_MISSING_FK', details: { target: target.modelName, foreignKey: fkAttr } }
+      );
+    }
+    if (!this.associations) this.associations = {};
+    const assoc = new Association('hasMany', this, target, { ...options, foreignKey: fkAttr });
+    this.associations[target.modelName || target.name || 'unknown'] = assoc;
+    return this;
+  }
+
+  static hasOne(target, options = {}) {
+    if (!target) {
+      throw new ModelError('hasOne requires a target model', { code: 'SEQ_ASSOCIATION_INVALID_TARGET' });
+    }
+    const fkAttr = options.foreignKey || this._defaultForeignKeyName(this.modelName, target.primaryKeyAttribute || 'id');
+    if (target.rawAttributes && !target.rawAttributes[fkAttr]) {
+      throw new ModelError(
+        `Target model "${target.modelName}" must have a "${fkAttr}" attribute for hasOne association`,
+        { code: 'SEQ_ASSOCIATION_MISSING_FK', details: { target: target.modelName, foreignKey: fkAttr } }
+      );
+    }
+    if (!this.associations) this.associations = {};
+    const assoc = new Association('hasOne', this, target, { ...options, foreignKey: fkAttr });
+    this.associations[target.modelName || target.name || 'unknown'] = assoc;
+    return this;
+  }
+
+  static belongsTo(target, options = {}) {
+    if (!target) {
+      throw new ModelError('belongsTo requires a target model', { code: 'SEQ_ASSOCIATION_INVALID_TARGET' });
+    }
+    const fkAttr = options.foreignKey || this._defaultForeignKeyName(target.modelName || target.name, target.primaryKeyAttribute || 'id');
+    if (this.rawAttributes && !this.rawAttributes[fkAttr]) {
+      throw new ModelError(
+        `Model "${this.modelName}" must have a "${fkAttr}" attribute for belongsTo association`,
+        { code: 'SEQ_ASSOCIATION_MISSING_FK', details: { source: this.modelName, foreignKey: fkAttr } }
+      );
+    }
+    if (!this.associations) this.associations = {};
+    const assoc = new Association('belongsTo', this, target, { ...options, foreignKey: fkAttr });
+    this.associations[target.modelName || target.name || 'unknown'] = assoc;
+    return this;
+  }
+
+  static belongsToMany(target, options = {}) {
+    if (!target) {
+      throw new ModelError('belongsToMany requires a target model', { code: 'SEQ_ASSOCIATION_INVALID_TARGET' });
+    }
+    if (!options.through) {
+      throw new ModelError('belongsToMany requires a "through" option', { code: 'SEQ_ASSOCIATION_MISSING_THROUGH' });
+    }
+    const fkAttr = options.foreignKey || this._defaultForeignKeyName(this.modelName, this.primaryKeyAttribute || 'id');
+    const otherKey = options.otherKey || this._defaultForeignKeyName(target.modelName || target.name, target.primaryKeyAttribute || 'id');
+    if (!this.associations) this.associations = {};
+    const assoc = new Association('belongsToMany', this, target, { ...options, foreignKey: fkAttr, otherKey });
+    this.associations[target.modelName || target.name || 'unknown'] = assoc;
+    return this;
+  }
 
   /**
    * Returns the Seq instance associated with this model.
