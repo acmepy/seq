@@ -12,7 +12,8 @@ export class Product extends Model {
         },
         productName: {
           type: DataTypes.STRING(100),
-          allowNull: false
+          allowNull: false,
+          unique:true
         },
         unitPrice: {
           type: DataTypes.DECIMAL(10, 2),
