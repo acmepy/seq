@@ -1,4 +1,4 @@
-import { Seq, Model, DataTypes, MapAdapter } from '../src/index.js';
+import { Seq, Model, DataTypes, SQLiteAdapter } from '../src/index.js';
 
 class User extends Model {
   static define(seq) {
@@ -43,8 +43,11 @@ Task.belongsTo(User, { foreignKey: 'userId' });
 User.hasOne(Profile, { foreignKey: 'userId', onDelete: 'CASCADE' });
 Profile.belongsTo(User, { foreignKey: 'userId' });
 
+const adapter = new SQLiteAdapter({ database: ':memory:' });
+await adapter.connect();
+
 const seq = new Seq({
-  adapter: new MapAdapter(),
+  adapter,
   models: [User, Task, Profile],
   naming: { tables: 'snake_case', columns: 'snake_case' },
   logging: console.log
@@ -99,3 +102,4 @@ if (taskSchema) {
 }
 
 await seq.close();
+await adapter.close();

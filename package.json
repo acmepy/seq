@@ -1,6 +1,6 @@
 {
   "name": "seq",
-  "version": "0.2.1",
+  "version": "0.2.5",
   "description": "seq es un micro orm, modular, flexible y de facil integracion",
   "type": "module",
   "main": "src/index.js",
@@ -12,7 +12,7 @@
     "test:watch": "node --test --watch tests/*.test.js",
     "basic": "node examples/basic.js",
     "associations": "node examples/associations.js",
-    "examples":"npm run basic && npm run associations"
+    "examples": "npm run basic && npm run associations"
   },
   "keywords": [
     "orm",
@@ -21,6 +21,7 @@
     "model"
   ],
   "dependencies": {
+    "better-sqlite3": "^12.11.1",
     "yep": "github:acmepy/yep"
   },
   "author": "",

@@ -174,6 +174,11 @@ export class DMLAbstract extends BaseAbstract {
   _validateRecord(record, schema, modelName) {
     for (const [attrName, colDef] of Object.entries(schema.columns)) {
       const colName = schema.attrToColumn[attrName] || attrName;
+
+      if (schema.autoIncrement && colName === schema.autoIncrement) {
+        continue;
+      }
+
       const value = record[colName];
 
       if (!colDef.allowNull && (value === null || value === undefined)) {
