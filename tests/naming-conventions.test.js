@@ -1,6 +1,6 @@
 import { describe, it, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
-import { MapAdapter } from '../src/adapters/map/MapAdapter.js';
+import { SQLiteAdapter } from '../src/adapters/sqlite/SQLiteAdapter.js';
 import { Seq } from '../src/core/Seq.js';
 import { Model } from '../src/core/Model.js';
 import { DataTypes } from '../src/data-types/index.js';
@@ -90,7 +90,7 @@ describe('Naming Conventions', () => {
     let adapter;
 
     beforeEach(() => {
-      adapter = new MapAdapter();
+      adapter = new SQLiteAdapter({ database: ':memory:' });
     });
 
     it('accepts naming option', () => {
@@ -123,7 +123,7 @@ describe('Naming Conventions', () => {
         }
       }
 
-      const adapter = new MapAdapter();
+      const adapter = new SQLiteAdapter({ database: ':memory:' });
       const seq = new Seq({
         adapter,
         models: [Product],
@@ -145,7 +145,7 @@ describe('Naming Conventions', () => {
         }
       }
 
-      const adapter = new MapAdapter();
+      const adapter = new SQLiteAdapter({ database: ':memory:' });
       const seq = new Seq({
         adapter,
         models: [User],
@@ -166,7 +166,7 @@ describe('Naming Conventions', () => {
         }
       }
 
-      const adapter = new MapAdapter();
+      const adapter = new SQLiteAdapter({ database: ':memory:' });
       const seq = new Seq({
         adapter,
         models: [Order],
@@ -187,7 +187,7 @@ describe('Naming Conventions', () => {
         }
       }
 
-      const adapter = new MapAdapter();
+      const adapter = new SQLiteAdapter({ database: ':memory:' });
       const seq = new Seq({
         adapter,
         models: [User],
@@ -208,7 +208,7 @@ describe('Naming Conventions', () => {
         }
       }
 
-      const adapter = new MapAdapter();
+      const adapter = new SQLiteAdapter({ database: ':memory:' });
       const seq = new Seq({
         adapter,
         models: [OrderItem],
@@ -234,7 +234,7 @@ describe('Naming Conventions', () => {
         }
       }
 
-      const adapter = new MapAdapter();
+      const adapter = new SQLiteAdapter({ database: ':memory:' });
       const seq = new Seq({
         adapter,
         models: [Product],
@@ -258,7 +258,7 @@ describe('Naming Conventions', () => {
         }
       }
 
-      const adapter = new MapAdapter();
+      const adapter = new SQLiteAdapter({ database: ':memory:' });
       const seq = new Seq({
         adapter,
         models: [Product],
@@ -281,7 +281,7 @@ describe('Naming Conventions', () => {
         }
       }
 
-      const adapter = new MapAdapter();
+      const adapter = new SQLiteAdapter({ database: ':memory:' });
       const seq = new Seq({
         adapter,
         models: [User],
@@ -304,7 +304,7 @@ describe('Naming Conventions', () => {
         }
       }
 
-      const adapter = new MapAdapter();
+      const adapter = new SQLiteAdapter({ database: ':memory:' });
       const seq = new Seq({
         adapter,
         models: [Product]
@@ -327,7 +327,7 @@ describe('Naming Conventions', () => {
         }
       }
 
-      const adapter = new MapAdapter();
+      const adapter = new SQLiteAdapter({ database: ':memory:' });
       const seq = new Seq({
         adapter,
         models: [UserProfile],
@@ -351,7 +351,7 @@ describe('Naming Conventions', () => {
         }
       }
 
-      const adapter = new MapAdapter();
+      const adapter = new SQLiteAdapter({ database: ':memory:' });
       const seq = new Seq({
         adapter,
         models: [OrderItem],

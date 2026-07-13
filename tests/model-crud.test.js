@@ -1,12 +1,12 @@
-import { describe, it, beforeEach } from 'node:test';
+import { describe, it, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { Seq } from '../src/core/Seq.js';
 import { Model } from '../src/core/Model.js';
 import { DataTypes } from '../src/data-types/index.js';
-import { MapAdapter } from '../src/adapters/map/MapAdapter.js';
+import { SQLiteAdapter } from '../src/adapters/sqlite/SQLiteAdapter.js';
 
 describe('Model CRUD', () => {
-  let seq;
+  let seq, adapter;
   let User;
 
   beforeEach(async () => {
@@ -23,13 +23,19 @@ describe('Model CRUD', () => {
     );
     User = _User;
 
+    adapter = new SQLiteAdapter({ database: ':memory:' });
+    await adapter.connect();
     seq = new Seq({
-      adapter: new MapAdapter(),
+      adapter,
       models: [User],
       logging: false
     });
     await seq.init();
     await seq.sync();
+  });
+
+  afterEach(async () => {
+    await seq.close();
   });
 
   describe('create', () => {
@@ -326,16 +332,14 @@ describe('Model CRUD', () => {
       );
       Product = _Product;
 
-      seq2 = new Seq({ adapter: new MapAdapter(), models: [Product], logging: false });
+      seq2 = new Seq({ adapter, models: [Product], logging: false });
       await seq2.init();
       await seq2.sync();
     });
 
     it('stores records using column names', async () => {
       await Product.create({ productName: 'Laptop', unitPrice: 999.99 });
-      const schema = seq2._adapter.schemas.get('products');
-      const table = seq2._adapter.database.get('products');
-      const raw = [...table.values()][0];
+      const raw = adapter._db.prepare('SELECT * FROM products LIMIT 1').get();
       assert.ok('product_name' in raw);
       assert.ok('unit_price' in raw);
       assert.ok('in_stock' in raw);

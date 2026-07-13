@@ -1,12 +1,12 @@
-import { describe, it, beforeEach } from 'node:test';
+import { describe, it, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { Seq } from '../src/core/Seq.js';
 import { Model } from '../src/core/Model.js';
 import { DataTypes } from '../src/data-types/index.js';
-import { MapAdapter } from '../src/adapters/map/MapAdapter.js';
+import { SQLiteAdapter } from '../src/adapters/sqlite/SQLiteAdapter.js';
 
 describe('Seq.sync', () => {
-  let seq;
+  let seq, adapter;
   let User;
   let Product;
 
@@ -32,12 +32,18 @@ describe('Seq.sync', () => {
     );
     Product = _Product;
 
+    adapter = new SQLiteAdapter({ database: ':memory:' });
+    await adapter.connect();
     seq = new Seq({
-      adapter: new MapAdapter(),
+      adapter,
       models: [User, Product],
       logging: false
     });
     await seq.init();
+  });
+
+  afterEach(async () => {
+    await seq.close();
   });
 
   it('creates missing tables', async () => {
@@ -62,7 +68,6 @@ describe('Seq.sync', () => {
 
   it('detects altered columns with alter: true', async () => {
     await seq.sync();
-    // Create a model with an extra field
     class _Extra extends Model {}
     _Extra.init(
       {

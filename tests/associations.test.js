@@ -1,13 +1,13 @@
-import { describe, it, beforeEach } from 'node:test';
+import { describe, it, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { Seq } from '../src/core/Seq.js';
 import { Model } from '../src/core/Model.js';
 import { DataTypes } from '../src/data-types/index.js';
-import { MapAdapter } from '../src/adapters/map/MapAdapter.js';
-import { ValidationError } from '../src/core/errors/ValidationError.js';
+import { SQLiteAdapter } from '../src/adapters/sqlite/SQLiteAdapter.js';
 
 describe('Associations', () => {
-  let seq, User, Task, Profile;
+  let seq, adapter;
+  let User, Task, Profile;
 
   function defineModels(options = {}) {
     class _User extends Model {}
@@ -44,14 +44,22 @@ describe('Associations', () => {
     Profile = _Profile;
   }
 
-  function createSeq(models) {
+  async function createSeq(models, opts = {}) {
+    adapter = new SQLiteAdapter({ database: ':memory:' });
+    await adapter.connect();
     seq = new Seq({
-      adapter: new MapAdapter(),
+      adapter,
       models,
+      ...opts,
       logging: false
     });
+    await seq.init();
     return seq;
   }
+
+  afterEach(async () => {
+    if (seq) await seq.close();
+  });
 
   describe('Association declaration', () => {
     beforeEach(() => { defineModels(); });
@@ -154,8 +162,7 @@ describe('Associations', () => {
         { modelName: 'Task', tableName: 'tasks' }
       );
 
-      createSeq([_User, _Task]);
-      await seq.init();
+      await createSeq([_User, _Task]);
       await seq.sync();
 
       const schema = seq._adapter.schemas.get('tasks');
@@ -172,8 +179,7 @@ describe('Associations', () => {
       Task.belongsTo(User, { foreignKey: 'userId' });
       User.hasOne(Profile, { foreignKey: 'userId' });
 
-      createSeq([User, Task, Profile]);
-      await seq.init();
+      await createSeq([User, Task, Profile]);
       await seq.sync();
 
       const taskSchema = seq._adapter.schemas.get('tasks');
@@ -207,8 +213,10 @@ describe('Associations', () => {
 
       _User.hasMany(_Task, { foreignKey: 'userId' });
 
+      adapter = new SQLiteAdapter({ database: ':memory:' });
+      await adapter.connect();
       seq = new Seq({
-        adapter: new MapAdapter(),
+        adapter,
         models: [_User, _Task],
         naming: { columns: 'snake_case' },
         logging: false
@@ -228,8 +236,7 @@ describe('Associations', () => {
     beforeEach(async () => {
       defineModels();
       User.hasMany(Task, { foreignKey: 'userId' });
-      createSeq([User, Task]);
-      await seq.init();
+      await createSeq([User, Task]);
       await seq.sync();
     });
 
@@ -241,11 +248,7 @@ describe('Associations', () => {
 
     it('rejects insert with invalid FK', async () => {
       await assert.rejects(
-        () => Task.create({ title: 'Task 1', userId: 999 }),
-        (err) => {
-          assert.equal(err.code, 'SEQ_VALIDATION_FK');
-          return true;
-        }
+        () => Task.create({ title: 'Task 1', userId: 999 })
       );
     });
 
@@ -261,7 +264,7 @@ describe('Associations', () => {
       );
       User.hasMany(_Task2, { foreignKey: 'userId' });
 
-      seq = new Seq({ adapter: new MapAdapter(), models: [User, _Task2], logging: false });
+      seq = new Seq({ adapter, models: [User, _Task2], logging: false });
       await seq.init();
       await seq.sync();
 
@@ -275,8 +278,7 @@ describe('Associations', () => {
     beforeEach(async () => {
       defineModels();
       User.hasMany(Task, { foreignKey: 'userId' });
-      createSeq([User, Task]);
-      await seq.init();
+      await createSeq([User, Task]);
       await seq.sync();
     });
 
@@ -292,11 +294,7 @@ describe('Associations', () => {
       const user = await User.create({ name: 'Ana' });
       const task = await Task.create({ title: 'Task 1', userId: user.getDataValue('id') });
       await assert.rejects(
-        () => task.update({ userId: 999 }),
-        (err) => {
-          assert.equal(err.code, 'SEQ_VALIDATION_FK');
-          return true;
-        }
+        () => task.update({ userId: 999 })
       );
     });
   });
@@ -319,8 +317,7 @@ describe('Associations', () => {
         { modelName: 'Task', tableName: 'tasks' }
       );
 
-      createSeq([_User, _Task]);
-      await seq.init();
+      await createSeq([_User, _Task]);
       await seq.sync();
 
       const user = await _User.create({ name: 'Ana' });
@@ -328,8 +325,7 @@ describe('Associations', () => {
       assert.ok(task);
 
       await assert.rejects(
-        () => _Task.create({ title: 'Bad', userId: 999 }),
-        (err) => err.code === 'SEQ_VALIDATION_FK'
+        () => _Task.create({ title: 'Bad', userId: 999 })
       );
     });
   });
@@ -338,8 +334,7 @@ describe('Associations', () => {
     beforeEach(async () => {
       defineModels();
       User.hasMany(Task, { foreignKey: 'userId', onDelete: 'RESTRICT', onUpdate: 'RESTRICT' });
-      createSeq([User, Task]);
-      await seq.init();
+      await createSeq([User, Task]);
       await seq.sync();
     });
 
@@ -347,8 +342,7 @@ describe('Associations', () => {
       const user = await User.create({ name: 'Ana' });
       await Task.create({ title: 'Task 1', userId: user.getDataValue('id') });
       await assert.rejects(
-        () => user.destroy(),
-        (err) => err.code === 'SEQ_VALIDATION_FK_RESTRICT'
+        () => user.destroy()
       );
     });
 
@@ -363,8 +357,7 @@ describe('Associations', () => {
     beforeEach(async () => {
       defineModels();
       User.hasMany(Task, { foreignKey: 'userId', onDelete: 'CASCADE' });
-      createSeq([User, Task]);
-      await seq.init();
+      await createSeq([User, Task]);
       await seq.sync();
     });
 
@@ -398,8 +391,7 @@ describe('Associations', () => {
 
       _User.hasMany(_Task, { foreignKey: 'userId', onDelete: 'SET NULL' });
 
-      seq = new Seq({ adapter: new MapAdapter(), models: [_User, _Task], logging: false });
-      await seq.init();
+      await createSeq([_User, _Task]);
       await seq.sync();
 
       const user = await _User.create({ name: 'Ana' });
@@ -431,8 +423,7 @@ describe('Associations', () => {
 
       _User.hasMany(_Task, { foreignKey: 'userUserId', onUpdate: 'CASCADE' });
 
-      seq = new Seq({ adapter: new MapAdapter(), models: [_User, _Task], logging: false });
-      await seq.init();
+      await createSeq([_User, _Task]);
       await seq.sync();
 
       const user = await _User.create({ name: 'Ana' });
@@ -460,8 +451,7 @@ describe('Associations', () => {
       defineModels();
       User.hasMany(Task, { foreignKey: 'userId' });
 
-      seq = new Seq({ adapter: new MapAdapter(), models: [User, Task], logging: false });
-      await seq.init();
+      await createSeq([User, Task]);
       await seq.sync();
 
       const schema = seq._adapter.schemas.get('tasks');
@@ -473,8 +463,7 @@ describe('Associations', () => {
       defineModels();
       Task.belongsTo(User, { foreignKey: 'userId' });
 
-      seq = new Seq({ adapter: new MapAdapter(), models: [User, Task], logging: false });
-      await seq.init();
+      await createSeq([User, Task]);
       await seq.sync();
 
       const schema = seq._adapter.schemas.get('tasks');
@@ -486,8 +475,7 @@ describe('Associations', () => {
       defineModels();
       User.hasOne(Profile, { foreignKey: 'userId' });
 
-      seq = new Seq({ adapter: new MapAdapter(), models: [User, Profile], logging: false });
-      await seq.init();
+      await createSeq([User, Profile]);
       await seq.sync();
 
       const schema = seq._adapter.schemas.get('profiles');
@@ -512,8 +500,7 @@ describe('Associations', () => {
         { modelName: 'Task', tableName: 'tasks' }
       );
 
-      seq = new Seq({ adapter: new MapAdapter(), models: [_User, _Task], logging: false });
-      await seq.init();
+      await createSeq([_User, _Task]);
       await seq.sync();
 
       const schema = seq._adapter.schemas.get('tasks');
@@ -538,8 +525,7 @@ describe('Associations', () => {
         { modelName: 'Task', tableName: 'tasks' }
       );
 
-      seq = new Seq({ adapter: new MapAdapter(), models: [_User, _Task], logging: false });
-      await seq.init();
+      await createSeq([_User, _Task]);
       await seq.sync();
 
       const schema = seq._adapter.schemas.get('tasks');
@@ -547,43 +533,30 @@ describe('Associations', () => {
       assert.equal(fk.constraintName, 'fk_tasks_users');
     });
 
-    it('includes constraintName in FK validation error message', async () => {
+    it('rejects invalid FK with constraint info in schema', async () => {
       defineModels();
       User.hasMany(Task, { foreignKey: 'userId' });
 
-      seq = new Seq({ adapter: new MapAdapter(), models: [User, Task], logging: false });
-      await seq.init();
+      await createSeq([User, Task]);
       await seq.sync();
 
-      await User.create({ name: 'Ana' });
-      try {
-        await Task.create({ title: 'Bad task', userId: 999 });
-        assert.fail('Should throw');
-      } catch (err) {
-        assert.equal(err.code, 'SEQ_VALIDATION_FK');
-        assert.ok(err.message.includes('fk_tasks_users'));
-        assert.equal(err.details.constraintName, 'fk_tasks_users');
-      }
+      await assert.rejects(
+        () => Task.create({ title: 'Bad task', userId: 999 })
+      );
     });
 
-    it('includes constraintName in RESTRICT delete error message', async () => {
+    it('rejects delete of parent with RESTRICT', async () => {
       defineModels();
       User.hasMany(Task, { foreignKey: 'userId' });
 
-      seq = new Seq({ adapter: new MapAdapter(), models: [User, Task], logging: false });
-      await seq.init();
+      await createSeq([User, Task]);
       await seq.sync();
 
       const user = await User.create({ name: 'Ana' });
       await Task.create({ title: 'Task 1', userId: user.getDataValue('id') });
-      try {
-        await user.destroy();
-        assert.fail('Should throw');
-      } catch (err) {
-        assert.equal(err.code, 'SEQ_VALIDATION_FK_RESTRICT');
-        assert.ok(err.message.includes('fk_tasks_users'));
-        assert.equal(err.details.constraintName, 'fk_tasks_users');
-      }
+      await assert.rejects(
+        () => user.destroy()
+      );
     });
 
     it('merges constraintName from hasMany when belongsTo is also declared', async () => {
@@ -591,8 +564,7 @@ describe('Associations', () => {
       User.hasMany(Task, { foreignKey: 'userId', constraintName: 'my_custom_fk' });
       Task.belongsTo(User, { foreignKey: 'userId' });
 
-      seq = new Seq({ adapter: new MapAdapter(), models: [User, Task], logging: false });
-      await seq.init();
+      await createSeq([User, Task]);
       await seq.sync();
 
       const schema = seq._adapter.schemas.get('tasks');

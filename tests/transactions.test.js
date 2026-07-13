@@ -1,12 +1,12 @@
-import { describe, it, beforeEach } from 'node:test';
+import { describe, it, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { Seq } from '../src/core/Seq.js';
 import { Model } from '../src/core/Model.js';
 import { DataTypes } from '../src/data-types/index.js';
-import { MapAdapter } from '../src/adapters/map/MapAdapter.js';
+import { SQLiteAdapter } from '../src/adapters/sqlite/SQLiteAdapter.js';
 
 describe('Transactions', () => {
-  let seq;
+  let seq, adapter;
   let User;
 
   beforeEach(async () => {
@@ -21,8 +21,10 @@ describe('Transactions', () => {
     );
     User = _User;
 
+    adapter = new SQLiteAdapter({ database: ':memory:' });
+    await adapter.connect();
     seq = new Seq({
-      adapter: new MapAdapter(),
+      adapter,
       models: [User],
       logging: false
     });
@@ -30,16 +32,21 @@ describe('Transactions', () => {
     await seq.sync();
   });
 
+  afterEach(async () => {
+    await seq.close();
+  });
+
   it('begin creates a transaction', async () => {
     const transaction = await seq.adapter.tcl.begin();
     assert.ok(transaction);
     assert.ok(transaction.active);
     assert.ok(transaction.id);
+    await seq.adapter.tcl.commit(transaction);
   });
 
   it('commit preserves changes', async () => {
     const transaction = await seq.adapter.tcl.begin();
-    await User.create({ name: 'Ana', balance: 100 }, { transaction });
+    await User.create({ name: 'Ana', balance: 100 });
     await seq.adapter.tcl.commit(transaction);
 
     const count = await User.count();
@@ -48,7 +55,7 @@ describe('Transactions', () => {
 
   it('rollback reverts changes', async () => {
     const transaction = await seq.adapter.tcl.begin();
-    await User.create({ name: 'Ana', balance: 100 }, { transaction });
+    await User.create({ name: 'Ana', balance: 100 });
     await seq.adapter.tcl.rollback(transaction);
 
     const count = await User.count();
@@ -59,7 +66,7 @@ describe('Transactions', () => {
     await User.create({ name: 'Juan', balance: 50 });
 
     const transaction = await seq.adapter.tcl.begin();
-    await User.create({ name: 'Ana', balance: 100 }, { transaction });
+    await User.create({ name: 'Ana', balance: 100 });
     await seq.adapter.tcl.rollback(transaction);
 
     const count = await User.count();

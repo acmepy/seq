@@ -2,6 +2,7 @@ import Database from 'better-sqlite3';
 import { BaseAdapter } from '../BaseAdapter.js';
 import { SQLiteDDL } from './SQLiteDDL.js';
 import { SQLiteDML } from './SQLiteDML.js';
+import { SQLiteTCL } from './SQLiteTCL.js';
 
 export class SQLiteAdapter extends BaseAdapter {
   constructor(options = {}) {
@@ -11,7 +12,7 @@ export class SQLiteAdapter extends BaseAdapter {
     this.ddl = new SQLiteDDL(this);
     this.dml = new SQLiteDML(this);
     this.dcl = null;
-    this.tcl = null;
+    this.tcl = new SQLiteTCL(this);
     this.schemas = new Map();
   }
 

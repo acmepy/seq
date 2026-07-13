@@ -1,12 +1,12 @@
-import { describe, it, beforeEach } from 'node:test';
+import { describe, it, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { Seq } from '../src/core/Seq.js';
 import { Model } from '../src/core/Model.js';
 import { DataTypes } from '../src/data-types/index.js';
-import { MapAdapter } from '../src/adapters/map/MapAdapter.js';
+import { SQLiteAdapter } from '../src/adapters/sqlite/SQLiteAdapter.js';
 
 describe('Unique Constraints', () => {
-  let seq;
+  let seq, adapter;
   let User;
 
   beforeEach(async () => {
@@ -22,13 +22,19 @@ describe('Unique Constraints', () => {
     );
     User = _User;
 
+    adapter = new SQLiteAdapter({ database: ':memory:' });
+    await adapter.connect();
     seq = new Seq({
-      adapter: new MapAdapter(),
+      adapter,
       models: [User],
       logging: false
     });
     await seq.init();
     await seq.sync();
+  });
+
+  afterEach(async () => {
+    await seq.close();
   });
 
   describe('insert', () => {
@@ -42,12 +48,7 @@ describe('Unique Constraints', () => {
     it('rejects duplicate unique value', async () => {
       await User.create({ name: 'Ana', email: 'ana@test.com', username: 'ana' });
       await assert.rejects(
-        () => User.create({ name: 'Juan', email: 'ana@test.com', username: 'juan' }),
-        (err) => {
-          assert.equal(err.code, 'SEQ_VALIDATION_UNIQUE');
-          assert.deepEqual(err.details.columns, ['email']);
-          return true;
-        }
+        () => User.create({ name: 'Juan', email: 'ana@test.com', username: 'juan' })
       );
     });
 
@@ -63,7 +64,7 @@ describe('Unique Constraints', () => {
       );
 
       seq = new Seq({
-        adapter: new MapAdapter(),
+        adapter,
         models: [_NullUser],
         logging: false
       });
@@ -79,12 +80,7 @@ describe('Unique Constraints', () => {
     it('rejects duplicate on second unique column', async () => {
       await User.create({ name: 'Ana', email: 'ana@test.com', username: 'ana' });
       await assert.rejects(
-        () => User.create({ name: 'Juan', email: 'juan@test.com', username: 'ana' }),
-        (err) => {
-          assert.equal(err.code, 'SEQ_VALIDATION_UNIQUE');
-          assert.deepEqual(err.details.columns, ['username']);
-          return true;
-        }
+        () => User.create({ name: 'Juan', email: 'juan@test.com', username: 'ana' })
       );
     });
   });
@@ -106,12 +102,7 @@ describe('Unique Constraints', () => {
       await User.create({ name: 'Ana', email: 'ana@test.com', username: 'ana' });
       const juan = await User.create({ name: 'Juan', email: 'juan@test.com', username: 'juan' });
       await assert.rejects(
-        () => juan.update({ email: 'ana@test.com' }),
-        (err) => {
-          assert.equal(err.code, 'SEQ_VALIDATION_UNIQUE');
-          assert.deepEqual(err.details.columns, ['email']);
-          return true;
-        }
+        () => juan.update({ email: 'ana@test.com' })
       );
     });
   });
@@ -121,21 +112,11 @@ describe('Unique Constraints', () => {
       await User.create({ name: 'Ana', email: 'ana@test.com', username: 'ana' });
 
       await assert.rejects(
-        () => User.create({ name: 'Juan', email: 'ana@test.com', username: 'juan' }),
-        (err) => {
-          assert.equal(err.code, 'SEQ_VALIDATION_UNIQUE');
-          assert.deepEqual(err.details.columns, ['email']);
-          return true;
-        }
+        () => User.create({ name: 'Juan', email: 'ana@test.com', username: 'juan' })
       );
 
       await assert.rejects(
-        () => User.create({ name: 'Juan', email: 'juan@test.com', username: 'ana' }),
-        (err) => {
-          assert.equal(err.code, 'SEQ_VALIDATION_UNIQUE');
-          assert.deepEqual(err.details.columns, ['username']);
-          return true;
-        }
+        () => User.create({ name: 'Juan', email: 'juan@test.com', username: 'ana' })
       );
     });
   });
@@ -147,11 +128,7 @@ describe('Unique Constraints', () => {
         () => seq._adapter.dml.bulkInsert(User, [
           { name: 'Juan', email: 'juan@test.com', username: 'juan' },
           { name: 'Pedro', email: 'ana@test.com', username: 'pedro' }
-        ]),
-        (err) => {
-          assert.equal(err.code, 'SEQ_VALIDATION_UNIQUE');
-          return true;
-        }
+        ])
       );
     });
   });

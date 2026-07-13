@@ -38,13 +38,11 @@ export class SQLiteDML extends DMLAbstract {
 
   _applyTimestamps(colRecord, schema) {
     if (schema.timestamps) {
-      const now = new Date().toISOString();
+      const now = new Date();
       const createdCol = schema.attrToColumn[schema.createdAt] || schema.createdAt;
       const updatedCol = schema.attrToColumn[schema.updatedAt] || schema.updatedAt;
       if (!colRecord[createdCol]) colRecord[createdCol] = now;
       if (!colRecord[updatedCol]) colRecord[updatedCol] = now;
-      if (colRecord[createdCol] instanceof Date) colRecord[createdCol] = colRecord[createdCol].toISOString();
-      if (colRecord[updatedCol] instanceof Date) colRecord[updatedCol] = colRecord[updatedCol].toISOString();
     }
   }
 
@@ -73,6 +71,10 @@ export class SQLiteDML extends DMLAbstract {
       } else if (typeName === 'BooleanType') {
         if (typeof value === 'boolean') result[attrName] = value;
         else result[attrName] = value === 1 || value === '1';
+      } else if (typeName === 'DateType') {
+        if (value instanceof Date) result[attrName] = value;
+        else if (typeof value === 'string') result[attrName] = new Date(value);
+        else result[attrName] = value;
       } else {
         result[attrName] = value;
       }
@@ -156,11 +158,12 @@ export class SQLiteDML extends DMLAbstract {
       });
       sql += ` ORDER BY ${orderClauses.join(', ')}`;
     }
-    if (options.limit) {
+    if (options.limit && options.offset) {
+      sql += ` LIMIT ${options.limit} OFFSET ${options.offset}`;
+    } else if (options.limit) {
       sql += ` LIMIT ${options.limit}`;
-    }
-    if (options.offset) {
-      sql += ` OFFSET ${options.offset}`;
+    } else if (options.offset) {
+      sql += ` LIMIT -1 OFFSET ${options.offset}`;
     }
     const rows = this._db().prepare(sql).all(...params);
     return rows.map(row => new model(this._toAttrNames(row, schema), { _isNew: false }));
@@ -220,6 +223,6 @@ export class SQLiteDML extends DMLAbstract {
   async truncate(model, options = {}) {
     const { tableName } = this._schema(model);
     this._db().prepare(`DELETE FROM "${tableName}"`).run();
-    this._db().prepare(`DELETE FROM sqlite_sequence WHERE name="${tableName}"`).run();
+    this._db().prepare(`DELETE FROM sqlite_sequence WHERE name='${tableName}'`).run();
   }
 }

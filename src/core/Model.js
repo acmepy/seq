@@ -1,6 +1,7 @@
 import { clone } from '../utils/clone.js';
 import { Association } from './Association.js';
 import { ModelError } from './errors/ModelError.js';
+import { DataTypes } from '../data-types/index.js';
 
 /**
  * Base Model class. All user-defined models must extend this.
@@ -84,14 +85,14 @@ export class Model {
 
       if (!this.rawAttributes[createdAtField]) {
         this.rawAttributes[createdAtField] = {
-          type: { key: 'DATE' },
+          type: DataTypes.DATE,
           allowNull: true,
           defaultValue: () => new Date()
         };
       }
       if (!this.rawAttributes[updatedAtField]) {
         this.rawAttributes[updatedAtField] = {
-          type: { key: 'DATE' },
+          type: DataTypes.DATE,
           allowNull: true,
           defaultValue: () => new Date()
         };

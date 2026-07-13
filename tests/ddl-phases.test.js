@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { Seq } from '../src/core/Seq.js';
 import { Model } from '../src/core/Model.js';
 import { DataTypes } from '../src/data-types/index.js';
-import { MapAdapter } from '../src/adapters/map/MapAdapter.js';
+import { SQLiteAdapter } from '../src/adapters/sqlite/SQLiteAdapter.js';
 
 describe('DDL Phases', () => {
   let seq;
@@ -20,7 +20,7 @@ describe('DDL Phases', () => {
         { modelName: 'User', tableName: 'users' }
       );
 
-      seq = new Seq({ adapter: new MapAdapter(), models: [User], logging: false });
+      seq = new Seq({ adapter: new SQLiteAdapter({ database: ':memory:' }), models: [User], logging: false });
       await seq.init();
 
       const def = seq._buildTableDefinition(User);
@@ -42,7 +42,7 @@ describe('DDL Phases', () => {
         { modelName: 'User', tableName: 'users' }
       );
 
-      seq = new Seq({ adapter: new MapAdapter(), models: [User], logging: false });
+      seq = new Seq({ adapter: new SQLiteAdapter({ database: ':memory:' }), models: [User], logging: false });
       await seq.init();
 
       const def = seq._buildTableDefinition(User);
@@ -61,7 +61,7 @@ describe('DDL Phases', () => {
         { modelName: 'User', tableName: 'users' }
       );
 
-      seq = new Seq({ adapter: new MapAdapter(), models: [User], logging: false });
+      seq = new Seq({ adapter: new SQLiteAdapter({ database: ':memory:' }), models: [User], logging: false });
       await seq.init();
 
       const def = seq._buildTableDefinition(User);
@@ -81,7 +81,7 @@ describe('DDL Phases', () => {
         { modelName: 'User', tableName: 'users' }
       );
 
-      seq = new Seq({ adapter: new MapAdapter(), models: [User], logging: false });
+      seq = new Seq({ adapter: new SQLiteAdapter({ database: ':memory:' }), models: [User], logging: false });
       await seq.init();
 
       const def = seq._buildTableDefinition(User);
@@ -100,7 +100,7 @@ describe('DDL Phases', () => {
         { modelName: 'User', tableName: 'users' }
       );
 
-      seq = new Seq({ adapter: new MapAdapter(), models: [User], logging: false });
+      seq = new Seq({ adapter: new SQLiteAdapter({ database: ':memory:' }), models: [User], logging: false });
       await seq.init();
       await seq.sync();
 
@@ -132,7 +132,7 @@ describe('DDL Phases', () => {
       User.hasMany(Task, { foreignKey: 'userId' });
       Task.belongsTo(User, { foreignKey: 'userId' });
 
-      seq = new Seq({ adapter: new MapAdapter(), models: [User, Task], logging: false });
+      seq = new Seq({ adapter: new SQLiteAdapter({ database: ':memory:' }), models: [User, Task], logging: false });
       await seq.init();
       await seq.sync();
 
@@ -150,7 +150,7 @@ describe('DDL Phases', () => {
         { modelName: 'User', tableName: 'users' }
       );
 
-      seq = new Seq({ adapter: new MapAdapter(), models: [User], logging: false });
+      seq = new Seq({ adapter: new SQLiteAdapter({ database: ':memory:' }), models: [User], logging: false });
       await seq.init();
       await seq.sync();
 
@@ -167,7 +167,7 @@ describe('DDL Phases', () => {
         { modelName: 'User', tableName: 'users' }
       );
 
-      seq = new Seq({ adapter: new MapAdapter(), models: [User], logging: false });
+      seq = new Seq({ adapter: new SQLiteAdapter({ database: ':memory:' }), models: [User], logging: false });
       await seq.init();
       await seq.sync();
 
@@ -184,7 +184,7 @@ describe('DDL Phases', () => {
         { modelName: 'User', tableName: 'users' }
       );
 
-      seq = new Seq({ adapter: new MapAdapter(), models: [User], logging: false });
+      seq = new Seq({ adapter: new SQLiteAdapter({ database: ':memory:' }), models: [User], logging: false });
       await seq.init();
       await seq.sync();
 
@@ -207,7 +207,7 @@ describe('DDL Phases', () => {
         { modelName: 'User', tableName: 'users' }
       );
 
-      seq = new Seq({ adapter: new MapAdapter(), models: [User], logging: false });
+      seq = new Seq({ adapter: new SQLiteAdapter({ database: ':memory:' }), models: [User], logging: false });
       await seq.init();
       await seq.sync();
 
@@ -236,7 +236,7 @@ describe('DDL Phases', () => {
         { modelName: 'Task', tableName: 'tasks' }
       );
 
-      seq = new Seq({ adapter: new MapAdapter(), models: [User, Task], logging: false });
+      seq = new Seq({ adapter: new SQLiteAdapter({ database: ':memory:' }), models: [User, Task], logging: false });
       await seq.init();
       await seq.sync();
 
