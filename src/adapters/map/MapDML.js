@@ -1,4 +1,5 @@
 import { AdapterError } from '../../core/errors/AdapterError.js';
+import { ValidationError } from '../../core/errors/ValidationError.js';
 import { clone } from '../../utils/clone.js';
 import { DMLAbstract } from '../abstract/DMLAbstract.js';
 
@@ -90,6 +91,8 @@ export class MapDML extends DMLAbstract {
         );
       }
     }
+
+    this._checkUniqueConstraint(tableName, schema, colRecord);
 
     const storedRecord = clone(colRecord);
     if (schema.primaryKey) {
@@ -271,6 +274,8 @@ export class MapDML extends DMLAbstract {
         record[updatedCol] = now;
       }
 
+      this._checkUniqueConstraint(tableName, schema, record, key);
+
       if (schema) {
         this._validateRecord(record, schema, model.modelName);
       }
@@ -326,5 +331,32 @@ export class MapDML extends DMLAbstract {
     const table = this._adapter.database.get(tableName);
     table.clear();
     this._adapter.sequences.set(tableName, 1);
+  }
+
+  _checkUniqueConstraint(tableName, schema, colRecord, excludePk) {
+    const table = this._adapter.database.get(tableName);
+    if (!table) return;
+
+    for (const [attrName, colDef] of Object.entries(schema.columns)) {
+      if (!colDef.unique) continue;
+
+      const colName = schema.attrToColumn[attrName] || attrName;
+      const value = colRecord[colName];
+
+      if (value === null || value === undefined) continue;
+
+      for (const [pk, existing] of table) {
+        if (excludePk !== undefined && pk === excludePk) continue;
+        if (existing[colName] === value) {
+          throw new ValidationError(
+            `Duplicate value "${value}" for unique field "${attrName}" in model "${schema.modelName || tableName}"`,
+            {
+              code: 'SEQ_VALIDATION_UNIQUE',
+              details: { model: schema.modelName || tableName, field: attrName, value }
+            }
+          );
+        }
+      }
+    }
   }
 }
