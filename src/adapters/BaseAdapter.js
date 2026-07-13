@@ -44,6 +44,15 @@ export class BaseAdapter {
   }
 
   /**
+   * Returns the case style for identifiers (table/column names).
+   * Subclasses can override to return 'upper' for databases like Oracle.
+   * @returns {string} 'lower' | 'upper' | undefined
+   */
+  get caseStyle() {
+    return 'lower';
+  }
+
+  /**
    * Normalizes a value for storage.
    * @param {object} attribute - The attribute definition
    * @param {*} value - The value to normalize

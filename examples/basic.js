@@ -5,6 +5,10 @@ import { Product } from './models/Product.js';
 const seq = new Seq({
   adapter: new MapAdapter(),
   models: [User, Product],
+  naming: {
+    tables: 'snake_case',
+    columns: 'snake_case'
+  },
   logging: console.log
 });
 
@@ -37,9 +41,9 @@ const mouse = await Product.create({
 
 console.log('Laptop (attr names):', laptop.toJSON());
 
-const schema = seq._adapter.schemas.get('products');
-const table = seq._adapter.database.get('products');
-const raw = [...table.values()][0];
+const productTable = Product._resolvedTableName;
+const schema = seq._adapter.schemas.get(productTable);
+const raw = [...seq._adapter.database.get(productTable).values()][0];
 console.log('Laptop (column names in DB):', raw);
 console.log('attrToColumn:', schema.attrToColumn);
 

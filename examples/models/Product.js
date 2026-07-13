@@ -12,26 +12,22 @@ export class Product extends Model {
         },
         productName: {
           type: DataTypes.STRING(100),
-          allowNull: false,
-          field: 'product_name'
+          allowNull: false
         },
         unitPrice: {
           type: DataTypes.DECIMAL(10, 2),
           allowNull: false,
-          defaultValue: 0,
-          field: 'unit_price'
+          defaultValue: 0
         },
         inStock: {
           type: DataTypes.BOOLEAN,
           allowNull: false,
-          defaultValue: true,
-          field: 'in_stock'
+          defaultValue: true
         }
       },
       {
         seq,
         modelName: 'Product',
-        tableName: 'products',
         timestamps: true
       }
     );

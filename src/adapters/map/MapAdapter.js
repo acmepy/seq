@@ -26,6 +26,15 @@ export class MapAdapter extends BaseAdapter {
   }
 
   /**
+   * Returns the case style for identifiers.
+   * In-memory adapter uses lowercase by default.
+   * @returns {string}
+   */
+  get caseStyle() {
+    return 'lower';
+  }
+
+  /**
    * Initializes the adapter (no-op for in-memory).
    */
   async initialize() {}

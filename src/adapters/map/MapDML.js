@@ -6,7 +6,7 @@ import { DMLAbstract } from '../abstract/DMLAbstract.js';
  * DML operations for the MapAdapter.
  * Handles insert, select, update, delete, and truncate.
  *
- * Extends DMLStatements which provides adapter-agnostic helpers:
+ * Extends DMLAbstract which provides adapter-agnostic helpers:
  * _toColumnNames, _toAttrNames, _translateWhere, _matchWhere, _validateRecord.
  *
  * Records in the database use column names (from `field`).
@@ -21,6 +21,16 @@ export class MapDML extends DMLAbstract {
   }
 
   /**
+   * Returns the effective table name for a model.
+   * Uses _resolvedTableName if set by Seq (convention-applied), otherwise falls back to tableName.
+   * @param {typeof import('../../core/Model.js').Model} model
+   * @returns {string}
+   */
+  _getTableName(model) {
+    return model._resolvedTableName || model.tableName;
+  }
+
+  /**
    * Inserts a single record.
    * @param {typeof import('../../core/Model.js').Model} model
    * @param {object} values - Values using attribute names
@@ -28,21 +38,20 @@ export class MapDML extends DMLAbstract {
    * @returns {Promise<import('../../core/Model.js').Model>}
    */
   async insert(model, values, options = {}) {
-    const table = this._adapter.database.get(model.tableName);
-    const schema = this._adapter.schemas.get(model.tableName);
+    const tableName = this._getTableName(model);
+    const table = this._adapter.database.get(tableName);
+    const schema = this._adapter.schemas.get(tableName);
 
     if (!schema) {
-      throw new AdapterError(`Table "${model.tableName}" does not exist`, {
-        code: 'SEQ_ADAPTER_TABLE_NOT_FOUND'
-      });
+      throw new AdapterError(`Table "${tableName}" does not exist`, { code: 'SEQ_ADAPTER_TABLE_NOT_FOUND' });
     }
 
     const colRecord = this._toColumnNames(values, schema);
 
     if (schema.autoIncrement) {
-      const seq = this._adapter.sequences.get(model.tableName) || 1;
+      const seq = this._adapter.sequences.get(tableName) || 1;
       colRecord[schema.autoIncrement] = seq;
-      this._adapter.sequences.set(model.tableName, seq + 1);
+      this._adapter.sequences.set(tableName, seq + 1);
     }
 
     for (const [attrName, colDef] of Object.entries(schema.columns)) {
@@ -148,8 +157,9 @@ export class MapDML extends DMLAbstract {
    * @private
    */
   async _select(model, options = {}) {
-    const table = this._adapter.database.get(model.tableName);
-    const schema = this._adapter.schemas.get(model.tableName);
+    const tableName = this._getTableName(model);
+    const table = this._adapter.database.get(tableName);
+    const schema = this._adapter.schemas.get(tableName);
     let results = [];
 
     for (const [, record] of table) {
@@ -202,8 +212,9 @@ export class MapDML extends DMLAbstract {
    * @returns {Promise<number>}
    */
   async count(model, options = {}) {
-    const table = this._adapter.database.get(model.tableName);
-    const schema = this._adapter.schemas.get(model.tableName);
+    const tableName = this._getTableName(model);
+    const table = this._adapter.database.get(tableName);
+    const schema = this._adapter.schemas.get(tableName);
     let count = 0;
 
     const colWhere = options.where ? this._translateWhere(options.where, schema) : null;
@@ -229,8 +240,9 @@ export class MapDML extends DMLAbstract {
    * @returns {Promise<import('../../core/Model.js').Model[]>}
    */
   async update(model, values, options = {}) {
-    const table = this._adapter.database.get(model.tableName);
-    const schema = this._adapter.schemas.get(model.tableName);
+    const tableName = this._getTableName(model);
+    const table = this._adapter.database.get(tableName);
+    const schema = this._adapter.schemas.get(tableName);
     const updatedInstances = [];
     const now = new Date();
 
@@ -277,8 +289,9 @@ export class MapDML extends DMLAbstract {
    * @returns {Promise<number>}
    */
   async delete(model, options = {}) {
-    const table = this._adapter.database.get(model.tableName);
-    const schema = this._adapter.schemas.get(model.tableName);
+    const tableName = this._getTableName(model);
+    const table = this._adapter.database.get(tableName);
+    const schema = this._adapter.schemas.get(tableName);
     let count = 0;
 
     const colWhere = options.where ? this._translateWhere(options.where, schema) : null;
@@ -309,8 +322,9 @@ export class MapDML extends DMLAbstract {
    * @returns {Promise<void>}
    */
   async truncate(model, options = {}) {
-    const table = this._adapter.database.get(model.tableName);
+    const tableName = this._getTableName(model);
+    const table = this._adapter.database.get(tableName);
     table.clear();
-    this._adapter.sequences.set(model.tableName, 1);
+    this._adapter.sequences.set(tableName, 1);
   }
 }
