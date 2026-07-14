@@ -25,6 +25,7 @@ export class Seq {
     }
 
     this._adapter = options.adapter;
+    this._adapter._seq = this;
     this._logging = options.logging || false;
     this._define = options.define || {};
     this._naming = options.naming || {};

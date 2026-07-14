@@ -17,6 +17,7 @@ export class TCLAbstract extends BaseAbstract {
    * @returns {Promise<object>} Transaction object
    */
   async begin(options = {}) {
+    this._log('TCL.begin');
     throw new AdapterError('TCL begin is not implemented by this adapter', { code: 'SEQ_TCL_NOT_IMPLEMENTED' });
   }
 
@@ -25,6 +26,7 @@ export class TCLAbstract extends BaseAbstract {
    * @param {object} transaction
    */
   async commit(transaction) {
+    this._log('TCL.commit');
     throw new AdapterError('TCL commit is not implemented by this adapter', { code: 'SEQ_TCL_NOT_IMPLEMENTED' });
   }
 
@@ -33,6 +35,7 @@ export class TCLAbstract extends BaseAbstract {
    * @param {object} transaction
    */
   async rollback(transaction) {
+    this._log('TCL.rollback');
     throw new AdapterError('TCL rollback is not implemented by this adapter', { code: 'SEQ_TCL_NOT_IMPLEMENTED' });
   }
 

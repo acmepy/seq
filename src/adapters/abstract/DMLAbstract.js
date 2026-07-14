@@ -20,6 +20,7 @@ export class DMLAbstract extends BaseAbstract {
    * @returns {Promise<import('../../core/Model.js').Model>}
    */
   async insert(model, values, options = {}) {
+    this._log('DML.insert', model.modelName, values);
     throw new AdapterError('DML insert is not implemented by this adapter', { code: 'SEQ_DML_NOT_IMPLEMENTED' });
   }
 
@@ -68,6 +69,7 @@ export class DMLAbstract extends BaseAbstract {
    * @returns {Promise<import('../../core/Model.js').Model[]>}
    */
   async selectAll(model, options = {}) {
+    this._log('DML.selectAll', model.modelName, options);
     throw new AdapterError('DML selectAll is not implemented by this adapter', { code: 'SEQ_DML_NOT_IMPLEMENTED' });
   }
 
@@ -78,6 +80,7 @@ export class DMLAbstract extends BaseAbstract {
    * @returns {Promise<number>}
    */
   async count(model, options = {}) {
+    this._log('DML.count', model.modelName, options);
     throw new AdapterError('DML count is not implemented by this adapter', { code: 'SEQ_DML_NOT_IMPLEMENTED' });
   }
 
@@ -89,6 +92,7 @@ export class DMLAbstract extends BaseAbstract {
    * @returns {Promise<import('../../core/Model.js').Model[]>}
    */
   async update(model, values, options = {}) {
+    this._log('DML.update', model.modelName, values, options);
     throw new AdapterError('DML update is not implemented by this adapter', { code: 'SEQ_DML_NOT_IMPLEMENTED' });
   }
 
@@ -99,6 +103,7 @@ export class DMLAbstract extends BaseAbstract {
    * @returns {Promise<number>}
    */
   async delete(model, options = {}) {
+    this._log('DML.delete', model.modelName, options);
     throw new AdapterError('DML delete is not implemented by this adapter', { code: 'SEQ_DML_NOT_IMPLEMENTED' });
   }
 
@@ -109,6 +114,7 @@ export class DMLAbstract extends BaseAbstract {
    * @returns {Promise<void>}
    */
   async truncate(model, options = {}) {
+    this._log('DML.truncate', model.modelName);
     throw new AdapterError('DML truncate is not implemented by this adapter', { code: 'SEQ_DML_NOT_IMPLEMENTED' });
   }
 

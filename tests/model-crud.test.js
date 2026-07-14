@@ -498,4 +498,85 @@ describe('Model CRUD', () => {
       );
     });
   });
+
+  describe('logging', () => {
+    let logCalls;
+    let loggingSeq;
+
+    beforeEach(async () => {
+      logCalls = [];
+      loggingSeq = new Seq({
+        adapter,
+        models: [User],
+        logging: (...args) => logCalls.push(args)
+      });
+      User.seq = loggingSeq;
+      await loggingSeq.sync();
+    });
+
+    it('logs findAll with options', async () => {
+      await User.findAll({ where: { active: true } });
+      const findallLog = logCalls.find(args => args[1]?.includes?.('User.findAll'));
+      assert.ok(findallLog, 'Expected a findAll log entry');
+      assert.deepEqual(findallLog[2], { where: { active: true } });
+    });
+
+    it('logs findOne with options', async () => {
+      await User.findOne({ where: { id: 1 } });
+      const findOneLog = logCalls.find(args => args[1]?.includes?.('User.findOne'));
+      assert.ok(findOneLog, 'Expected a findOne log entry');
+    });
+
+    it('logs findByPk with id', async () => {
+      await User.findByPk(1);
+      const findByPkLog = logCalls.find(args => args[1]?.includes?.('User.findByPk'));
+      assert.ok(findByPkLog, 'Expected a findByPk log entry');
+      assert.equal(findByPkLog[2], 1);
+    });
+
+    it('logs create with values', async () => {
+      await User.create({ name: 'Test', email: 'test@test.com' });
+      const createLog = logCalls.find(args => args[1]?.includes?.('User.create'));
+      assert.ok(createLog, 'Expected a create log entry');
+      assert.equal(createLog[2].name, 'Test');
+    });
+
+    it('logs count with options', async () => {
+      await User.count({ where: { active: true } });
+      const countLog = logCalls.find(args => args[1]?.includes?.('User.count'));
+      assert.ok(countLog, 'Expected a count log entry');
+    });
+
+    it('logs update with values and options', async () => {
+      await User.update({ name: 'Updated' }, { where: { id: 1 } });
+      const updateLog = logCalls.find(args => args[1]?.includes?.('User.update'));
+      assert.ok(updateLog, 'Expected an update log entry');
+      assert.equal(updateLog[2].name, 'Updated');
+    });
+
+    it('logs destroy with options', async () => {
+      await User.destroy({ where: { id: 1 } });
+      const destroyLog = logCalls.find(args => args[1]?.includes?.('User.destroy'));
+      assert.ok(destroyLog, 'Expected a destroy log entry');
+    });
+
+    it('logs truncate without options', async () => {
+      await User.truncate();
+      const truncateLog = logCalls.find(args => args[1]?.includes?.('User.truncate'));
+      assert.ok(truncateLog, 'Expected a truncate log entry');
+    });
+
+    it('does not log when logging is false', async () => {
+      logCalls = [];
+      const silentSeq = new Seq({
+        adapter,
+        models: [User],
+        logging: false
+      });
+      User.seq = silentSeq;
+      await silentSeq.sync();
+      await User.findAll();
+      assert.equal(logCalls.length, 0);
+    });
+  });
 });

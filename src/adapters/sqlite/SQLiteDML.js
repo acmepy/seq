@@ -134,16 +134,15 @@ export class SQLiteDML extends DMLAbstract {
       });
       sql += ` ORDER BY ${orderClauses.join(', ')}`;
     }
-    if (options.limit) sql += ` LIMIT ${options.limit}`
-    if (options.offset) sql += ` OFFSET ${options.offset}`
-    /*if (options.limit && options.offset) {
+
+    if (options.limit && options.offset) {
       sql += ` LIMIT ${options.limit} OFFSET ${options.offset}`;
     } else if (options.limit) {
       sql += ` LIMIT ${options.limit}`;
     } else if (options.offset) {
       sql += ` LIMIT -1 OFFSET ${options.offset}`;
-    }*/
-    
+    }
+    this._log('selectAll', {sql, params})
     const rows = this._db().prepare(sql).all(...params);
     return rows.map(row => new model(this._toAttrNames(row, schema), { _isNew: false }));
   }
@@ -157,6 +156,7 @@ export class SQLiteDML extends DMLAbstract {
       const conditions = Object.entries(where).map(([k, v]) => { params.push(this._serializeValue(v)); return `"${k}" = ?`; });
       sql += ` WHERE ${conditions.join(' AND ')}`;
     }
+    this._log('count', {sql, params})
     const row = this._db().prepare(sql).get(...params);
     return row.cnt;
   }
@@ -177,11 +177,10 @@ export class SQLiteDML extends DMLAbstract {
     }
 
     const sql = `UPDATE "${tableName}" SET ${setClauses.join(', ')}${whereSql}`;
+    this._log('update', {sql,params})
     this._db().prepare(sql).run(...params);
 
-    if (options.where) {
-      return await this.selectAll(model, options);
-    }
+    if (options.where)  return await this.selectAll(model, options);
     return [];
   }
 
@@ -195,13 +194,17 @@ export class SQLiteDML extends DMLAbstract {
       whereSql = ` WHERE ${conditions.join(' AND ')}`;
     }
     const sql = `DELETE FROM "${tableName}"${whereSql}`;
+    this._log('update', {sql, params})
     const info = this._db().prepare(sql).run(...params);
     return info.changes;
   }
 
   async truncate(model, options = {}) {
     const { tableName } = this._schema(model);
-    this._db().prepare(`DELETE FROM "${tableName}"`).run();
-    this._db().prepare(`DELETE FROM sqlite_sequence WHERE name='${tableName}'`).run();
+    const sqlDel = `DELETE FROM "${tableName}"`
+    const sqlSeq = `DELETE FROM sqlite_sequence WHERE name='${tableName}'`
+    this._log('truncate', {sqlDel, sqlSeq});
+    this._db().prepare(sqlDel).run();
+    this._db().prepare(sqlSeq).run();
   }
 }
