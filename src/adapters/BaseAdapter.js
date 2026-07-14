@@ -54,6 +54,17 @@ export class BaseAdapter {
   }
 
   /**
+   * Returns the FK creation strategy for this adapter.
+   * - 'alter': FKs created via ALTER TABLE ADD CONSTRAINT (default for most DBs)
+   * - 'inline': FKs included in CREATE TABLE statement (SQLite)
+   * - 'none': no physical FK creation (in-memory adapters)
+   * @returns {string} 'alter' | 'inline' | 'none'
+   */
+  get fkStrategy() {
+    return 'alter';
+  }
+
+  /**
    * Normalizes a value for storage.
    * @param {object} attribute - The attribute definition
    * @param {*} value - The value to normalize

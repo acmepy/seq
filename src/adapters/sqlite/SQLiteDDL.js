@@ -1,4 +1,5 @@
 import { DDLAbstract } from '../abstract/DDLAbstract.js';
+import { AdapterError } from '../../core/errors/AdapterError.js';
 
 export class SQLiteDDL extends DDLAbstract {
   constructor(adapter) {
@@ -15,15 +16,9 @@ export class SQLiteDDL extends DDLAbstract {
       const colName = colDef.field || attrName;
       const parts = [colName];
       parts.push(this._adapter.mapDataType(colDef.type));
-      if (colDef.primaryKey && !def.autoIncrement) {
-        parts.push('PRIMARY KEY');
-      }
-      if (colDef.autoIncrement) {
-        parts.push('PRIMARY KEY AUTOINCREMENT');
-      }
-      if (!colDef.allowNull && !colDef.primaryKey) {
-        parts.push('NOT NULL');
-      }
+      if (colDef.primaryKey && !def.autoIncrement) parts.push('PRIMARY KEY');
+      if (colDef.autoIncrement) parts.push('PRIMARY KEY AUTOINCREMENT');
+      if (!colDef.allowNull && !colDef.primaryKey) parts.push('NOT NULL');
       if (colDef.defaultValue !== undefined && colDef.defaultValue !== null) {
         const dv = typeof colDef.defaultValue === 'function' ? colDef.defaultValue() : colDef.defaultValue;
         if (dv instanceof Date) {
@@ -40,6 +35,7 @@ export class SQLiteDDL extends DDLAbstract {
     }
 
     for (const fk of (def.foreignKeys || [])) {
+      if (this._adapter.fkStrategy !== 'inline') continue;
       const refTable = fk.references.table;
       const refCol = fk.references.column;
       const colName = fk.columnName;
@@ -47,6 +43,8 @@ export class SQLiteDDL extends DDLAbstract {
       const onDelete = fk.onDelete || 'RESTRICT';
       const onUpdate = fk.onUpdate || 'RESTRICT';
       colDefs.push(`CONSTRAINT "${fkName}" FOREIGN KEY ("${colName}") REFERENCES "${refTable}" ("${refCol}") ON DELETE ${onDelete} ON UPDATE ${onUpdate}`);
+      const schema = this._adapter.schemas.get(def.tableName);
+      schema.foreignKeys.push({ ...fk });
     }
 
     const sql = `CREATE TABLE "${def.tableName}" (\n  ${colDefs.join(',\n  ')}\n)`;
@@ -65,15 +63,16 @@ export class SQLiteDDL extends DDLAbstract {
 
   async describeTable(tableName) {
     const schema = this._adapter.schemas.get(tableName);
-    if (!schema) {
-      const { AdapterError } = await import('../../core/errors/AdapterError.js');
-      throw new AdapterError(`Table "${tableName}" does not exist`, { code: 'SEQ_ADAPTER_TABLE_NOT_FOUND' });
-    }
+    if (!schema)  throw new AdapterError(`Table "${tableName}" does not exist`, { code: 'SEQ_ADAPTER_TABLE_NOT_FOUND' });
     return { ...schema };
   }
 
   async listTables() {
     const rows = this._db().prepare("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'").all();
     return rows.map(r => r.name);
+  }
+
+  async addForeignKey(tableName, fk){
+    if (this._adapter.fkStrategy === 'alter') super.addForeignKey(tableName, fk);
   }
 }

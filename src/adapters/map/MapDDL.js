@@ -18,11 +18,7 @@ export class MapDDL extends DDLAbstract {
   // ---------------------------------------------------------------------------
 
   async createTableStructure(def) {
-    if (this._adapter.database.has(def.tableName)) {
-      throw new AdapterError(`Table "${def.tableName}" already exists`, {
-        code: 'SEQ_ADAPTER_TABLE_EXISTS'
-      });
-    }
+    if (this._adapter.database.has(def.tableName))  throw new AdapterError(`Table "${def.tableName}" already exists`, { code: 'SEQ_ADAPTER_TABLE_EXISTS'});
 
     this._adapter.database.set(def.tableName, new Map());
     this._adapter.sequences.set(def.tableName, 1);
@@ -40,11 +36,7 @@ export class MapDDL extends DDLAbstract {
   }
 
   async describeTable(tableName) {
-    if (!this._adapter.schemas.has(tableName)) {
-      throw new AdapterError(`Table "${tableName}" does not exist`, {
-        code: 'SEQ_ADAPTER_TABLE_NOT_FOUND'
-      });
-    }
+    if (!this._adapter.schemas.has(tableName))  throw new AdapterError(`Table "${tableName}" does not exist`, {code: 'SEQ_ADAPTER_TABLE_NOT_FOUND'});
     return { ...this._adapter.schemas.get(tableName) };
   }
 

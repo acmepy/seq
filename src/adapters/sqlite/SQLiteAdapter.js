@@ -19,6 +19,10 @@ export class SQLiteAdapter extends BaseAdapter {
     return 'lower';
   }
 
+  get fkStrategy() {
+    return 'inline';
+  }
+
   async connect() {
     this._db = new Database(this._dbPath);
     this._db.pragma('journal_mode = WAL');

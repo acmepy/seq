@@ -175,6 +175,10 @@ export class DDLAbstract extends BaseAbstract {
    * @param {object} fk - Foreign key definition
    */
   async addForeignKey(tableName, fk) {
+    if (this._adapter.fkStrategy === 'alter'){
+      const sql = `ALTER TABLE "${tableName}" ADD CONSTRAINT "${fk.constraintName}" FOREIGN KEY ("${fk.columnName}") REFERENCES "${fk.references.table}" ("${fk.references.column}") ON DELETE ${fk.onDelete || 'RESTRICT'} ON UPDATE ${fk.onUpdate || 'RESTRICT'}`;
+      this._adapter._db.prepare(sql).run();
+    }
     const schema = this._adapter.schemas.get(tableName);
     schema.foreignKeys.push({ ...fk });
   }
@@ -189,18 +193,7 @@ export class DDLAbstract extends BaseAbstract {
    */
   _registerSchema(def) {
     this._adapter.schemas.set(def.tableName, {
-      modelName: def.modelName,
-      tableName: def.tableName,
-      columns: def.columns,
-      primaryKey: def.primaryKey,
-      autoIncrement: def.autoIncrement,
-      primaryKeyAttribute: def.primaryKeyAttribute,
-      autoIncrementAttribute: def.autoIncrementAttribute,
-      timestamps: def.timestamps,
-      createdAt: def.createdAt,
-      updatedAt: def.updatedAt,
-      attrToColumn: def.attrToColumn,
-      columnToAttr: def.columnToAttr,
+      ...def,
       uniqueConstraints: [],
       indexes: [],
       foreignKeys: []

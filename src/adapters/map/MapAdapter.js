@@ -32,6 +32,10 @@ export class MapAdapter extends BaseAdapter {
     return 'lower';
   }
 
+  get fkStrategy() {
+    return 'none';
+  }
+
   /**
    * Initializes the adapter (no-op for in-memory).
    */
