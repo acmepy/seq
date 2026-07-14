@@ -6,6 +6,7 @@ export { BaseAdapter } from './adapters/BaseAdapter.js';
 export { MapAdapter } from './adapters/map/MapAdapter.js';
 export { SQLiteAdapter } from './adapters/sqlite/SQLiteAdapter.js';
 export { DataTypes } from './data-types/index.js';
+export { Op } from './operators.js';
 
 export {
   SeqError,

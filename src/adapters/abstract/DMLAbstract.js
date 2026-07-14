@@ -1,6 +1,8 @@
 import { BaseAbstract } from './BaseAbstract.js';
 import { AdapterError } from '../../core/errors/AdapterError.js';
 import { ValidationError } from '../../core/errors/ValidationError.js';
+import { Op } from '../../operators.js';
+import { resolveWhereValue } from '../../utils/where.js';
 
 /**
  * Base DML abstract.
@@ -93,10 +95,65 @@ export class DMLAbstract extends BaseAbstract {
     if (!where) return { sql: '', params: [] };
     const colWhere = this._translateWhere(where, schema);
     const params = [];
-    const conditions = Object.entries(colWhere).map(([k, v]) => {
-      params.push(this._serializeValue(v));
-      return `"${k}" = ?`;
-    });
+    const conditions = [];
+    for (const [k, v] of Object.entries(colWhere)) {
+      const { op, value } = resolveWhereValue(v);
+      switch (op) {
+        case Op.eq:
+          params.push(this._serializeValue(value));
+          conditions.push(`"${k}" = ?`);
+          break;
+        case Op.ne:
+          params.push(this._serializeValue(value));
+          conditions.push(`"${k}" != ?`);
+          break;
+        case Op.gt:
+          params.push(this._serializeValue(value));
+          conditions.push(`"${k}" > ?`);
+          break;
+        case Op.gte:
+          params.push(this._serializeValue(value));
+          conditions.push(`"${k}" >= ?`);
+          break;
+        case Op.lt:
+          params.push(this._serializeValue(value));
+          conditions.push(`"${k}" < ?`);
+          break;
+        case Op.lte:
+          params.push(this._serializeValue(value));
+          conditions.push(`"${k}" <= ?`);
+          break;
+        case Op.like:
+          params.push(this._serializeValue(value));
+          conditions.push(`"${k}" LIKE ?`);
+          break;
+        case Op.notLike:
+          params.push(this._serializeValue(value));
+          conditions.push(`"${k}" NOT LIKE ?`);
+          break;
+        case Op.in:
+          const inParams = value.map(v => this._serializeValue(v));
+          params.push(...inParams);
+          conditions.push(`"${k}" IN (${inParams.map(() => '?').join(', ')})`);
+          break;
+        case Op.notIn:
+          const notInParams = value.map(v => this._serializeValue(v));
+          params.push(...notInParams);
+          conditions.push(`"${k}" NOT IN (${notInParams.map(() => '?').join(', ')})`);
+          break;
+        case Op.between:
+          params.push(this._serializeValue(value[0]), this._serializeValue(value[1]));
+          conditions.push(`"${k}" BETWEEN ? AND ?`);
+          break;
+        case Op.notBetween:
+          params.push(this._serializeValue(value[0]), this._serializeValue(value[1]));
+          conditions.push(`"${k}" NOT BETWEEN ? AND ?`);
+          break;
+        default:
+          params.push(this._serializeValue(value));
+          conditions.push(`"${k}" = ?`);
+      }
+    }
     return { sql: ` WHERE ${conditions.join(' AND ')}`, params };
   }
 
@@ -400,8 +457,51 @@ export class DMLAbstract extends BaseAbstract {
    */
   _matchWhere(record, where) {
     for (const [key, value] of Object.entries(where)) {
-      if (record[key] !== value) {
-        return false;
+      const { op, value: opValue } = resolveWhereValue(value);
+      const recordValue = record[key];
+      switch (op) {
+        case Op.eq:
+          if (recordValue !== opValue) return false;
+          break;
+        case Op.ne:
+          if (recordValue === opValue) return false;
+          break;
+        case Op.gt:
+          if (!(recordValue > opValue)) return false;
+          break;
+        case Op.gte:
+          if (!(recordValue >= opValue)) return false;
+          break;
+        case Op.lt:
+          if (!(recordValue < opValue)) return false;
+          break;
+        case Op.lte:
+          if (!(recordValue <= opValue)) return false;
+          break;
+        case Op.like: {
+          const regex = new RegExp('^' + opValue.replace(/%/g, '.*').replace(/_/g, '.') + '$', 'i');
+          if (!regex.test(String(recordValue))) return false;
+          break;
+        }
+        case Op.notLike: {
+          const regex = new RegExp('^' + opValue.replace(/%/g, '.*').replace(/_/g, '.') + '$', 'i');
+          if (regex.test(String(recordValue))) return false;
+          break;
+        }
+        case Op.in:
+          if (!opValue.includes(recordValue)) return false;
+          break;
+        case Op.notIn:
+          if (opValue.includes(recordValue)) return false;
+          break;
+        case Op.between:
+          if (recordValue < opValue[0] || recordValue > opValue[1]) return false;
+          break;
+        case Op.notBetween:
+          if (recordValue >= opValue[0] && recordValue <= opValue[1]) return false;
+          break;
+        default:
+          if (recordValue !== opValue) return false;
       }
     }
     return true;

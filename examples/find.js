@@ -1,4 +1,4 @@
-import { Seq, SQLiteAdapter } from '../src/index.js';
+import { Seq, SQLiteAdapter, Op } from '../src/index.js';
 import { User } from './models/User.js';
 import { Task } from './models/Task.js';
 
@@ -77,6 +77,31 @@ console.log(`  Found: ${one ? one.getDataValue('title') : 'null'}`);
 const byPk = await Task.findByPk(1);
 console.log(`\n--- findByPk: id = 1 ---`);
 console.log(`  Found: ${byPk ? byPk.getDataValue('title') : 'null'}`);
+
+// 11. Op.like — tasks with "docs" in title
+const likeTasks = await Task.findAll({ where: { title: { [Op.like]: '%docs%' } } });
+printTasks('Op.like: title contains "docs"', likeTasks);
+
+// 12. Op.in — tasks with specific ids
+const inTasks = await Task.findAll({ where: { id: { [Op.in]: [1, 3, 5] } } });
+printTasks('Op.in: id IN [1, 3, 5]', inTasks);
+
+// 13. Op.between — priority between 1 and 2
+const betweenTasks = await Task.findAll({ where: { priority: { [Op.between]: [1, 2] } } });
+printTasks('Op.between: priority BETWEEN 1 AND 2', betweenTasks);
+
+// 14. Op.gt — priority greater than 1
+const gtTasks = await Task.findAll({ where: { priority: { [Op.gt]: 1 } } });
+printTasks('Op.gt: priority > 1', gtTasks);
+
+// 15. Mixed — pending tasks with priority >= 2
+const mixedTasks = await Task.findAll({
+  where: {
+    completed: false,
+    priority: { [Op.gte]: 2 }
+  }
+});
+printTasks('Mixed: completed=false AND priority >= 2', mixedTasks);
 
 await seq.close();
 await adapter.close();
