@@ -118,30 +118,6 @@ export class SQLiteDML extends DMLAbstract {
     return results;
   }
 
-  async selectByPk(model, id, options = {}) {
-    const { tableName, schema } = this._schema(model);
-    const pkCol = schema.primaryKey;
-    const sql = `SELECT * FROM "${tableName}" WHERE "${pkCol}" = ? LIMIT 1`;
-    const row = this._db().prepare(sql).get(id);
-    if (!row) return null;
-    return new model(this._toAttrNames(row, schema), { _isNew: false });
-  }
-
-  async selectOne(model, options = {}) {
-    const { tableName, schema } = this._schema(model);
-    let sql = `SELECT * FROM "${tableName}"`;
-    const params = [];
-    if (options.where) {
-      const where = this._translateWhere(options.where, schema);
-      const conditions = Object.entries(where).map(([k, v]) => { params.push(this._serializeValue(v)); return `"${k}" = ?`; });
-      sql += ` WHERE ${conditions.join(' AND ')}`;
-    }
-    sql += ' LIMIT 1';
-    const row = this._db().prepare(sql).get(...params);
-    if (!row) return null;
-    return new model(this._toAttrNames(row, schema), { _isNew: false });
-  }
-
   async selectAll(model, options = {}) {
     const { tableName, schema } = this._schema(model);
     let sql = `SELECT * FROM "${tableName}"`;
@@ -158,13 +134,16 @@ export class SQLiteDML extends DMLAbstract {
       });
       sql += ` ORDER BY ${orderClauses.join(', ')}`;
     }
-    if (options.limit && options.offset) {
+    if (options.limit) sql += ` LIMIT ${options.limit}`
+    if (options.offset) sql += ` OFFSET ${options.offset}`
+    /*if (options.limit && options.offset) {
       sql += ` LIMIT ${options.limit} OFFSET ${options.offset}`;
     } else if (options.limit) {
       sql += ` LIMIT ${options.limit}`;
     } else if (options.offset) {
       sql += ` LIMIT -1 OFFSET ${options.offset}`;
-    }
+    }*/
+    
     const rows = this._db().prepare(sql).all(...params);
     return rows.map(row => new model(this._toAttrNames(row, schema), { _isNew: false }));
   }

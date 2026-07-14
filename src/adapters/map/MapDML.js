@@ -128,27 +128,6 @@ export class MapDML extends DMLAbstract {
    * @param {object} [options]
    * @returns {Promise<import('../../core/Model.js').Model|null>}
    */
-  async selectByPk(model, id, options = {}) {
-    return this.selectOne(model, { ...options, where: { [model.primaryKeyAttribute]: id } });
-  }
-
-  /**
-   * Selects one record matching the where clause.
-   * @param {typeof import('../../core/Model.js').Model} model
-   * @param {object} [options]
-   * @returns {Promise<import('../../core/Model.js').Model|null>}
-   */
-  async selectOne(model, options = {}) {
-    const results = await this._select(model, options);
-    return results.length > 0 ? results[0] : null;
-  }
-
-  /**
-   * Selects all records matching the where clause.
-   * @param {typeof import('../../core/Model.js').Model} model
-   * @param {object} [options]
-   * @returns {Promise<import('../../core/Model.js').Model[]>}
-   */
   async selectAll(model, options = {}) {
     return this._select(model, options);
   }

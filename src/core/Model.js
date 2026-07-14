@@ -1,6 +1,7 @@
 import { clone } from '../utils/clone.js';
 import { Association } from './Association.js';
 import { ModelError } from './errors/ModelError.js';
+import { ValidationError, ValidationWhereError, ValidationOrderError, ValidationLimitError, ValidationOffsetError } from './errors/ValidationError.js';
 import { DataTypes } from '../data-types/index.js';
 
 /**
@@ -256,6 +257,10 @@ export class Model {
    * @returns {Promise<Model[]>}
    */
   static async findAll(options = {}) {
+    if (options.where !== undefined && (typeof options.where !== 'object' || Array.isArray(options.where))) throw new ValidationWhereError();
+    if (options.order !== undefined && !Array.isArray(options.order)) throw new ValidationOrderError();
+    if (options.limit !== undefined && (!Number.isInteger(options.limit) || options.limit < 1))  throw new ValidationLimitError();
+    if (options.offset !== undefined && (!Number.isInteger(options.offset) || options.offset < 0)) throw new ValidationOffsetError();
     return this._adapter.dml.selectAll(this, options);
   }
 
@@ -265,6 +270,7 @@ export class Model {
    * @returns {Promise<number>}
    */
   static async count(options = {}) {
+    if (options.where !== undefined && (typeof options.where !== 'object' || Array.isArray(options.where))) throw new ValidationWhereError();
     return this._adapter.dml.count(this, options);
   }
 
@@ -275,6 +281,7 @@ export class Model {
    * @returns {Promise<Model[]>}
    */
   static async update(values, options = {}) {
+    if (options.where !== undefined && (typeof options.where !== 'object' || Array.isArray(options.where)))throw new ValidationWhereError();
     return this._adapter.dml.update(this, values, options);
   }
 
@@ -284,6 +291,7 @@ export class Model {
    * @returns {Promise<number>}
    */
   static async destroy(options = {}) {
+    if (options.where !== undefined && (typeof options.where !== 'object' || Array.isArray(options.where)))throw new ValidationWhereError();
     return this._adapter.dml.delete(this, options);
   }
 
@@ -395,5 +403,9 @@ export class Model {
     const pk = this.constructor.primaryKeyAttribute;
     const where = { [pk]: this.dataValues[pk] };
     await this.constructor.destroy({ ...options, where });
+  }
+
+  static _log(...args) {
+    this.seq?._log(...args);
   }
 }

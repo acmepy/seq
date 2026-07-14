@@ -14,3 +14,27 @@ export class ValidationError extends SeqError {
     this.code = options.code || 'SEQ_VALIDATION_ERROR';
   }
 }
+
+export class ValidationWhereError extends ValidationError{
+  constructor(message, options = {}){
+    super('where must be an object', { code: 'SEQ_VALIDATION_WHERE', ...options })
+  }
+}
+
+export class ValidationOrderError extends ValidationError{
+  constructor(message, options = {}){
+    super('order must be an array', { code: 'SEQ_VALIDATION_ORDER', ...options })
+  }
+}
+
+export class ValidationLimitError extends ValidationError{
+  constructor(message, options = {}){
+    super('limit must be an integer >= 1', { code: 'SEQ_VALIDATION_LIMIT', ...options })
+  }
+}
+
+export class ValidationOffsetError extends ValidationError{
+  constructor(message, options = {}){
+    super('offset must be an integer >= 0', { code: 'SEQ_VALIDATION_OFFSET', ...options })
+  }
+}

@@ -72,7 +72,7 @@ export class SQLiteDDL extends DDLAbstract {
     return rows.map(r => r.name);
   }
 
-  async addForeignKey(tableName, fk){
+  async addForeignKey(tableName, fk) {
     if (this._adapter.fkStrategy === 'alter') super.addForeignKey(tableName, fk);
   }
 }

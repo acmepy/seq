@@ -42,7 +42,12 @@ export class DMLAbstract extends BaseAbstract {
    * @returns {Promise<import('../../core/Model.js').Model|null>}
    */
   async selectByPk(model, id, options = {}) {
-    throw new AdapterError('DML selectByPk is not implemented by this adapter', { code: 'SEQ_DML_NOT_IMPLEMENTED' });
+    if (!model.primaryKeyAttribute) {
+      throw new AdapterError(`Model "${model.modelName}" has no primary key`, { code: 'SEQ_DML_NO_PRIMARY_KEY' });
+    }
+    const where = { [model.primaryKeyAttribute]: id };
+    const results = await this.selectAll(model, { ...options, where, limit: 1, offset: 0 });
+    return results.length > 0 ? results[0] : null;
   }
 
   /**
@@ -52,7 +57,8 @@ export class DMLAbstract extends BaseAbstract {
    * @returns {Promise<import('../../core/Model.js').Model|null>}
    */
   async selectOne(model, options = {}) {
-    throw new AdapterError('DML selectOne is not implemented by this adapter', { code: 'SEQ_DML_NOT_IMPLEMENTED' });
+    const results = await this.selectAll(model, { ...options, limit: 1, offset: 0 });
+    return results.length > 0 ? results[0] : null;
   }
 
   /**

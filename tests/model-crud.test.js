@@ -412,4 +412,90 @@ describe('Model CRUD', () => {
       assert.equal(found.getDataValue('unitPrice'), 799.99);
     });
   });
+
+  describe('parameter validation', () => {
+    describe('findAll', () => {
+      it('rejects where as array', async () => {
+        await assert.rejects(
+          () => User.findAll({ where: [{ name: 'Ana' }] }),
+          (err) => err.code === 'SEQ_VALIDATION_WHERE'
+        );
+      });
+
+      it('rejects where as string', async () => {
+        await assert.rejects(
+          () => User.findAll({ where: 'name = Ana' }),
+          (err) => err.code === 'SEQ_VALIDATION_WHERE'
+        );
+      });
+
+      it('rejects order as string', async () => {
+        await assert.rejects(
+          () => User.findAll({ order: 'name ASC' }),
+          (err) => err.code === 'SEQ_VALIDATION_ORDER'
+        );
+      });
+
+      it('rejects limit as string', async () => {
+        await assert.rejects(
+          () => User.findAll({ limit: '10' }),
+          (err) => err.code === 'SEQ_VALIDATION_LIMIT'
+        );
+      });
+
+      it('rejects limit as 0', async () => {
+        await assert.rejects(
+          () => User.findAll({ limit: 0 }),
+          (err) => err.code === 'SEQ_VALIDATION_LIMIT'
+        );
+      });
+
+      it('rejects limit as negative', async () => {
+        await assert.rejects(
+          () => User.findAll({ limit: -1 }),
+          (err) => err.code === 'SEQ_VALIDATION_LIMIT'
+        );
+      });
+
+      it('rejects offset as string', async () => {
+        await assert.rejects(
+          () => User.findAll({ offset: '5' }),
+          (err) => err.code === 'SEQ_VALIDATION_OFFSET'
+        );
+      });
+
+      it('rejects offset as negative', async () => {
+        await assert.rejects(
+          () => User.findAll({ offset: -1 }),
+          (err) => err.code === 'SEQ_VALIDATION_OFFSET'
+        );
+      });
+
+      it('accepts offset as 0', async () => {
+        const users = await User.findAll({ offset: 0 });
+        assert.ok(Array.isArray(users));
+      });
+    });
+
+    it('count rejects where as array', async () => {
+      await assert.rejects(
+        () => User.count({ where: [{ name: 'Ana' }] }),
+        (err) => err.code === 'SEQ_VALIDATION_WHERE'
+      );
+    });
+
+    it('update rejects where as array', async () => {
+      await assert.rejects(
+        () => User.update({ name: 'Ana' }, { where: [{ name: 'Juan' }] }),
+        (err) => err.code === 'SEQ_VALIDATION_WHERE'
+      );
+    });
+
+    it('destroy rejects where as array', async () => {
+      await assert.rejects(
+        () => User.destroy({ where: [{ name: 'Ana' }] }),
+        (err) => err.code === 'SEQ_VALIDATION_WHERE'
+      );
+    });
+  });
 });

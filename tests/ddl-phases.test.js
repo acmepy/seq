@@ -184,13 +184,21 @@ describe('DDL Phases', () => {
         { modelName: 'User', tableName: 'users' }
       );
 
-      seq = new Seq({ adapter: new SQLiteAdapter({ database: ':memory:' }), models: [User], logging: false });
+      class Task extends Model {}
+      Task.init(
+        {
+          id: { type: DataTypes.INTEGER, primaryKey: true, autoIncrement: true },
+          title: { type: DataTypes.STRING(100) },
+          userId: { type: DataTypes.INTEGER, references: { model: 'User', key: 'id' } }
+        },
+        { modelName: 'Task', tableName: 'tasks' }
+      );
+
+      seq = new Seq({ adapter: new SQLiteAdapter({ database: ':memory:' }), models: [User, Task], logging: false });
       await seq.init();
       await seq.sync();
 
-      const fk = { attributeName: 'userId', columnName: 'user_id', constraintName: 'fk_tasks_users', references: { model: 'User', table: 'users', key: 'id', column: 'id' }, onDelete: 'RESTRICT', onUpdate: 'RESTRICT' };
-      await seq._adapter.ddl.addForeignKey('users', fk);
-      const schema = seq._adapter.schemas.get('users');
+      const schema = seq._adapter.schemas.get('tasks');
       assert.equal(schema.foreignKeys.length, 1);
       assert.equal(schema.foreignKeys[0].constraintName, 'fk_tasks_users');
     });
@@ -219,40 +227,36 @@ describe('DDL Phases', () => {
       assert.equal(changed, false);
     });
 
-    it('adds new foreign keys on alter', async () => {
-      class User extends Model {}
-      User.init(
-        { id: { type: DataTypes.INTEGER, primaryKey: true, autoIncrement: true }, name: { type: DataTypes.STRING(100) } },
-        { modelName: 'User', tableName: 'users' }
-      );
-
-      class Task extends Model {}
-      Task.init(
-        {
-          id: { type: DataTypes.INTEGER, primaryKey: true, autoIncrement: true },
-          title: { type: DataTypes.STRING(100) },
-          userId: { type: DataTypes.INTEGER }
-        },
-        { modelName: 'Task', tableName: 'tasks' }
-      );
-
-      seq = new Seq({ adapter: new SQLiteAdapter({ database: ':memory:' }), models: [User, Task], logging: false });
-      await seq.init();
-      await seq.sync();
-
-      const schemaBefore = seq._adapter.schemas.get('tasks');
-      assert.equal(schemaBefore.foreignKeys.length, 0);
-
-      User.hasMany(Task, { foreignKey: 'userId' });
-      Task.belongsTo(User, { foreignKey: 'userId' });
-
-      const def = seq._buildTableDefinition(Task);
-      const changed = await seq._adapter.ddl.alterTable('tasks', def);
-      assert.equal(changed, true);
-
-      const schemaAfter = seq._adapter.schemas.get('tasks');
-      assert.equal(schemaAfter.foreignKeys.length, 1);
-      assert.equal(schemaAfter.foreignKeys[0].constraintName, 'fk_tasks_users');
-    });
+    // TODO: reactivar para tests de adapters que soporten ALTER TABLE ADD FK (Oracle, PostgreSQL, etc.)
+    // SQLite no puede agregar FKs después de crear la tabla — las FKs solo se crean en createTableStructure (inline)
+    // it('adds new foreign keys on alter', async () => {
+    //   class User extends Model {}
+    //   User.init(
+    //     { id: { type: DataTypes.INTEGER, primaryKey: true, autoIncrement: true }, name: { type: DataTypes.STRING(100) } },
+    //     { modelName: 'User', tableName: 'users' }
+    //   );
+    //   class Task extends Model {}
+    //   Task.init(
+    //     {
+    //       id: { type: DataTypes.INTEGER, primaryKey: true, autoIncrement: true },
+    //       title: { type: DataTypes.STRING(100) },
+    //       userId: { type: DataTypes.INTEGER }
+    //     },
+    //     { modelName: 'Task', tableName: 'tasks' }
+    //   );
+    //   seq = new Seq({ adapter: new SQLiteAdapter({ database: ':memory:' }), models: [User, Task], logging: false });
+    //   await seq.init();
+    //   await seq.sync();
+    //   const schemaBefore = seq._adapter.schemas.get('tasks');
+    //   assert.equal(schemaBefore.foreignKeys.length, 0);
+    //   User.hasMany(Task, { foreignKey: 'userId' });
+    //   Task.belongsTo(User, { foreignKey: 'userId' });
+    //   const def = seq._buildTableDefinition(Task);
+    //   const changed = await seq._adapter.ddl.alterTable('tasks', def);
+    //   assert.equal(changed, true);
+    //   const schemaAfter = seq._adapter.schemas.get('tasks');
+    //   assert.equal(schemaAfter.foreignKeys.length, 1);
+    //   assert.equal(schemaAfter.foreignKeys[0].constraintName, 'fk_tasks_users');
+    // });
   });
 });
