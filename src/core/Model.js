@@ -106,6 +106,10 @@ export class Model {
     this._tableNameExplicit = options.tableName !== undefined;
     this.seq = options.seq || null;
     this.associations = this.associations || {};
+    this._hooks = {};
+    for (const [hookName, handlers] of Object.entries(options.hooks || {})) {
+      this._hooks[hookName] = Array.isArray(handlers) ? [...handlers] : [handlers];
+    }
 
     this.alias = options.alias || this.modelName.split(/(?=[A-Z])/).map(w => w[0].toLowerCase()).join('');
 
@@ -216,6 +220,35 @@ export class Model {
   }
 
   /**
+   * Registers a model hook.
+   * @param {string} name
+   * @param {function} handler
+   * @returns {typeof Model}
+   */
+  static addHook(name, handler) {
+    if (typeof handler !== 'function') {
+      throw new TypeError(`Hook "${name}" must be a function`);
+    }
+    if (!this._hooks) this._hooks = {};
+    if (!this._hooks[name]) this._hooks[name] = [];
+    this._hooks[name].push(handler);
+    return this;
+  }
+
+  /**
+   * Runs registered hooks sequentially.
+   * @param {string} name
+   * @param {...*} args
+   * @returns {Promise<void>}
+   */
+  static async _runHooks(name, ...args) {
+    const hooks = this._hooks?.[name] || [];
+    for (const hook of hooks) {
+      await hook.apply(this, args);
+    }
+  }
+
+  /**
    * Creates a new record.
    * @param {object} values
    * @param {object} [options]
@@ -223,8 +256,10 @@ export class Model {
    */
   static async create(values = {}, options = {}) {
     //this._log(`${this.modelName}.create`, values);
-    const instance = this.build(values, { _isNew: true });
-    return instance.save(options);
+    if (options.hooks !== false) await this._runHooks('beforeCreate', values, options);
+    const result = await this._adapter.dml.insert(this, values, options);
+    if (options.hooks !== false) await this._runHooks('afterCreate', result, options);
+    return result;
   }
 
   /**
@@ -235,7 +270,10 @@ export class Model {
    */
   static async bulkCreate(records = [], options = {}) {
     //this._log(`${this.modelName}.bulkCreate`, records);
-    return this._adapter.dml.bulkInsert(this, records, options);
+    if (options.hooks !== false) await this._runHooks('beforeBulkCreate', records, options);
+    const result = await this._adapter.dml.bulkInsert(this, records, options);
+    if (options.hooks !== false) await this._runHooks('afterBulkCreate', result, options);
+    return result;
   }
 
   /**
@@ -260,7 +298,10 @@ export class Model {
    */
   static async findOne(options = {}) {
     //this._log(`${this.modelName}.findOne`, options);
-    return this._adapter.dml.selectOne(this, options);
+    if (options.hooks !== false) await this._runHooks('beforeFind', options);
+    const result = await this._adapter.dml.selectOne(this, options);
+    if (options.hooks !== false) await this._runHooks('afterFind', result, options);
+    return result;
   }
 
   /**
@@ -269,13 +310,16 @@ export class Model {
    * @returns {Promise<Model[]>}
    */
   static async findAll(options = {}) {
+    if (options.hooks !== false) await this._runHooks('beforeFind', options);
     if (options.where !== undefined && (typeof options.where !== 'object' || Array.isArray(options.where))) throw new ValidationWhereError();
     if (options.order !== undefined && !Array.isArray(options.order)) throw new ValidationOrderError();
     if (options.limit !== undefined && (!Number.isInteger(options.limit) || options.limit < 1))  throw new ValidationLimitError();
     if (options.offset !== undefined && (!Number.isInteger(options.offset) || options.offset < 0)) throw new ValidationOffsetError();
     if (options.include) options.include = normalizeInclude(options.include);
     //this._log(`${this.modelName}.findAll`, options);
-    return this._adapter.dml.selectAll(this, options);
+    const result = await this._adapter.dml.selectAll(this, options);
+    if (options.hooks !== false) await this._runHooks('afterFind', result, options);
+    return result;
   }
 
   /**
@@ -284,9 +328,12 @@ export class Model {
    * @returns {Promise<number>}
    */
   static async count(options = {}) {
+    if (options.hooks !== false) await this._runHooks('beforeCount', options);
     if (options.where !== undefined && (typeof options.where !== 'object' || Array.isArray(options.where))) throw new ValidationWhereError();
     this._log(`${this.modelName}.count`, options);
-    return this._adapter.dml.count(this, options);
+    const result = await this._adapter.dml.count(this, options);
+    if (options.hooks !== false) await this._runHooks('afterCount', result, options);
+    return result;
   }
 
   /**
@@ -298,7 +345,10 @@ export class Model {
   static async update(values, options = {}) {
     if (options.where !== undefined && (typeof options.where !== 'object' || Array.isArray(options.where)))throw new ValidationWhereError();
     //this._log(`${this.modelName}.update`, values, options);
-    return this._adapter.dml.update(this, values, options);
+    if (options.hooks !== false) await this._runHooks('beforeUpdate', values, options);
+    const result = await this._adapter.dml.update(this, values, options);
+    if (options.hooks !== false) await this._runHooks('afterUpdate', result, options);
+    return result;
   }
 
   /**
@@ -309,7 +359,10 @@ export class Model {
   static async destroy(options = {}) {
     if (options.where !== undefined && (typeof options.where !== 'object' || Array.isArray(options.where)))throw new ValidationWhereError();
     //this._log(`${this.modelName}.destroy`, options);
-    return this._adapter.dml.delete(this, options);
+    if (options.hooks !== false) await this._runHooks('beforeDestroy', options);
+    const result = await this._adapter.dml.delete(this, options);
+    if (options.hooks !== false) await this._runHooks('afterDestroy', result, options);
+    return result;
   }
 
   /**
@@ -319,7 +372,10 @@ export class Model {
    */
   static async truncate(options = {}) {
     //this._log(`${this.modelName}.truncate`);
-    return this._adapter.dml.truncate(this, options);
+    if (options.hooks !== false) await this._runHooks('beforeTruncate', options);
+    const result = await this._adapter.dml.truncate(this, options);
+    if (options.hooks !== false) await this._runHooks('afterTruncate', options);
+    return result;
   }
 
   /**
@@ -373,21 +429,32 @@ export class Model {
    * @returns {Promise<Model>}
    */
   async save(options = {}) {
+    const Ctor = this.constructor;
+    const isNew = this._isNew;
+    if (options.hooks !== false) {
+      await Ctor._runHooks('beforeSave', this, options);
+      await Ctor._runHooks(isNew ? 'beforeCreate' : 'beforeUpdate', this, options);
+    }
+
     if (this._isNew) {
-      const result = await this.constructor._adapter.dml.insert(
-        this.constructor,
+      const result = await Ctor._adapter.dml.insert(
+        Ctor,
         this.dataValues,
         options
       );
       Object.assign(this.dataValues, result.dataValues);
       this._isNew = false;
       this._changed = {};
+      if (options.hooks !== false) {
+        await Ctor._runHooks('afterCreate', this, options);
+        await Ctor._runHooks('afterSave', this, options);
+      }
       return this;
     }
-    const pk = this.constructor.primaryKeyAttribute;
+    const pk = Ctor.primaryKeyAttribute;
     const where = { [pk]: this.dataValues[pk] };
-    const result = await this.constructor._adapter.dml.update(
-      this.constructor,
+    const result = await Ctor._adapter.dml.update(
+      Ctor,
       this.dataValues,
       { ...options, where }
     );
@@ -395,6 +462,10 @@ export class Model {
       Object.assign(this.dataValues, result[0].dataValues);
     }
     this._changed = {};
+    if (options.hooks !== false) {
+      await Ctor._runHooks('afterUpdate', this, options);
+      await Ctor._runHooks('afterSave', this, options);
+    }
     return this;
   }
 
@@ -418,8 +489,11 @@ export class Model {
    * @returns {Promise<void>}
    */
   async destroy(options = {}) {
-    const pk = this.constructor.primaryKeyAttribute;
+    const Ctor = this.constructor;
+    if (options.hooks !== false) await Ctor._runHooks('beforeDestroy', this, options);
+    const pk = Ctor.primaryKeyAttribute;
     const where = { [pk]: this.dataValues[pk] };
-    await this.constructor.destroy({ ...options, where });
+    await Ctor.destroy({ ...options, where, hooks: false });
+    if (options.hooks !== false) await Ctor._runHooks('afterDestroy', this, options);
   }
 }
