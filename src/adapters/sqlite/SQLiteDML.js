@@ -14,17 +14,17 @@ export class SQLiteDML extends DMLAbstract {
   // ---------------------------------------------------------------------------
 
   async _executeQueryAll(sql, params) {
-    this._log('executeQueryAll', {sql, params})
+    this._log('executeQueryAll', { sql, params });
     return this._db().prepare(sql).all(...params);
   }
 
   async _executeGet(sql, params) {
-    this._log('executeGet', {sql, params})
+    this._log('executeGet', { sql, params });
     return this._db().prepare(sql).get(...params);
   }
 
   async _executeRun(sql, params) {
-    this._log('executeRun', {sql, params})
+    this._log('executeRun', { sql, params });
     return this._db().prepare(sql).run(...params);
   }
 
@@ -76,9 +76,41 @@ export class SQLiteDML extends DMLAbstract {
   // Adapter-specific methods — truncate
   // ---------------------------------------------------------------------------
 
+  async bulkInsert(model, records, options = {}) {
+    if (records.length === 0) return [];
+
+    const { tableName, schema } = this._schema(model);
+    const insertOne = (values) => {
+      const colRecord = this._toColumnNames(values, schema);
+      this._applyDefaults(colRecord, schema);
+      this._applyTimestamps(colRecord, schema);
+      if (schema.autoIncrement && colRecord[schema.autoIncrement] === undefined) {
+        delete colRecord[schema.autoIncrement];
+      }
+      this._validateRecord(colRecord, schema, model.modelName);
+
+      const cols = Object.keys(colRecord);
+      const colNames = cols.map(c => this._q(c)).join(', ');
+      const placeholders = cols.map(() => '?').join(', ');
+      const sql = `INSERT INTO ${this._q(tableName)} (${colNames}) VALUES (${placeholders})`;
+      const params = cols.map(c => this._serializeValue(colRecord[c]));
+      this._log('executeRun', { sql, params });
+      const info = this._db().prepare(sql).run(...params);
+
+      if (schema.primaryKey && !colRecord[schema.primaryKey]) {
+        colRecord[schema.primaryKey] = Number(info.lastInsertRowid);
+      }
+      const attrRecord = this._toAttrNames(colRecord, schema);
+      return new model(attrRecord, { _isNew: false });
+    };
+
+    const insertMany = this._db().transaction(items => items.map(insertOne));
+    return insertMany(records);
+  }
+
   async truncate(model, options = {}) {
     const { tableName } = this._schema(model);
-    this._executeRun(`DELETE FROM ${this._q(tableName)}`, []);
-    this._executeRun(`DELETE FROM sqlite_sequence WHERE name='${tableName}'`, []);
+    await this._executeRun(`DELETE FROM ${this._q(tableName)}`, []);
+    await this._executeRun('DELETE FROM sqlite_sequence WHERE name = ?', [tableName]);
   }
 }

@@ -96,6 +96,56 @@ export class DMLAbstract extends BaseAbstract {
     return v;
   }
 
+  _buildCondition(col, rawValue) {
+    const { op, value } = resolveWhereValue(rawValue);
+    switch (op) {
+      case Op.eq:
+        return { sql: `${col} = ?`, params: [this._serializeValue(value)] };
+      case Op.ne:
+        return { sql: `${col} != ?`, params: [this._serializeValue(value)] };
+      case Op.gt:
+        return { sql: `${col} > ?`, params: [this._serializeValue(value)] };
+      case Op.gte:
+        return { sql: `${col} >= ?`, params: [this._serializeValue(value)] };
+      case Op.lt:
+        return { sql: `${col} < ?`, params: [this._serializeValue(value)] };
+      case Op.lte:
+        return { sql: `${col} <= ?`, params: [this._serializeValue(value)] };
+      case Op.like:
+        return { sql: `${col} LIKE ?`, params: [this._serializeValue(value)] };
+      case Op.notLike:
+        return { sql: `${col} NOT LIKE ?`, params: [this._serializeValue(value)] };
+      case Op.in: {
+        const inParams = value.map(v => this._serializeValue(v));
+        return { sql: `${col} IN (${inParams.map(() => '?').join(', ')})`, params: inParams };
+      }
+      case Op.notIn: {
+        const notInParams = value.map(v => this._serializeValue(v));
+        return { sql: `${col} NOT IN (${notInParams.map(() => '?').join(', ')})`, params: notInParams };
+      }
+      case Op.between:
+        return { sql: `${col} BETWEEN ? AND ?`, params: [this._serializeValue(value[0]), this._serializeValue(value[1])] };
+      case Op.notBetween:
+        return { sql: `${col} NOT BETWEEN ? AND ?`, params: [this._serializeValue(value[0]), this._serializeValue(value[1])] };
+      default:
+        return { sql: `${col} = ?`, params: [this._serializeValue(value)] };
+    }
+  }
+
+  _buildConditions(where, schema, alias = null) {
+    const colWhere = this._translateWhere(where, schema);
+    const params = [];
+    const conditions = [];
+
+    for (const [k, v] of Object.entries(colWhere)) {
+      const condition = this._buildCondition(this._colRef(k, alias), v);
+      conditions.push(condition.sql);
+      params.push(...condition.params);
+    }
+
+    return { conditions, params };
+  }
+
   // ---------------------------------------------------------------------------
   // SQL builders — generate standard SQL fragments
   // ---------------------------------------------------------------------------
@@ -109,68 +159,7 @@ export class DMLAbstract extends BaseAbstract {
    */
   _buildWhere(where, schema, alias = null) {
     if (!where) return { sql: '', params: [] };
-    const colWhere = this._translateWhere(where, schema);
-    const params = [];
-    const conditions = [];
-    for (const [k, v] of Object.entries(colWhere)) {
-      const col = this._colRef(k, alias);
-      const { op, value } = resolveWhereValue(v);
-      switch (op) {
-        case Op.eq:
-          params.push(this._serializeValue(value));
-          conditions.push(`${col} = ?`);
-          break;
-        case Op.ne:
-          params.push(this._serializeValue(value));
-          conditions.push(`${col} != ?`);
-          break;
-        case Op.gt:
-          params.push(this._serializeValue(value));
-          conditions.push(`${col} > ?`);
-          break;
-        case Op.gte:
-          params.push(this._serializeValue(value));
-          conditions.push(`${col} >= ?`);
-          break;
-        case Op.lt:
-          params.push(this._serializeValue(value));
-          conditions.push(`${col} < ?`);
-          break;
-        case Op.lte:
-          params.push(this._serializeValue(value));
-          conditions.push(`${col} <= ?`);
-          break;
-        case Op.like:
-          params.push(this._serializeValue(value));
-          conditions.push(`${col} LIKE ?`);
-          break;
-        case Op.notLike:
-          params.push(this._serializeValue(value));
-          conditions.push(`${col} NOT LIKE ?`);
-          break;
-        case Op.in:
-          const inParams = value.map(v => this._serializeValue(v));
-          params.push(...inParams);
-          conditions.push(`${col} IN (${inParams.map(() => '?').join(', ')})`);
-          break;
-        case Op.notIn:
-          const notInParams = value.map(v => this._serializeValue(v));
-          params.push(...notInParams);
-          conditions.push(`${col} NOT IN (${notInParams.map(() => '?').join(', ')})`);
-          break;
-        case Op.between:
-          params.push(this._serializeValue(value[0]), this._serializeValue(value[1]));
-          conditions.push(`${col} BETWEEN ? AND ?`);
-          break;
-        case Op.notBetween:
-          params.push(this._serializeValue(value[0]), this._serializeValue(value[1]));
-          conditions.push(`${col} NOT BETWEEN ? AND ?`);
-          break;
-        default:
-          params.push(this._serializeValue(value));
-          conditions.push(`${col} = ?`);
-      }
-    }
+    const { conditions, params } = this._buildConditions(where, schema, alias);
     return { sql: ` WHERE ${conditions.join(' AND ')}`, params };
   }
 
@@ -269,68 +258,9 @@ export class DMLAbstract extends BaseAbstract {
 
         let onClause = `${this._colRef(junctionOtherKeyCol, junctionAlias)} = ${this._colRef(targetPKCol, joinAlias)}`;
         if (inc.where) {
-          const incTranslated = this._translateWhere(inc.where, targetSchema);
-          for (const [k, v] of Object.entries(incTranslated)) {
-            const col = this._colRef(k, joinAlias);
-            const { op, value } = resolveWhereValue(v);
-            switch (op) {
-              case Op.eq:
-                params.push(this._serializeValue(value));
-                onClause += ` AND ${col} = ?`;
-                break;
-              case Op.ne:
-                params.push(this._serializeValue(value));
-                onClause += ` AND ${col} != ?`;
-                break;
-              case Op.gt:
-                params.push(this._serializeValue(value));
-                onClause += ` AND ${col} > ?`;
-                break;
-              case Op.gte:
-                params.push(this._serializeValue(value));
-                onClause += ` AND ${col} >= ?`;
-                break;
-              case Op.lt:
-                params.push(this._serializeValue(value));
-                onClause += ` AND ${col} < ?`;
-                break;
-              case Op.lte:
-                params.push(this._serializeValue(value));
-                onClause += ` AND ${col} <= ?`;
-                break;
-              case Op.like:
-                params.push(this._serializeValue(value));
-                onClause += ` AND ${col} LIKE ?`;
-                break;
-              case Op.notLike:
-                params.push(this._serializeValue(value));
-                onClause += ` AND ${col} NOT LIKE ?`;
-                break;
-              case Op.in: {
-                const inParams = value.map(v => this._serializeValue(v));
-                params.push(...inParams);
-                onClause += ` AND ${col} IN (${inParams.map(() => '?').join(', ')})`;
-                break;
-              }
-              case Op.notIn: {
-                const notInParams = value.map(v => this._serializeValue(v));
-                params.push(...notInParams);
-                onClause += ` AND ${col} NOT IN (${notInParams.map(() => '?').join(', ')})`;
-                break;
-              }
-              case Op.between:
-                params.push(this._serializeValue(value[0]), this._serializeValue(value[1]));
-                onClause += ` AND ${col} BETWEEN ? AND ?`;
-                break;
-              case Op.notBetween:
-                params.push(this._serializeValue(value[0]), this._serializeValue(value[1]));
-                onClause += ` AND ${col} NOT BETWEEN ? AND ?`;
-                break;
-              default:
-                params.push(this._serializeValue(value));
-                onClause += ` AND ${col} = ?`;
-            }
-          }
+          const where = this._buildConditions(inc.where, targetSchema, joinAlias);
+          onClause += ` AND ${where.conditions.join(' AND ')}`;
+          params.push(...where.params);
         }
         sql += ` LEFT JOIN ${this._q(targetTable)} AS ${this._q(joinAlias)} ON ${onClause}`;
       } else {
@@ -347,68 +277,9 @@ export class DMLAbstract extends BaseAbstract {
           onClause = `${this._colRef(pkCol, parentAlias)} = ${this._colRef(fkCol, joinAlias)}`;
         }
         if (inc.where) {
-          const incTranslated = this._translateWhere(inc.where, targetSchema);
-          for (const [k, v] of Object.entries(incTranslated)) {
-            const col = this._colRef(k, joinAlias);
-            const { op, value } = resolveWhereValue(v);
-            switch (op) {
-              case Op.eq:
-                params.push(this._serializeValue(value));
-                onClause += ` AND ${col} = ?`;
-                break;
-              case Op.ne:
-                params.push(this._serializeValue(value));
-                onClause += ` AND ${col} != ?`;
-                break;
-              case Op.gt:
-                params.push(this._serializeValue(value));
-                onClause += ` AND ${col} > ?`;
-                break;
-              case Op.gte:
-                params.push(this._serializeValue(value));
-                onClause += ` AND ${col} >= ?`;
-                break;
-              case Op.lt:
-                params.push(this._serializeValue(value));
-                onClause += ` AND ${col} < ?`;
-                break;
-              case Op.lte:
-                params.push(this._serializeValue(value));
-                onClause += ` AND ${col} <= ?`;
-                break;
-              case Op.like:
-                params.push(this._serializeValue(value));
-                onClause += ` AND ${col} LIKE ?`;
-                break;
-              case Op.notLike:
-                params.push(this._serializeValue(value));
-                onClause += ` AND ${col} NOT LIKE ?`;
-                break;
-              case Op.in: {
-                const inParams = value.map(v => this._serializeValue(v));
-                params.push(...inParams);
-                onClause += ` AND ${col} IN (${inParams.map(() => '?').join(', ')})`;
-                break;
-              }
-              case Op.notIn: {
-                const notInParams = value.map(v => this._serializeValue(v));
-                params.push(...notInParams);
-                onClause += ` AND ${col} NOT IN (${notInParams.map(() => '?').join(', ')})`;
-                break;
-              }
-              case Op.between:
-                params.push(this._serializeValue(value[0]), this._serializeValue(value[1]));
-                onClause += ` AND ${col} BETWEEN ? AND ?`;
-                break;
-              case Op.notBetween:
-                params.push(this._serializeValue(value[0]), this._serializeValue(value[1]));
-                onClause += ` AND ${col} NOT BETWEEN ? AND ?`;
-                break;
-              default:
-                params.push(this._serializeValue(value));
-                onClause += ` AND ${col} = ?`;
-            }
-          }
+          const where = this._buildConditions(inc.where, targetSchema, joinAlias);
+          onClause += ` AND ${where.conditions.join(' AND ')}`;
+          params.push(...where.params);
         }
         sql += ` LEFT JOIN ${this._q(targetTable)} AS ${this._q(joinAlias)} ON ${onClause}`;
       }

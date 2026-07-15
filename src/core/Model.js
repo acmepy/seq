@@ -234,11 +234,8 @@ export class Model {
    * @returns {Promise<Model[]>}
    */
   static async bulkCreate(records = [], options = {}) {
-    const results = [];
-    for (const record of records) {
-      results.push(await this.create(record, options));
-    }
-    return results;
+    this._log(`${this.modelName}.bulkCreate`, records);
+    return this._adapter.dml.bulkInsert(this, records, options);
   }
 
   /**
@@ -424,9 +421,5 @@ export class Model {
     const pk = this.constructor.primaryKeyAttribute;
     const where = { [pk]: this.dataValues[pk] };
     await this.constructor.destroy({ ...options, where });
-  }
-
-  static _log(...args) {
-    this.seq?._log(...args);
   }
 }

@@ -95,14 +95,42 @@ export async function loadIncludes(instances, includes, model, dml) {
   }
 }
 
+function _definedValues(items, getValue) {
+  return [...new Set(
+    items
+      .map(getValue)
+      .filter(value => value !== null && value !== undefined)
+  )];
+}
+
+function _groupBy(items, getKey) {
+  const groups = new Map();
+  for (const item of items) {
+    const key = getKey(item);
+    if (key === null || key === undefined) continue;
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(item);
+  }
+  return groups;
+}
+
+function _indexBy(items, getKey) {
+  const index = new Map();
+  for (const item of items) {
+    const key = getKey(item);
+    if (key !== null && key !== undefined && !index.has(key)) {
+      index.set(key, item);
+    }
+  }
+  return index;
+}
+
 async function _loadHasMany(instances, inc, assoc, alias, dml) {
   const target = assoc.target;
   const fkAttr = assoc.foreignKey;
   const parentPK = assoc.source.primaryKeyAttribute || 'id';
 
-  const parentIds = instances
-    .map(i => i.getDataValue(parentPK))
-    .filter(id => id !== null && id !== undefined);
+  const parentIds = _definedValues(instances, i => i.getDataValue(parentPK));
 
   if (parentIds.length === 0) {
     for (const instance of instances) {
@@ -113,13 +141,11 @@ async function _loadHasMany(instances, inc, assoc, alias, dml) {
 
   const where = { [fkAttr]: { [Op.in]: parentIds }, ...inc.where };
   const children = await dml.selectAll(target, { where });
+  const childrenByFK = _groupBy(children, child => child.getDataValue(fkAttr));
 
   for (const instance of instances) {
     const pkVal = instance.getDataValue(parentPK);
-    const matching = children.filter(
-      c => c.getDataValue(fkAttr) === pkVal
-    );
-    instance.setDataValue(alias, matching);
+    instance.setDataValue(alias, childrenByFK.get(pkVal) || []);
   }
 }
 
@@ -128,9 +154,7 @@ async function _loadHasOne(instances, inc, assoc, alias, dml) {
   const fkAttr = assoc.foreignKey;
   const parentPK = assoc.source.primaryKeyAttribute || 'id';
 
-  const parentIds = instances
-    .map(i => i.getDataValue(parentPK))
-    .filter(id => id !== null && id !== undefined);
+  const parentIds = _definedValues(instances, i => i.getDataValue(parentPK));
 
   if (parentIds.length === 0) {
     for (const instance of instances) {
@@ -141,11 +165,11 @@ async function _loadHasOne(instances, inc, assoc, alias, dml) {
 
   const where = { [fkAttr]: { [Op.in]: parentIds }, ...inc.where };
   const children = await dml.selectAll(target, { where });
+  const childByFK = _indexBy(children, child => child.getDataValue(fkAttr));
 
   for (const instance of instances) {
     const pkVal = instance.getDataValue(parentPK);
-    const match = children.find(c => c.getDataValue(fkAttr) === pkVal);
-    instance.setDataValue(alias, match || null);
+    instance.setDataValue(alias, childByFK.get(pkVal) || null);
   }
 }
 
@@ -154,9 +178,7 @@ async function _loadBelongsTo(instances, inc, assoc, alias, dml) {
   const fkAttr = assoc.foreignKey;
   const targetPK = target.primaryKeyAttribute || 'id';
 
-  const fkValues = instances
-    .map(i => i.getDataValue(fkAttr))
-    .filter(id => id !== null && id !== undefined);
+  const fkValues = _definedValues(instances, i => i.getDataValue(fkAttr));
 
   if (fkValues.length === 0) {
     for (const instance of instances) {
@@ -167,11 +189,11 @@ async function _loadBelongsTo(instances, inc, assoc, alias, dml) {
 
   const where = { [targetPK]: { [Op.in]: fkValues }, ...inc.where };
   const targets = await dml.selectAll(target, { where });
+  const targetByPK = _indexBy(targets, target => target.getDataValue(targetPK));
 
   for (const instance of instances) {
     const fkVal = instance.getDataValue(fkAttr);
-    const match = targets.find(t => t.getDataValue(targetPK) === fkVal);
-    instance.setDataValue(alias, match || null);
+    instance.setDataValue(alias, targetByPK.get(fkVal) || null);
   }
 }
 
@@ -183,9 +205,7 @@ async function _loadBelongsToMany(instances, inc, assoc, alias, dml) {
   const otherKeyAttr = assoc.otherKey;
   const through = assoc.through;
 
-  const sourceIds = instances
-    .map(i => i.getDataValue(sourcePK))
-    .filter(id => id !== null && id !== undefined);
+  const sourceIds = _definedValues(instances, i => i.getDataValue(sourcePK));
 
   if (sourceIds.length === 0) {
     for (const instance of instances) {
@@ -199,6 +219,7 @@ async function _loadBelongsToMany(instances, inc, assoc, alias, dml) {
   const junctionSQL = `SELECT ${q(fkAttr)}, ${q(otherKeyAttr)} FROM ${q(through)} WHERE ${q(fkAttr)} IN (${placeholders})`;
   const serializedParams = sourceIds.map(id => dml._serializeValue(id));
   const junctionRows = await dml._executeQueryAll(junctionSQL, serializedParams);
+  const junctionRowsBySource = _groupBy(junctionRows, row => row[fkAttr]);
 
   const targetIds = [...new Set(junctionRows.map(r => r[otherKeyAttr]).filter(id => id !== null && id !== undefined))];
 
@@ -211,13 +232,14 @@ async function _loadBelongsToMany(instances, inc, assoc, alias, dml) {
 
   const targetWhere = { [targetPK]: { [Op.in]: targetIds }, ...inc.where };
   const targets = await dml.selectAll(target, { where: targetWhere });
+  const targetByPK = _indexBy(targets, target => target.getDataValue(targetPK));
 
   for (const instance of instances) {
     const pkVal = instance.getDataValue(sourcePK);
-    const relatedTargetIds = junctionRows
-      .filter(r => r[fkAttr] === pkVal)
-      .map(r => r[otherKeyAttr]);
-    const matching = targets.filter(t => relatedTargetIds.includes(t.getDataValue(targetPK)));
+    const relatedRows = junctionRowsBySource.get(pkVal) || [];
+    const matching = relatedRows
+      .map(row => targetByPK.get(row[otherKeyAttr]))
+      .filter(Boolean);
     instance.setDataValue(alias, matching);
   }
 }

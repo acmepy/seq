@@ -36,6 +36,21 @@ class Permission extends Model {
   }
 }
 
+class Task extends Model {
+  static define(seq) {
+    return this.init(
+      {
+        id: { type: DataTypes.INTEGER, primaryKey: true, autoIncrement: true },
+        title: { type: DataTypes.STRING(100), allowNull: false },
+        userId: { type: DataTypes.INTEGER, allowNull: false }
+      },
+      { seq, modelName: 'Task', timestamps: false }
+    );
+  }
+}
+
+User.hasMany(Task, { foreignKey: 'userId' });
+Task.belongsTo(User, { foreignKey: 'userId' });
 User.belongsToMany(Role, { through: 'user_roles', foreignKey: 'userId', otherKey: 'roleId' });
 Role.belongsToMany(User, { through: 'user_roles', foreignKey: 'roleId', otherKey: 'userId' });
 Role.belongsToMany(Permission, { through: 'role_permissions', foreignKey: 'roleId', otherKey: 'permissionId' });
@@ -46,7 +61,7 @@ await adapter.connect();
 
 const seq = new Seq({
   adapter,
-  models: [User, Role, Permission],
+  models: [User, Role, Permission, Task],
   logging: console.log
 });
 
@@ -64,6 +79,12 @@ const editor = await Role.create({ name: 'editor' });
 const read = await Permission.create({ name: 'read' });
 const write = await Permission.create({ name: 'write' });
 const deletePerm = await Permission.create({ name: 'delete' });
+
+await Task.bulkCreate([
+  { title: 'Review access matrix', userId: ana.getDataValue('id') },
+  { title: 'Publish role guide', userId: ana.getDataValue('id') },
+  { title: 'Audit permissions', userId: juan.getDataValue('id') }
+]);
 
 const dml = adapter.dml;
 const execSQL = (sql, params) => dml._executeRun(sql, params);
