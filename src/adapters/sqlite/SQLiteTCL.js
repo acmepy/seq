@@ -11,8 +11,12 @@ export class SQLiteTCL extends TCLAbstract {
     return this._adapter._db;
   }
 
+  async _execute(sql, params = []) {
+    this._db().prepare(sql).run(...params);
+  }
+
   async begin(options = {}) {
-    this._db().prepare('BEGIN IMMEDIATE').run();
+    this._execute('BEGIN IMMEDIATE');
     return {
       id: ++transactionIdCounter,
       active: true
@@ -21,13 +25,13 @@ export class SQLiteTCL extends TCLAbstract {
 
   async commit(transaction) {
     this._validateTransaction(transaction);
-    this._db().prepare('COMMIT').run();
+    this._execute('COMMIT');
     transaction.active = false;
   }
 
   async rollback(transaction) {
     this._validateTransaction(transaction);
-    this._db().prepare('ROLLBACK').run();
+    this._execute('ROLLBACK');
     transaction.active = false;
   }
 }

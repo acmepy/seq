@@ -31,7 +31,7 @@ export class DDLAbstract extends BaseAbstract {
    */
   async createTable(definition, options = {}) {
     const def = this.normalizeDefinition(definition);
-    this._log('DDL.createTable', def.tableName);
+    //this._log('DDL.createTable', def.tableName);
     this._registerSchema(def);
     await this.createTableStructure(def);
     for (const uk of def.uniqueConstraints) await this.addUniqueConstraint(def.tableName, uk);
@@ -106,7 +106,7 @@ export class DDLAbstract extends BaseAbstract {
    * @param {object} [options]
    */
   async dropTable(tableName, options = {}) {
-    this._log('DDL.dropTable', tableName);
+    //this._log('DDL.dropTable', tableName);
     //await this._dropTablePhysical(tableName, options);
     this._adapter.schemas.delete(tableName);
   }
@@ -144,7 +144,7 @@ export class DDLAbstract extends BaseAbstract {
    * @param {object} missingColumns - Map of column names to definitions
    */
   async addColumns(tableName, missingColumns) {
-    this._log('DDL.addColumns', tableName, Object.keys(missingColumns));
+    //this._log('DDL.addColumns', tableName, Object.keys(missingColumns));
     const schema = this._adapter.schemas.get(tableName);
     for (const [name, colDef] of Object.entries(missingColumns)) {
       const colType = this._adapter.mapDataType(colDef.type);
@@ -159,7 +159,7 @@ export class DDLAbstract extends BaseAbstract {
    * @param {object} constraint - { columns: string[], constraintName: string }
    */
   async addUniqueConstraint(tableName, constraint) {
-    this._log('DDL.addUniqueConstraint', tableName, constraint.constraintName);
+    //this._log('DDL.addUniqueConstraint', tableName, constraint.constraintName);
     const schema = this._adapter.schemas.get(tableName);
     const cols = constraint.columns.map(c => this._q(c)).join(', ');
     const sql = `CREATE UNIQUE INDEX ${this._q(constraint.constraintName)} ON ${this._q(tableName)} (${cols})`;
@@ -173,7 +173,7 @@ export class DDLAbstract extends BaseAbstract {
    * @param {object} index - { columns: string[], name: string, unique: boolean }
    */
   async addIndex(tableName, index) {
-    this._log('DDL.addIndex', tableName, index.name);
+    //this._log('DDL.addIndex', tableName, index.name);
     const schema = this._adapter.schemas.get(tableName);
     const cols = index.columns.map(c => this._q(c)).join(', ');
     const unique = index.unique ? 'UNIQUE ' : '';
@@ -188,7 +188,7 @@ export class DDLAbstract extends BaseAbstract {
    * @param {object} fk - Foreign key definition
    */
   async addForeignKey(tableName, fk) {
-    this._log('DDL.addForeignKey', tableName, fk.constraintName);
+    //this._log('DDL.addForeignKey', tableName, fk.constraintName);
     if (this._adapter.fkStrategy === 'alter'){
       const sql = `ALTER TABLE ${this._q(tableName)} ADD CONSTRAINT ${this._q(fk.constraintName)} FOREIGN KEY (${this._q(fk.columnName)}) REFERENCES ${this._q(fk.references.table)} (${this._q(fk.references.column)}) ON DELETE ${fk.onDelete || 'RESTRICT'} ON UPDATE ${fk.onUpdate || 'RESTRICT'}`;
       this._adapter._db.prepare(sql).run();
@@ -206,12 +206,7 @@ export class DDLAbstract extends BaseAbstract {
    * @param {object} def - Normalized definition
    */
   _registerSchema(def) {
-    this._adapter.schemas.set(def.tableName, {
-      ...def,
-      uniqueConstraints: [],
-      indexes: [],
-      foreignKeys: []
-    });
+    this._adapter.schemas.set(def.tableName, { ...def, uniqueConstraints: [], indexes: [], foreignKeys: [] });
   }
 
   /**

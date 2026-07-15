@@ -84,4 +84,11 @@ export class BaseAdapter {
   normalizeValue(attribute, value) {
     return value;
   }
+
+  /**
+   * Logs through the owning Seq instance when logging is enabled.
+   */
+  _log(...args) {
+    this._seq?._log(...args);
+  }
 }

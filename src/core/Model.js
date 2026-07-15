@@ -222,7 +222,7 @@ export class Model {
    * @returns {Promise<Model>}
    */
   static async create(values = {}, options = {}) {
-    this._log(`${this.modelName}.create`, values);
+    //this._log(`${this.modelName}.create`, values);
     const instance = this.build(values, { _isNew: true });
     return instance.save(options);
   }
@@ -234,7 +234,7 @@ export class Model {
    * @returns {Promise<Model[]>}
    */
   static async bulkCreate(records = [], options = {}) {
-    this._log(`${this.modelName}.bulkCreate`, records);
+    //this._log(`${this.modelName}.bulkCreate`, records);
     return this._adapter.dml.bulkInsert(this, records, options);
   }
 
@@ -245,7 +245,7 @@ export class Model {
    * @returns {Promise<Model|null>}
    */
   static async findByPk(id, options = {}) {
-    this._log(`${this.modelName}.findByPk`, id);
+    //this._log(`${this.modelName}.findByPk`, id);
     if (!this.primaryKeyAttribute) {
       throw new Error(`Model "${this.modelName}" has no primary key`);
     }
@@ -259,7 +259,7 @@ export class Model {
    * @returns {Promise<Model|null>}
    */
   static async findOne(options = {}) {
-    this._log(`${this.modelName}.findOne`, options);
+    //this._log(`${this.modelName}.findOne`, options);
     return this._adapter.dml.selectOne(this, options);
   }
 
@@ -274,7 +274,7 @@ export class Model {
     if (options.limit !== undefined && (!Number.isInteger(options.limit) || options.limit < 1))  throw new ValidationLimitError();
     if (options.offset !== undefined && (!Number.isInteger(options.offset) || options.offset < 0)) throw new ValidationOffsetError();
     if (options.include) options.include = normalizeInclude(options.include);
-    this._log(`${this.modelName}.findAll`, options);
+    //this._log(`${this.modelName}.findAll`, options);
     return this._adapter.dml.selectAll(this, options);
   }
 
@@ -297,7 +297,7 @@ export class Model {
    */
   static async update(values, options = {}) {
     if (options.where !== undefined && (typeof options.where !== 'object' || Array.isArray(options.where)))throw new ValidationWhereError();
-    this._log(`${this.modelName}.update`, values, options);
+    //this._log(`${this.modelName}.update`, values, options);
     return this._adapter.dml.update(this, values, options);
   }
 
@@ -308,7 +308,7 @@ export class Model {
    */
   static async destroy(options = {}) {
     if (options.where !== undefined && (typeof options.where !== 'object' || Array.isArray(options.where)))throw new ValidationWhereError();
-    this._log(`${this.modelName}.destroy`, options);
+    //this._log(`${this.modelName}.destroy`, options);
     return this._adapter.dml.delete(this, options);
   }
 
@@ -318,7 +318,7 @@ export class Model {
    * @returns {Promise<void>}
    */
   static async truncate(options = {}) {
-    this._log(`${this.modelName}.truncate`);
+    //this._log(`${this.modelName}.truncate`);
     return this._adapter.dml.truncate(this, options);
   }
 

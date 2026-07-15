@@ -87,7 +87,7 @@ await Task.bulkCreate([
 ]);
 
 const dml = adapter.dml;
-const execSQL = (sql, params) => dml._executeRun(sql, params);
+const execSQL = (sql, params) => dml._execute(sql, params);
 
 await execSQL('INSERT INTO "user_roles" ("userId", "roleId") VALUES (?, ?)', [ana.getDataValue('id'), admin.getDataValue('id')]);
 await execSQL('INSERT INTO "user_roles" ("userId", "roleId") VALUES (?, ?)', [ana.getDataValue('id'), editor.getDataValue('id')]);

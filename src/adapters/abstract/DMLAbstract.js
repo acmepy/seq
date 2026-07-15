@@ -8,7 +8,7 @@ import { loadIncludes, processJoinedRows, resolveIncludeAlias, resolveEager } fr
 /**
  * Base DML abstract.
  * Provides SQL-based default implementations for selectAll, count, update, delete.
- * Adapter subclasses implement execution hooks (_executeQuery, _executeGet, _executeRun, _mapRows)
+ * Adapter subclasses implement execution hooks (_executeQuery, _executeGet, _execute, _mapRows)
  * and adapter-specific methods (insert, truncate).
  */
 export class DMLAbstract extends BaseAbstract {
@@ -317,8 +317,8 @@ export class DMLAbstract extends BaseAbstract {
    * @param {*[]} params
    * @returns {Promise<{ changes: number, lastInsertRowid?: number }>}
    */
-  async _executeRun(sql, params) {
-    throw new AdapterError('DML _executeRun is not implemented by this adapter', { code: 'SEQ_DML_NOT_IMPLEMENTED' });
+  async _execute(sql, params = []) {
+    throw new AdapterError('DML _execute is not implemented by this adapter', { code: 'SEQ_DML_NOT_IMPLEMENTED' });
   }
 
   /**
@@ -343,7 +343,7 @@ export class DMLAbstract extends BaseAbstract {
    * @returns {Promise<import('../../core/Model.js').Model[]>}
    */
   async selectAll(model, options = {}) {
-    this._log('DML.selectAll', model.modelName, options);
+    //this._log('DML.selectAll', model.modelName, options);
     const { tableName, schema, alias } = this._schema(model);
     const includes = options.include || [];
     const globalEager = options.eager || false;
@@ -396,7 +396,7 @@ export class DMLAbstract extends BaseAbstract {
    * @returns {Promise<number>}
    */
   async count(model, options = {}) {
-    this._log('DML.count', model.modelName, options);
+    //this._log('DML.count', model.modelName, options);
     const { tableName, schema, alias } = this._schema(model);
     let sql = alias
       ? `SELECT COUNT(*) as cnt FROM ${this._q(tableName)} AS ${this._q(alias)}`
@@ -417,7 +417,7 @@ export class DMLAbstract extends BaseAbstract {
    * @returns {Promise<import('../../core/Model.js').Model[]>}
    */
   async update(model, values, options = {}) {
-    this._log('DML.update', model.modelName, values, options);
+    //this._log('DML.update', model.modelName, values, options);
     const { tableName, schema } = this._schema(model);
     const colValues = this._toColumnNames(values, schema);
     this._applyTimestamps(colValues, schema);
@@ -426,7 +426,7 @@ export class DMLAbstract extends BaseAbstract {
     const where = this._buildWhere(options.where, schema);
     const sql = `UPDATE ${this._q(tableName)} SET ${setClauses.join(', ')}${where.sql}`;
     params.push(...where.params);
-    await this._executeRun(sql, params);
+    await this._execute(sql, params);
     if (options.where) return await this.selectAll(model, options);
     return [];
   }
@@ -438,13 +438,13 @@ export class DMLAbstract extends BaseAbstract {
    * @returns {Promise<number>}
    */
   async delete(model, options = {}) {
-    this._log('DML.delete', model.modelName, options);
+    //this._log('DML.delete', model.modelName, options);
     const { tableName, schema } = this._schema(model);
     const params = [];
     const where = this._buildWhere(options.where, schema);
     const sql = `DELETE FROM ${this._q(tableName)}${where.sql}`;
     params.push(...where.params);
-    const info = await this._executeRun(sql, params);
+    const info = await this._execute(sql, params);
     return info.changes;
   }
 
@@ -460,7 +460,7 @@ export class DMLAbstract extends BaseAbstract {
    * @returns {Promise<import('../../core/Model.js').Model>}
    */
   async insert(model, values, options = {}) {
-    this._log('DML.insert', model.modelName, values);
+    //this._log('DML.insert', model.modelName, values);
     const { tableName, schema } = this._schema(model);
     const colRecord = this._toColumnNames(values, schema);
     this._applyDefaults(colRecord, schema);
@@ -474,7 +474,7 @@ export class DMLAbstract extends BaseAbstract {
     const placeholders = cols.map(() => '?').join(', ');
     const sql = `INSERT INTO ${this._q(tableName)} (${colNames}) VALUES (${placeholders})`;
     const params = cols.map(c => this._serializeValue(colRecord[c]));
-    const info = await this._executeRun(sql, params);
+    const info = await this._execute(sql, params);
     if (schema.primaryKey && !colRecord[schema.primaryKey]) {
       colRecord[schema.primaryKey] = Number(info.lastInsertRowid);
     }
@@ -504,7 +504,7 @@ export class DMLAbstract extends BaseAbstract {
    * @returns {Promise<void>}
    */
   async truncate(model, options = {}) {
-    this._log('DML.truncate', model.modelName);
+    //this._log('DML.truncate', model.modelName);
     throw new AdapterError('DML truncate is not implemented by this adapter', { code: 'SEQ_DML_NOT_IMPLEMENTED' });
   }
 

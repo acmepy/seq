@@ -543,16 +543,16 @@ describe('Aliases & Include', () => {
       deletePerm = await Permission.create({ name: 'delete' });
 
       const userRolesSQL = `INSERT INTO "user_roles" ("userId", "roleId") VALUES (?, ?)`;
-      await seq._adapter.dml._executeRun(userRolesSQL, [1, admin.getDataValue('id')]);
-      await seq._adapter.dml._executeRun(userRolesSQL, [1, editor.getDataValue('id')]);
-      await seq._adapter.dml._executeRun(userRolesSQL, [2, admin.getDataValue('id')]);
+      await seq._adapter.dml._execute(userRolesSQL, [1, admin.getDataValue('id')]);
+      await seq._adapter.dml._execute(userRolesSQL, [1, editor.getDataValue('id')]);
+      await seq._adapter.dml._execute(userRolesSQL, [2, admin.getDataValue('id')]);
 
       const rolePermsSQL = `INSERT INTO "role_permissions" ("roleId", "permissionId") VALUES (?, ?)`;
-      await seq._adapter.dml._executeRun(rolePermsSQL, [admin.getDataValue('id'), readPerm.getDataValue('id')]);
-      await seq._adapter.dml._executeRun(rolePermsSQL, [admin.getDataValue('id'), writePerm.getDataValue('id')]);
-      await seq._adapter.dml._executeRun(rolePermsSQL, [admin.getDataValue('id'), deletePerm.getDataValue('id')]);
-      await seq._adapter.dml._executeRun(rolePermsSQL, [editor.getDataValue('id'), readPerm.getDataValue('id')]);
-      await seq._adapter.dml._executeRun(rolePermsSQL, [editor.getDataValue('id'), writePerm.getDataValue('id')]);
+      await seq._adapter.dml._execute(rolePermsSQL, [admin.getDataValue('id'), readPerm.getDataValue('id')]);
+      await seq._adapter.dml._execute(rolePermsSQL, [admin.getDataValue('id'), writePerm.getDataValue('id')]);
+      await seq._adapter.dml._execute(rolePermsSQL, [admin.getDataValue('id'), deletePerm.getDataValue('id')]);
+      await seq._adapter.dml._execute(rolePermsSQL, [editor.getDataValue('id'), readPerm.getDataValue('id')]);
+      await seq._adapter.dml._execute(rolePermsSQL, [editor.getDataValue('id'), writePerm.getDataValue('id')]);
     });
 
     it('sync creates junction tables', async () => {
@@ -649,16 +649,16 @@ describe('Aliases & Include', () => {
       deletePerm = await Permission.create({ name: 'delete' });
 
       const userRolesSQL = `INSERT INTO "user_roles" ("userId", "roleId") VALUES (?, ?)`;
-      await seq._adapter.dml._executeRun(userRolesSQL, [1, admin.getDataValue('id')]);
-      await seq._adapter.dml._executeRun(userRolesSQL, [1, editor.getDataValue('id')]);
-      await seq._adapter.dml._executeRun(userRolesSQL, [2, admin.getDataValue('id')]);
+      await seq._adapter.dml._execute(userRolesSQL, [1, admin.getDataValue('id')]);
+      await seq._adapter.dml._execute(userRolesSQL, [1, editor.getDataValue('id')]);
+      await seq._adapter.dml._execute(userRolesSQL, [2, admin.getDataValue('id')]);
 
       const rolePermsSQL = `INSERT INTO "role_permissions" ("roleId", "permissionId") VALUES (?, ?)`;
-      await seq._adapter.dml._executeRun(rolePermsSQL, [admin.getDataValue('id'), readPerm.getDataValue('id')]);
-      await seq._adapter.dml._executeRun(rolePermsSQL, [admin.getDataValue('id'), writePerm.getDataValue('id')]);
-      await seq._adapter.dml._executeRun(rolePermsSQL, [admin.getDataValue('id'), deletePerm.getDataValue('id')]);
-      await seq._adapter.dml._executeRun(rolePermsSQL, [editor.getDataValue('id'), readPerm.getDataValue('id')]);
-      await seq._adapter.dml._executeRun(rolePermsSQL, [editor.getDataValue('id'), writePerm.getDataValue('id')]);
+      await seq._adapter.dml._execute(rolePermsSQL, [admin.getDataValue('id'), readPerm.getDataValue('id')]);
+      await seq._adapter.dml._execute(rolePermsSQL, [admin.getDataValue('id'), writePerm.getDataValue('id')]);
+      await seq._adapter.dml._execute(rolePermsSQL, [admin.getDataValue('id'), deletePerm.getDataValue('id')]);
+      await seq._adapter.dml._execute(rolePermsSQL, [editor.getDataValue('id'), readPerm.getDataValue('id')]);
+      await seq._adapter.dml._execute(rolePermsSQL, [editor.getDataValue('id'), writePerm.getDataValue('id')]);
     });
 
     it('loads roles via LEFT JOIN through junction table', async () => {

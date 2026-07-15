@@ -7,6 +7,6 @@ export class BaseAbstract {
   }
 
   _log(...args) {
-    this._adapter?._seq?._log(...args);
+    this._adapter?._log(...args);
   }
 }

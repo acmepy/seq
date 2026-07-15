@@ -1,4 +1,4 @@
-import { DMLAbstract } from '../abstract/DMLAbstract.js';
+import { DMLAbstract } from "../abstract/DMLAbstract.js";
 
 export class SQLiteDML extends DMLAbstract {
   constructor(adapter) {
@@ -14,17 +14,17 @@ export class SQLiteDML extends DMLAbstract {
   // ---------------------------------------------------------------------------
 
   async _executeQueryAll(sql, params) {
-    this._log('executeQueryAll', { sql, params });
+    this._log(sql, JSON.stringify(params).replaceAll(`"`, `'`));
     return this._db().prepare(sql).all(...params);
   }
 
   async _executeGet(sql, params) {
-    this._log('executeGet', { sql, params });
+    this._log(sql, JSON.stringify(params).replaceAll(`"`, `'`));
     return this._db().prepare(sql).get(...params);
   }
 
-  async _executeRun(sql, params) {
-    this._log('executeRun', { sql, params });
+  _execute(sql, params = []) {
+    this._log(sql, JSON.stringify(params).replaceAll(`"`, `'`));
     return this._db().prepare(sql).run(...params);
   }
 
@@ -94,8 +94,7 @@ export class SQLiteDML extends DMLAbstract {
       const placeholders = cols.map(() => '?').join(', ');
       const sql = `INSERT INTO ${this._q(tableName)} (${colNames}) VALUES (${placeholders})`;
       const params = cols.map(c => this._serializeValue(colRecord[c]));
-      this._log('executeRun', { sql, params });
-      const info = this._db().prepare(sql).run(...params);
+      const info = this._execute(sql, params);
 
       if (schema.primaryKey && !colRecord[schema.primaryKey]) {
         colRecord[schema.primaryKey] = Number(info.lastInsertRowid);
@@ -110,7 +109,7 @@ export class SQLiteDML extends DMLAbstract {
 
   async truncate(model, options = {}) {
     const { tableName } = this._schema(model);
-    await this._executeRun(`DELETE FROM ${this._q(tableName)}`, []);
-    await this._executeRun('DELETE FROM sqlite_sequence WHERE name = ?', [tableName]);
+    await this._execute(`DELETE FROM ${this._q(tableName)}`, []);
+    await this._execute('DELETE FROM sqlite_sequence WHERE name = ?', [tableName]);
   }
 }

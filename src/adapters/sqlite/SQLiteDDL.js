@@ -48,11 +48,11 @@ export class SQLiteDDL extends DDLAbstract {
     }
 
     const sql = `CREATE TABLE ${this._q(def.tableName)} (\n  ${colDefs.join(',\n  ')}\n)`;
-    this._db().prepare(sql).run();
+    await this._execute(sql);
   }
 
   async dropTable(tableName, options = {}) {
-    this._db().prepare(`DROP TABLE IF EXISTS ${this._q(tableName)}`).run();
+    await this._execute(`DROP TABLE IF EXISTS ${this._q(tableName)}`);
     await super.dropTable(tableName, options);
   }
 
@@ -70,6 +70,10 @@ export class SQLiteDDL extends DDLAbstract {
   async listTables() {
     const rows = this._db().prepare("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'").all();
     return rows.map(r => r.name);
+  }
+
+  async _execute(sql, params = []) {
+    this._db().prepare(sql).run(...params);
   }
 
   async addForeignKey(tableName, fk) {
