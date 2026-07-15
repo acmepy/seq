@@ -16,7 +16,7 @@ export class SQLiteAdapter extends BaseAdapter {
   }
 
   get caseStyle() {
-    return 'upper';
+    return 'lower';
   }
 
   get fkStrategy() {

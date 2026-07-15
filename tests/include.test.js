@@ -5,7 +5,7 @@ import { SQLiteAdapter } from '../src/adapters/sqlite/SQLiteAdapter.js';
 import { normalizeInclude, resolveIncludeAlias, resolveEager } from '../src/utils/include.js';
 
 describe('Aliases & Include', () => {
-  let seq, adapter, User, Task, Profile;
+  let seq, adapter, User, Task, Profile, Role, Permission;
 
   beforeEach(async () => {
     class _User extends Model {}
@@ -41,14 +41,39 @@ describe('Aliases & Include', () => {
     );
     Profile = _Profile;
 
+    class _Role extends Model {}
+    _Role.init(
+      {
+        id: { type: DataTypes.INTEGER, primaryKey: true, autoIncrement: true },
+        name: { type: DataTypes.STRING(50), allowNull: false },
+      },
+      { modelName: 'Role', tableName: 'roles', timestamps: false }
+    );
+    Role = _Role;
+
+    class _Permission extends Model {}
+    _Permission.init(
+      {
+        id: { type: DataTypes.INTEGER, primaryKey: true, autoIncrement: true },
+        name: { type: DataTypes.STRING(50), allowNull: false },
+      },
+      { modelName: 'Permission', tableName: 'permissions', timestamps: false }
+    );
+    Permission = _Permission;
+
     User.hasMany(Task);
     User.hasOne(Profile);
     Task.belongsTo(User);
     Profile.belongsTo(User);
 
+    User.belongsToMany(Role, { through: 'user_roles', foreignKey: 'userId', otherKey: 'roleId' });
+    Role.belongsToMany(User, { through: 'user_roles', foreignKey: 'roleId', otherKey: 'userId' });
+    Role.belongsToMany(Permission, { through: 'role_permissions', foreignKey: 'roleId', otherKey: 'permissionId' });
+    Permission.belongsToMany(Role, { through: 'role_permissions', foreignKey: 'permissionId', otherKey: 'roleId' });
+
     adapter = new SQLiteAdapter({ database: ':memory:' });
     await adapter.connect();
-    seq = new Seq({ adapter, models: [User, Task, Profile], logging: false });
+    seq = new Seq({ adapter, models: [User, Task, Profile, Role, Permission], logging: false });
     await seq.init();
     await seq.sync();
 
@@ -500,6 +525,204 @@ describe('Aliases & Include', () => {
       const ana = users.find(u => u.getDataValue('name') === 'Ana');
       assert.ok(Array.isArray(ana.getDataValue('tasks')));
       assert.ok(ana.getDataValue('profiles'));
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // belongsToMany includes
+  // ---------------------------------------------------------------------------
+
+  describe('belongsToMany includes', () => {
+    let admin, editor, readPerm, writePerm, deletePerm;
+
+    beforeEach(async () => {
+      admin = await Role.create({ name: 'admin' });
+      editor = await Role.create({ name: 'editor' });
+      readPerm = await Permission.create({ name: 'read' });
+      writePerm = await Permission.create({ name: 'write' });
+      deletePerm = await Permission.create({ name: 'delete' });
+
+      const userRolesSQL = `INSERT INTO "user_roles" ("userId", "roleId") VALUES (?, ?)`;
+      await seq._adapter.dml._executeRun(userRolesSQL, [1, admin.getDataValue('id')]);
+      await seq._adapter.dml._executeRun(userRolesSQL, [1, editor.getDataValue('id')]);
+      await seq._adapter.dml._executeRun(userRolesSQL, [2, admin.getDataValue('id')]);
+
+      const rolePermsSQL = `INSERT INTO "role_permissions" ("roleId", "permissionId") VALUES (?, ?)`;
+      await seq._adapter.dml._executeRun(rolePermsSQL, [admin.getDataValue('id'), readPerm.getDataValue('id')]);
+      await seq._adapter.dml._executeRun(rolePermsSQL, [admin.getDataValue('id'), writePerm.getDataValue('id')]);
+      await seq._adapter.dml._executeRun(rolePermsSQL, [admin.getDataValue('id'), deletePerm.getDataValue('id')]);
+      await seq._adapter.dml._executeRun(rolePermsSQL, [editor.getDataValue('id'), readPerm.getDataValue('id')]);
+      await seq._adapter.dml._executeRun(rolePermsSQL, [editor.getDataValue('id'), writePerm.getDataValue('id')]);
+    });
+
+    it('sync creates junction tables', async () => {
+      const tables = await seq._adapter.ddl.listTables();
+      assert.ok(tables.includes('user_roles'));
+      assert.ok(tables.includes('role_permissions'));
+    });
+
+    it('lazy loads belongsToMany roles for user', async () => {
+      const users = await User.findAll({ include: Role });
+      assert.equal(users.length, 2);
+
+      const ana = users.find(u => u.getDataValue('name') === 'Ana');
+      const anaRoles = ana.getDataValue('roles');
+      assert.ok(Array.isArray(anaRoles));
+      assert.equal(anaRoles.length, 2);
+      const anaRoleNames = anaRoles.map(r => r.getDataValue('name')).sort();
+      assert.deepEqual(anaRoleNames, ['admin', 'editor']);
+
+      const juan = users.find(u => u.getDataValue('name') === 'Juan');
+      const juanRoles = juan.getDataValue('roles');
+      assert.ok(Array.isArray(juanRoles));
+      assert.equal(juanRoles.length, 1);
+      assert.equal(juanRoles[0].getDataValue('name'), 'admin');
+    });
+
+    it('lazy loads belongsToMany permissions for role', async () => {
+      const roles = await Role.findAll({ include: Permission });
+      assert.equal(roles.length, 2);
+
+      const adminRole = roles.find(r => r.getDataValue('name') === 'admin');
+      const adminPerms = adminRole.getDataValue('permissions');
+      assert.ok(Array.isArray(adminPerms));
+      assert.equal(adminPerms.length, 3);
+      const adminPermNames = adminPerms.map(p => p.getDataValue('name')).sort();
+      assert.deepEqual(adminPermNames, ['delete', 'read', 'write']);
+
+      const editorRole = roles.find(r => r.getDataValue('name') === 'editor');
+      const editorPerms = editorRole.getDataValue('permissions');
+      assert.ok(Array.isArray(editorPerms));
+      assert.equal(editorPerms.length, 2);
+      const editorPermNames = editorPerms.map(p => p.getDataValue('name')).sort();
+      assert.deepEqual(editorPermNames, ['read', 'write']);
+    });
+
+    it('returns empty array when no matches', async () => {
+      const readRole = await Role.create({ name: 'read-only' });
+      const roles = await Role.findAll({ include: Permission });
+      const readOnly = roles.find(r => r.getDataValue('name') === 'read-only');
+      const perms = readOnly.getDataValue('permissions');
+      assert.ok(Array.isArray(perms));
+      assert.equal(perms.length, 0);
+    });
+
+    it('belongsToMany with where filter', async () => {
+      const roles = await Role.findAll({
+        include: { model: Permission, where: { name: 'read' } },
+      });
+      assert.ok(roles.length >= 2);
+      for (const role of roles) {
+        const perms = role.getDataValue('permissions');
+        assert.ok(perms.every(p => p.getDataValue('name') === 'read'));
+      }
+    });
+
+    it('multiple belongsToMany includes', async () => {
+      const users = await User.findAll({ include: [Role, Task] });
+      const ana = users.find(u => u.getDataValue('name') === 'Ana');
+      assert.ok(Array.isArray(ana.getDataValue('roles')));
+      assert.ok(Array.isArray(ana.getDataValue('tasks')));
+      assert.equal(ana.getDataValue('roles').length, 2);
+      assert.equal(ana.getDataValue('tasks').length, 2);
+    });
+
+    it('backward compatibility: findAll without include works', async () => {
+      const users = await User.findAll();
+      assert.equal(users.length, 2);
+      assert.equal(users[0].getDataValue('name'), 'Ana');
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // Eager include - belongsToMany (LEFT JOIN through junction)
+  // ---------------------------------------------------------------------------
+
+  describe('eager include belongsToMany', () => {
+    let admin, editor, readPerm, writePerm, deletePerm;
+
+    beforeEach(async () => {
+      admin = await Role.create({ name: 'admin' });
+      editor = await Role.create({ name: 'editor' });
+      readPerm = await Permission.create({ name: 'read' });
+      writePerm = await Permission.create({ name: 'write' });
+      deletePerm = await Permission.create({ name: 'delete' });
+
+      const userRolesSQL = `INSERT INTO "user_roles" ("userId", "roleId") VALUES (?, ?)`;
+      await seq._adapter.dml._executeRun(userRolesSQL, [1, admin.getDataValue('id')]);
+      await seq._adapter.dml._executeRun(userRolesSQL, [1, editor.getDataValue('id')]);
+      await seq._adapter.dml._executeRun(userRolesSQL, [2, admin.getDataValue('id')]);
+
+      const rolePermsSQL = `INSERT INTO "role_permissions" ("roleId", "permissionId") VALUES (?, ?)`;
+      await seq._adapter.dml._executeRun(rolePermsSQL, [admin.getDataValue('id'), readPerm.getDataValue('id')]);
+      await seq._adapter.dml._executeRun(rolePermsSQL, [admin.getDataValue('id'), writePerm.getDataValue('id')]);
+      await seq._adapter.dml._executeRun(rolePermsSQL, [admin.getDataValue('id'), deletePerm.getDataValue('id')]);
+      await seq._adapter.dml._executeRun(rolePermsSQL, [editor.getDataValue('id'), readPerm.getDataValue('id')]);
+      await seq._adapter.dml._executeRun(rolePermsSQL, [editor.getDataValue('id'), writePerm.getDataValue('id')]);
+    });
+
+    it('loads roles via LEFT JOIN through junction table', async () => {
+      const users = await User.findAll({ include: Role, eager: true });
+      assert.equal(users.length, 2);
+
+      const ana = users.find(u => u.getDataValue('name') === 'Ana');
+      const anaRoles = ana.getDataValue('roles');
+      assert.ok(Array.isArray(anaRoles));
+      assert.equal(anaRoles.length, 2);
+      const anaRoleNames = anaRoles.map(r => r.getDataValue('name')).sort();
+      assert.deepEqual(anaRoleNames, ['admin', 'editor']);
+
+      const juan = users.find(u => u.getDataValue('name') === 'Juan');
+      const juanRoles = juan.getDataValue('roles');
+      assert.ok(Array.isArray(juanRoles));
+      assert.equal(juanRoles.length, 1);
+      assert.equal(juanRoles[0].getDataValue('name'), 'admin');
+    });
+
+    it('loads permissions via LEFT JOIN through junction table', async () => {
+      const roles = await Role.findAll({ include: Permission, eager: true });
+      assert.equal(roles.length, 2);
+
+      const adminRole = roles.find(r => r.getDataValue('name') === 'admin');
+      const adminPerms = adminRole.getDataValue('permissions');
+      assert.ok(Array.isArray(adminPerms));
+      assert.equal(adminPerms.length, 3);
+      const adminPermNames = adminPerms.map(p => p.getDataValue('name')).sort();
+      assert.deepEqual(adminPermNames, ['delete', 'read', 'write']);
+
+      const editorRole = roles.find(r => r.getDataValue('name') === 'editor');
+      const editorPerms = editorRole.getDataValue('permissions');
+      assert.ok(Array.isArray(editorPerms));
+      assert.equal(editorPerms.length, 2);
+      const editorPermNames = editorPerms.map(p => p.getDataValue('name')).sort();
+      assert.deepEqual(editorPermNames, ['read', 'write']);
+    });
+
+    it('eager belongsToMany with where filter', async () => {
+      const roles = await Role.findAll({
+        include: [{ model: Permission, where: { name: 'read' } }],
+        eager: true,
+      });
+      assert.ok(roles.length >= 2);
+      for (const role of roles) {
+        const perms = role.getDataValue('permissions');
+        assert.ok(Array.isArray(perms));
+        assert.ok(perms.every(p => p.getDataValue('name') === 'read'));
+      }
+    });
+
+    it('mixed: eager belongsToMany + lazy hasMany', async () => {
+      const users = await User.findAll({
+        include: [
+          { model: Role, eager: true },
+          { model: Task },
+        ],
+      });
+      const ana = users.find(u => u.getDataValue('name') === 'Ana');
+      assert.ok(Array.isArray(ana.getDataValue('roles')));
+      assert.equal(ana.getDataValue('roles').length, 2);
+      assert.ok(Array.isArray(ana.getDataValue('tasks')));
+      assert.equal(ana.getDataValue('tasks').length, 2);
     });
   });
 });

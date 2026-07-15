@@ -160,6 +160,24 @@ export class Seq {
       }
     }
 
+    const junctions = this._buildJunctionTables();
+    for (const assoc of junctions) {
+      const through = assoc.through;
+      if (existingTables.includes(through)) {
+        if (force) {
+          await this._adapter.ddl.dropTable(through);
+          await this._adapter.ddl.createTable(this._buildJunctionTableDefinition(assoc));
+          result.dropped.push(through);
+          result.created.push(through);
+        } else {
+          result.existing.push(through);
+        }
+      } else {
+        await this._adapter.ddl.createTable(this._buildJunctionTableDefinition(assoc));
+        result.created.push(through);
+      }
+    }
+
     this._log('Sync complete:', result);
     return result;
   }
@@ -298,6 +316,114 @@ export class Seq {
       attrToColumn,
       columnToAttr
     };
+  }
+
+  /**
+   * Builds a table definition for a belongsToMany junction/pivot table.
+   * @param {import('./Association.js').Association} assoc
+   * @returns {object}
+   * @private
+   */
+  _buildJunctionTableDefinition(assoc) {
+    const source = assoc.source;
+    const target = assoc.target;
+    const through = assoc.through;
+    const fkAttr = assoc.foreignKey;
+    const otherKeyAttr = assoc.otherKey;
+
+    const sourcePKAttr = source.primaryKeyAttribute || 'id';
+    const sourcePKDef = source.rawAttributes[sourcePKAttr] || {};
+    const sourcePKType = sourcePKDef.type;
+    const sourcePKCol = this._resolveColumnName(sourcePKDef, sourcePKAttr);
+
+    const targetPKAttr = target.primaryKeyAttribute || 'id';
+    const targetPKDef = target.rawAttributes[targetPKAttr] || {};
+    const targetPKType = targetPKDef.type;
+    const targetPKCol = this._resolveColumnName(targetPKDef, targetPKAttr);
+
+    const sourceTable = source._resolvedTableName || this._resolveTableName(source);
+    const targetTable = target._resolvedTableName || this._resolveTableName(target);
+
+    const fkCol = fkAttr;
+    const otherKeyCol = otherKeyAttr;
+
+    const columns = {
+      [fkAttr]: {
+        type: sourcePKType,
+        primaryKey: false,
+        autoIncrement: false,
+        allowNull: false,
+        field: fkCol
+      },
+      [otherKeyAttr]: {
+        type: targetPKType,
+        primaryKey: false,
+        autoIncrement: false,
+        allowNull: false,
+        field: otherKeyCol
+      }
+    };
+
+    const uniqueConstraints = [{
+      columns: [fkCol, otherKeyCol],
+      constraintName: `uk_${through}_${fkCol}_${otherKeyCol}`
+    }];
+
+    const foreignKeys = [
+      {
+        attributeName: fkAttr,
+        columnName: fkCol,
+        constraintName: `fk_${through}_${fkCol}`,
+        references: { model: source.modelName, table: sourceTable, key: sourcePKAttr, column: sourcePKCol },
+        onDelete: 'CASCADE',
+        onUpdate: 'CASCADE'
+      },
+      {
+        attributeName: otherKeyAttr,
+        columnName: otherKeyCol,
+        constraintName: `fk_${through}_${otherKeyCol}`,
+        references: { model: target.modelName, table: targetTable, key: targetPKAttr, column: targetPKCol },
+        onDelete: 'CASCADE',
+        onUpdate: 'CASCADE'
+      }
+    ];
+
+    return {
+      modelName: null,
+      tableName: through,
+      columns,
+      uniqueConstraints,
+      indexes: [],
+      foreignKeys,
+      primaryKey: null,
+      autoIncrement: null,
+      primaryKeyAttribute: null,
+      autoIncrementAttribute: null,
+      timestamps: false,
+      createdAt: 'createdAt',
+      updatedAt: 'updatedAt',
+      attrToColumn: { [fkAttr]: fkCol, [otherKeyAttr]: otherKeyCol },
+      columnToAttr: { [fkCol]: fkAttr, [otherKeyCol]: otherKeyAttr }
+    };
+  }
+
+  /**
+   * Collects unique junction tables from all belongsToMany associations.
+   * @returns {import('./Association.js').Association[]}
+   * @private
+   */
+  _buildJunctionTables() {
+    const junctions = [];
+    const seen = new Set();
+    for (const modelClass of this._registry.all()) {
+      for (const assoc of Object.values(modelClass.associations || {})) {
+        if (assoc.type !== 'belongsToMany') continue;
+        if (seen.has(assoc.through)) continue;
+        seen.add(assoc.through);
+        junctions.push(assoc);
+      }
+    }
+    return junctions;
   }
 
   _buildForeignKeys(modelClass, attrToColumn) {

@@ -84,6 +84,9 @@ export async function loadIncludes(instances, includes, model, dml) {
       case 'belongsTo':
         await _loadBelongsTo(instances, inc, assoc, alias, dml);
         break;
+      case 'belongsToMany':
+        await _loadBelongsToMany(instances, inc, assoc, alias, dml);
+        break;
       default:
         for (const instance of instances) {
           instance.setDataValue(alias, null);
@@ -169,6 +172,53 @@ async function _loadBelongsTo(instances, inc, assoc, alias, dml) {
     const fkVal = instance.getDataValue(fkAttr);
     const match = targets.find(t => t.getDataValue(targetPK) === fkVal);
     instance.setDataValue(alias, match || null);
+  }
+}
+
+async function _loadBelongsToMany(instances, inc, assoc, alias, dml) {
+  const target = assoc.target;
+  const sourcePK = assoc.source.primaryKeyAttribute || 'id';
+  const targetPK = target.primaryKeyAttribute || 'id';
+  const fkAttr = assoc.foreignKey;
+  const otherKeyAttr = assoc.otherKey;
+  const through = assoc.through;
+
+  const sourceIds = instances
+    .map(i => i.getDataValue(sourcePK))
+    .filter(id => id !== null && id !== undefined);
+
+  if (sourceIds.length === 0) {
+    for (const instance of instances) {
+      instance.setDataValue(alias, []);
+    }
+    return;
+  }
+
+  const q = (name) => dml._adapter._quoteIdentifier(name);
+  const placeholders = sourceIds.map(() => '?').join(', ');
+  const junctionSQL = `SELECT ${q(fkAttr)}, ${q(otherKeyAttr)} FROM ${q(through)} WHERE ${q(fkAttr)} IN (${placeholders})`;
+  const serializedParams = sourceIds.map(id => dml._serializeValue(id));
+  const junctionRows = await dml._executeQueryAll(junctionSQL, serializedParams);
+
+  const targetIds = [...new Set(junctionRows.map(r => r[otherKeyAttr]).filter(id => id !== null && id !== undefined))];
+
+  if (targetIds.length === 0) {
+    for (const instance of instances) {
+      instance.setDataValue(alias, []);
+    }
+    return;
+  }
+
+  const targetWhere = { [targetPK]: { [Op.in]: targetIds }, ...inc.where };
+  const targets = await dml.selectAll(target, { where: targetWhere });
+
+  for (const instance of instances) {
+    const pkVal = instance.getDataValue(sourcePK);
+    const relatedTargetIds = junctionRows
+      .filter(r => r[fkAttr] === pkVal)
+      .map(r => r[otherKeyAttr]);
+    const matching = targets.filter(t => relatedTargetIds.includes(t.getDataValue(targetPK)));
+    instance.setDataValue(alias, matching);
   }
 }
 
