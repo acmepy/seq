@@ -18,6 +18,7 @@ class Task extends Model {
       {
         id: { type: DataTypes.INTEGER, primaryKey: true, autoIncrement: true },
         title: { type: DataTypes.STRING(100), allowNull: false },
+        completed: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: false },
         userId: { type: DataTypes.INTEGER, allowNull: false }
       },
       { seq, modelName: 'Task', timestamps: true }
@@ -60,9 +61,9 @@ const ana = await User.create({ name: 'Ana' });
 const juan = await User.create({ name: 'Juan' });
 
 await Task.bulkCreate([
-  { title: 'Design FK system', userId: ana.getDataValue('id') },
-  { title: 'Write tests', userId: ana.getDataValue('id') },
-  { title: 'Update docs', userId: juan.getDataValue('id') }
+  { title: 'Design FK system', userId: ana.getDataValue('id'), completed: true },
+  { title: 'Write tests', userId: ana.getDataValue('id'), completed: false },
+  { title: 'Update docs', userId: juan.getDataValue('id'), completed: true }
 ]);
 
 await Profile.create({ bio: 'Full-stack developer', userId: ana.getDataValue('id') });

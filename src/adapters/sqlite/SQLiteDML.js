@@ -78,7 +78,7 @@ export class SQLiteDML extends DMLAbstract {
 
   async truncate(model, options = {}) {
     const { tableName } = this._schema(model);
-    this._executeRun(`DELETE FROM "${tableName}"`, []);
+    this._executeRun(`DELETE FROM ${this._q(tableName)}`, []);
     this._executeRun(`DELETE FROM sqlite_sequence WHERE name='${tableName}'`, []);
   }
 }

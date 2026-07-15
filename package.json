@@ -1,6 +1,6 @@
 {
   "name": "seq",
-  "version": "0.3.3",
+  "version": "0.3.4",
   "description": "seq es un micro orm, modular, flexible y de facil integracion",
   "type": "module",
   "main": "src/index.js",
@@ -12,8 +12,8 @@
     "test:watch": "node --test --watch tests/*.test.js",
     "basic": "node examples/basic.js",
     "associations": "node examples/associations.js",
-    "find": "node examples/find.js",
-    "examples": "npm run basic && npm run associations && npm run find"
+    "include": "node examples/include.js",
+    "examples": "npm run basic && npm run associations && npm run find && npm run include"
   },
   "keywords": [
     "orm",

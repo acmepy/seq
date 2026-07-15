@@ -3,6 +3,7 @@ import { Association } from './Association.js';
 import { ModelError } from './errors/ModelError.js';
 import { ValidationError, ValidationWhereError, ValidationOrderError, ValidationLimitError, ValidationOffsetError } from './errors/ValidationError.js';
 import { DataTypes } from '../data-types/index.js';
+import { normalizeInclude } from '../utils/include.js';
 
 /**
  * Base Model class. All user-defined models must extend this.
@@ -106,6 +107,8 @@ export class Model {
     this.seq = options.seq || null;
     this.associations = this.associations || {};
 
+    this.alias = options.alias || this.modelName.split(/(?=[A-Z])/).map(w => w[0].toLowerCase()).join('');
+
     return this;
   }
 
@@ -134,6 +137,7 @@ export class Model {
       );
     }
     if (!this.associations) this.associations = {};
+    if (!options.as) options.as = (target.modelName || target.name || 'unknown').toLowerCase() + 's';
     const assoc = new Association('hasMany', this, target, { ...options, foreignKey: fkAttr });
     this.associations[target.modelName || target.name || 'unknown'] = assoc;
     return this;
@@ -151,6 +155,7 @@ export class Model {
       );
     }
     if (!this.associations) this.associations = {};
+    if (!options.as) options.as = (target.modelName || target.name || 'unknown').toLowerCase() + 's';
     const assoc = new Association('hasOne', this, target, { ...options, foreignKey: fkAttr });
     this.associations[target.modelName || target.name || 'unknown'] = assoc;
     return this;
@@ -168,6 +173,7 @@ export class Model {
       );
     }
     if (!this.associations) this.associations = {};
+    if (!options.as) options.as = (target.modelName || target.name || 'unknown').toLowerCase();
     const assoc = new Association('belongsTo', this, target, { ...options, foreignKey: fkAttr });
     this.associations[target.modelName || target.name || 'unknown'] = assoc;
     return this;
@@ -180,6 +186,7 @@ export class Model {
     const fkAttr = options.foreignKey || this._defaultForeignKeyName(this.modelName, this.primaryKeyAttribute || 'id');
     const otherKey = options.otherKey || this._defaultForeignKeyName(target.modelName || target.name, target.primaryKeyAttribute || 'id');
     if (!this.associations) this.associations = {};
+    if (!options.as) options.as = (target.modelName || target.name || 'unknown').toLowerCase() + 's';
     const assoc = new Association('belongsToMany', this, target, { ...options, foreignKey: fkAttr, otherKey });
     this.associations[target.modelName || target.name || 'unknown'] = assoc;
     return this;
@@ -269,6 +276,7 @@ export class Model {
     if (options.order !== undefined && !Array.isArray(options.order)) throw new ValidationOrderError();
     if (options.limit !== undefined && (!Number.isInteger(options.limit) || options.limit < 1))  throw new ValidationLimitError();
     if (options.offset !== undefined && (!Number.isInteger(options.offset) || options.offset < 0)) throw new ValidationOffsetError();
+    if (options.include) options.include = normalizeInclude(options.include);
     this._log(`${this.modelName}.findAll`, options);
     return this._adapter.dml.selectAll(this, options);
   }

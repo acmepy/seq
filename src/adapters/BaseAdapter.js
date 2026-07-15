@@ -45,6 +45,17 @@ export class BaseAdapter {
   }
 
   /**
+   * Quotes a SQL identifier (table, column, index, constraint name).
+   * Default uses double quotes (standard SQL). Override for adapter-specific quoting.
+   * MySQL: `\`${name}\``, SQL Server: `[${name}]`
+   * @param {string} name - The identifier to quote
+   * @returns {string}
+   */
+  _quoteIdentifier(name) {
+    return `"${name}"`;
+  }
+
+  /**
    * Returns the case style for identifiers (table/column names).
    * Subclasses can override to return 'upper' for databases like Oracle.
    * @returns {string} 'lower' | 'upper' | undefined

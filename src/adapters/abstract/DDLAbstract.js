@@ -8,6 +8,14 @@ import { AdapterError } from '../../core/errors/AdapterError.js';
  * Adapter-specific subclasses must implement the low-level methods.
  */
 export class DDLAbstract extends BaseAbstract {
+  constructor(adapter) {
+    super(adapter);
+  }
+
+  _q(name) {
+    return this._adapter._quoteIdentifier(name);
+  }
+
   // ---------------------------------------------------------------------------
   // Orchestration — ordered DDL phases
   // ---------------------------------------------------------------------------
@@ -140,7 +148,7 @@ export class DDLAbstract extends BaseAbstract {
     const schema = this._adapter.schemas.get(tableName);
     for (const [name, colDef] of Object.entries(missingColumns)) {
       const colType = this._adapter.mapDataType(colDef.type);
-      this._adapter._db.prepare(`ALTER TABLE "${tableName}" ADD COLUMN "${name}" ${colType}`).run();
+      this._adapter._db.prepare(`ALTER TABLE ${this._q(tableName)} ADD COLUMN ${this._q(name)} ${colType}`).run();
       schema.columns[name] = colDef;
     }
   }
@@ -153,8 +161,8 @@ export class DDLAbstract extends BaseAbstract {
   async addUniqueConstraint(tableName, constraint) {
     this._log('DDL.addUniqueConstraint', tableName, constraint.constraintName);
     const schema = this._adapter.schemas.get(tableName);
-    const cols = constraint.columns.join('", "');
-    const sql = `CREATE UNIQUE INDEX "${constraint.constraintName}" ON "${tableName}" ("${cols}")`;
+    const cols = constraint.columns.map(c => this._q(c)).join(', ');
+    const sql = `CREATE UNIQUE INDEX ${this._q(constraint.constraintName)} ON ${this._q(tableName)} (${cols})`;
     this._adapter._db.prepare(sql).run();
     schema.uniqueConstraints.push({ ...constraint });
   }
@@ -167,9 +175,9 @@ export class DDLAbstract extends BaseAbstract {
   async addIndex(tableName, index) {
     this._log('DDL.addIndex', tableName, index.name);
     const schema = this._adapter.schemas.get(tableName);
-    const cols = index.columns.join('", "');
+    const cols = index.columns.map(c => this._q(c)).join(', ');
     const unique = index.unique ? 'UNIQUE ' : '';
-    const sql = `CREATE ${unique}INDEX "${index.name}" ON "${tableName}" ("${cols}")`;
+    const sql = `CREATE ${unique}INDEX ${this._q(index.name)} ON ${this._q(tableName)} (${cols})`;
     this._adapter._db.prepare(sql).run();
     schema.indexes.push({ ...index });
   }
@@ -182,7 +190,7 @@ export class DDLAbstract extends BaseAbstract {
   async addForeignKey(tableName, fk) {
     this._log('DDL.addForeignKey', tableName, fk.constraintName);
     if (this._adapter.fkStrategy === 'alter'){
-      const sql = `ALTER TABLE "${tableName}" ADD CONSTRAINT "${fk.constraintName}" FOREIGN KEY ("${fk.columnName}") REFERENCES "${fk.references.table}" ("${fk.references.column}") ON DELETE ${fk.onDelete || 'RESTRICT'} ON UPDATE ${fk.onUpdate || 'RESTRICT'}`;
+      const sql = `ALTER TABLE ${this._q(tableName)} ADD CONSTRAINT ${this._q(fk.constraintName)} FOREIGN KEY (${this._q(fk.columnName)}) REFERENCES ${this._q(fk.references.table)} (${this._q(fk.references.column)}) ON DELETE ${fk.onDelete || 'RESTRICT'} ON UPDATE ${fk.onUpdate || 'RESTRICT'}`;
       this._adapter._db.prepare(sql).run();
     }
     const schema = this._adapter.schemas.get(tableName);

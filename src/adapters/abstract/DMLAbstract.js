@@ -3,6 +3,7 @@ import { AdapterError } from '../../core/errors/AdapterError.js';
 import { ValidationError } from '../../core/errors/ValidationError.js';
 import { Op } from '../../operators.js';
 import { resolveWhereValue } from '../../utils/where.js';
+import { loadIncludes, processJoinedRows, resolveIncludeAlias, resolveEager } from '../../utils/include.js';
 
 /**
  * Base DML abstract.
@@ -25,9 +26,9 @@ export class DMLAbstract extends BaseAbstract {
   }
 
   /**
-   * Returns the table name and schema for a model.
+   * Returns the table name, schema, and alias for a model.
    * @param {typeof import('../../core/Model.js').Model} model
-   * @returns {{ tableName: string, schema: object }}
+   * @returns {{ tableName: string, schema: object, alias: string|null }}
    */
   _schema(model) {
     const tableName = this._getTableName(model);
@@ -35,7 +36,21 @@ export class DMLAbstract extends BaseAbstract {
     if (!schema) {
       throw new AdapterError(`Table "${tableName}" does not exist`, { code: 'SEQ_ADAPTER_TABLE_NOT_FOUND' });
     }
-    return { tableName, schema };
+    return { tableName, schema, alias: model.alias || null };
+  }
+
+  /**
+   * Generates a column reference, optionally prefixed with a table alias.
+   * @param {string} colName
+   * @param {string|null} alias
+   * @returns {string}
+   */
+  _q(name) {
+    return this._adapter._quoteIdentifier(name);
+  }
+
+  _colRef(colName, alias) {
+    return alias ? `${this._q(alias)}.${this._q(colName)}` : this._q(colName);
   }
 
   /**
@@ -89,69 +104,71 @@ export class DMLAbstract extends BaseAbstract {
    * Builds a WHERE clause from a where object.
    * @param {object} where - Attribute-name where clause
    * @param {object} schema
+   * @param {string|null} [alias=null] - Table alias for column references
    * @returns {{ sql: string, params: *[] }}
    */
-  _buildWhere(where, schema) {
+  _buildWhere(where, schema, alias = null) {
     if (!where) return { sql: '', params: [] };
     const colWhere = this._translateWhere(where, schema);
     const params = [];
     const conditions = [];
     for (const [k, v] of Object.entries(colWhere)) {
+      const col = this._colRef(k, alias);
       const { op, value } = resolveWhereValue(v);
       switch (op) {
         case Op.eq:
           params.push(this._serializeValue(value));
-          conditions.push(`"${k}" = ?`);
+          conditions.push(`${col} = ?`);
           break;
         case Op.ne:
           params.push(this._serializeValue(value));
-          conditions.push(`"${k}" != ?`);
+          conditions.push(`${col} != ?`);
           break;
         case Op.gt:
           params.push(this._serializeValue(value));
-          conditions.push(`"${k}" > ?`);
+          conditions.push(`${col} > ?`);
           break;
         case Op.gte:
           params.push(this._serializeValue(value));
-          conditions.push(`"${k}" >= ?`);
+          conditions.push(`${col} >= ?`);
           break;
         case Op.lt:
           params.push(this._serializeValue(value));
-          conditions.push(`"${k}" < ?`);
+          conditions.push(`${col} < ?`);
           break;
         case Op.lte:
           params.push(this._serializeValue(value));
-          conditions.push(`"${k}" <= ?`);
+          conditions.push(`${col} <= ?`);
           break;
         case Op.like:
           params.push(this._serializeValue(value));
-          conditions.push(`"${k}" LIKE ?`);
+          conditions.push(`${col} LIKE ?`);
           break;
         case Op.notLike:
           params.push(this._serializeValue(value));
-          conditions.push(`"${k}" NOT LIKE ?`);
+          conditions.push(`${col} NOT LIKE ?`);
           break;
         case Op.in:
           const inParams = value.map(v => this._serializeValue(v));
           params.push(...inParams);
-          conditions.push(`"${k}" IN (${inParams.map(() => '?').join(', ')})`);
+          conditions.push(`${col} IN (${inParams.map(() => '?').join(', ')})`);
           break;
         case Op.notIn:
           const notInParams = value.map(v => this._serializeValue(v));
           params.push(...notInParams);
-          conditions.push(`"${k}" NOT IN (${notInParams.map(() => '?').join(', ')})`);
+          conditions.push(`${col} NOT IN (${notInParams.map(() => '?').join(', ')})`);
           break;
         case Op.between:
           params.push(this._serializeValue(value[0]), this._serializeValue(value[1]));
-          conditions.push(`"${k}" BETWEEN ? AND ?`);
+          conditions.push(`${col} BETWEEN ? AND ?`);
           break;
         case Op.notBetween:
           params.push(this._serializeValue(value[0]), this._serializeValue(value[1]));
-          conditions.push(`"${k}" NOT BETWEEN ? AND ?`);
+          conditions.push(`${col} NOT BETWEEN ? AND ?`);
           break;
         default:
           params.push(this._serializeValue(value));
-          conditions.push(`"${k}" = ?`);
+          conditions.push(`${col} = ?`);
       }
     }
     return { sql: ` WHERE ${conditions.join(' AND ')}`, params };
@@ -161,13 +178,14 @@ export class DMLAbstract extends BaseAbstract {
    * Builds an ORDER BY clause.
    * @param {Array} order - Array of [attr, direction] pairs
    * @param {object} schema
+   * @param {string|null} [alias=null] - Table alias for column references
    * @returns {string}
    */
-  _buildOrderBy(order, schema) {
+  _buildOrderBy(order, schema, alias = null) {
     if (!order || order.length === 0) return '';
     const clauses = order.map(([attr, dir]) => {
       const col = schema.attrToColumn[attr] || attr;
-      return `"${col}" ${dir}`;
+      return `${this._colRef(col, alias)} ${dir}`;
     });
     return ` ORDER BY ${clauses.join(', ')}`;
   }
@@ -186,6 +204,134 @@ export class DMLAbstract extends BaseAbstract {
       return ` LIMIT -1 OFFSET ${options.offset}`;
     }
     return '';
+  }
+
+  /**
+   * Builds a SELECT clause with table-qualified column aliases for JOINs.
+   * Format: "alias"."col" AS "alias__col"
+   * @param {typeof import('../../core/Model.js').Model} model
+   * @param {object} schema
+   * @param {string|null} alias
+   * @param {object[]} includes - Normalized include descriptors
+   * @returns {string}
+   */
+  _buildQualifiedSelect(model, schema, alias, includes) {
+    const parts = [];
+    const aliasPrefix = alias || this._getTableName(model);
+    for (const [attrName, colDef] of Object.entries(schema.columns || {})) {
+      const colName = schema.attrToColumn[attrName] || attrName;
+      parts.push(`${this._colRef(colName, alias)} AS ${this._q(`${aliasPrefix}.${attrName}`)}`);
+    }
+    for (const inc of includes) {
+      if (!inc.model) continue;
+      const { schema: incSchema, alias: incAlias } = this._schema(inc.model);
+      const incAliasPrefix = incAlias || this._getTableName(inc.model);
+      for (const [attrName, colDef] of Object.entries(incSchema.columns || {})) {
+        const colName = incSchema.attrToColumn[attrName] || attrName;
+        parts.push(`${this._colRef(colName, incAlias)} AS ${this._q(`${incAliasPrefix}.${attrName}`)}`);
+      }
+    }
+    return parts.join(', ');
+  }
+
+  /**
+   * Builds LEFT JOIN clauses for includes.
+   * @param {object[]} includes - Normalized include descriptors (eager only)
+   * @param {typeof import('../../core/Model.js').Model} model
+   * @param {string|null} parentAlias
+   * @param {function} resolveIncludeAliasFn - resolveIncludeAlias function
+   * @returns {{ sql: string, params: *[] }}
+   */
+  _buildJoinClause(includes, model, parentAlias, resolveIncludeAliasFn) {
+    let sql = '';
+    const params = [];
+    const { schema: parentSchema } = this._schema(model);
+    for (const inc of includes) {
+      if (!inc.model) continue;
+      const assoc = model.associations?.[inc.model.modelName];
+      if (!assoc) continue;
+      const { tableName: targetTable, schema: targetSchema, alias: targetAlias } = this._schema(inc.model);
+      const joinAlias = targetAlias || targetTable;
+      const fkAttr = assoc.foreignKey;
+      let onClause;
+      if (assoc.type === 'belongsTo') {
+        const fkCol = parentSchema.attrToColumn[fkAttr] || fkAttr;
+        const targetPKAttr = assoc.target.primaryKeyAttribute || 'id';
+        const targetPKCol = targetSchema.attrToColumn[targetPKAttr] || targetPKAttr;
+        onClause = `${this._colRef(fkCol, parentAlias)} = ${this._colRef(targetPKCol, joinAlias)}`;
+      } else {
+        const pkAttr = model.primaryKeyAttribute || 'id';
+        const pkCol = parentSchema.attrToColumn[pkAttr] || pkAttr;
+        const fkCol = targetSchema.attrToColumn[fkAttr] || fkAttr;
+        onClause = `${this._colRef(pkCol, parentAlias)} = ${this._colRef(fkCol, joinAlias)}`;
+      }
+      if (inc.where) {
+        const incTranslated = this._translateWhere(inc.where, targetSchema);
+        for (const [k, v] of Object.entries(incTranslated)) {
+          const col = this._colRef(k, joinAlias);
+          const { op, value } = resolveWhereValue(v);
+          switch (op) {
+            case Op.eq:
+              params.push(this._serializeValue(value));
+              onClause += ` AND ${col} = ?`;
+              break;
+            case Op.ne:
+              params.push(this._serializeValue(value));
+              onClause += ` AND ${col} != ?`;
+              break;
+            case Op.gt:
+              params.push(this._serializeValue(value));
+              onClause += ` AND ${col} > ?`;
+              break;
+            case Op.gte:
+              params.push(this._serializeValue(value));
+              onClause += ` AND ${col} >= ?`;
+              break;
+            case Op.lt:
+              params.push(this._serializeValue(value));
+              onClause += ` AND ${col} < ?`;
+              break;
+            case Op.lte:
+              params.push(this._serializeValue(value));
+              onClause += ` AND ${col} <= ?`;
+              break;
+            case Op.like:
+              params.push(this._serializeValue(value));
+              onClause += ` AND ${col} LIKE ?`;
+              break;
+            case Op.notLike:
+              params.push(this._serializeValue(value));
+              onClause += ` AND ${col} NOT LIKE ?`;
+              break;
+            case Op.in: {
+              const inParams = value.map(v => this._serializeValue(v));
+              params.push(...inParams);
+              onClause += ` AND ${col} IN (${inParams.map(() => '?').join(', ')})`;
+              break;
+            }
+            case Op.notIn: {
+              const notInParams = value.map(v => this._serializeValue(v));
+              params.push(...notInParams);
+              onClause += ` AND ${col} NOT IN (${notInParams.map(() => '?').join(', ')})`;
+              break;
+            }
+            case Op.between:
+              params.push(this._serializeValue(value[0]), this._serializeValue(value[1]));
+              onClause += ` AND ${col} BETWEEN ? AND ?`;
+              break;
+            case Op.notBetween:
+              params.push(this._serializeValue(value[0]), this._serializeValue(value[1]));
+              onClause += ` AND ${col} NOT BETWEEN ? AND ?`;
+              break;
+            default:
+              params.push(this._serializeValue(value));
+              onClause += ` AND ${col} = ?`;
+          }
+        }
+      }
+      sql += ` LEFT JOIN ${this._q(targetTable)} AS ${this._q(joinAlias)} ON ${onClause}`;
+    }
+    return { sql, params };
   }
 
   // ---------------------------------------------------------------------------
@@ -245,16 +391,49 @@ export class DMLAbstract extends BaseAbstract {
    */
   async selectAll(model, options = {}) {
     this._log('DML.selectAll', model.modelName, options);
-    const { tableName, schema } = this._schema(model);
-    let sql = `SELECT * FROM "${tableName}"`;
+    const { tableName, schema, alias } = this._schema(model);
+    const includes = options.include || [];
+    const globalEager = options.eager || false;
+    const eagerIncludes = [];
+    const lazyIncludes = [];
+    for (const inc of includes) {
+      if (resolveEager(inc, globalEager)) {
+        eagerIncludes.push(inc);
+      } else {
+        lazyIncludes.push(inc);
+      }
+    }
+    let sql;
     const params = [];
-    const where = this._buildWhere(options.where, schema);
+    if (eagerIncludes.length > 0) {
+      const qualifiedSelect = this._buildQualifiedSelect(model, schema, alias, eagerIncludes);
+      sql = alias
+        ? `SELECT ${qualifiedSelect} FROM ${this._q(tableName)} AS ${this._q(alias)}`
+        : `SELECT ${qualifiedSelect} FROM ${this._q(tableName)}`;
+      const joins = this._buildJoinClause(eagerIncludes, model, alias, resolveIncludeAlias);
+      sql += joins.sql;
+      params.push(...joins.params);
+    } else {
+      sql = alias
+        ? `SELECT * FROM ${this._q(tableName)} AS ${this._q(alias)}`
+        : `SELECT * FROM ${this._q(tableName)}`;
+    }
+    const where = this._buildWhere(options.where, schema, alias);
     sql += where.sql;
     params.push(...where.params);
-    sql += this._buildOrderBy(options.order, schema);
+    sql += this._buildOrderBy(options.order, schema, alias);
     sql += this._buildLimitOffset(options);
     const rows = await this._executeQueryAll(sql, params);
-    return this._mapRows(rows, model, schema);
+    let instances;
+    if (eagerIncludes.length > 0) {
+      instances = processJoinedRows(rows, model, eagerIncludes, this);
+    } else {
+      instances = this._mapRows(rows, model, schema);
+    }
+    if (lazyIncludes.length > 0) {
+      await loadIncludes(instances, lazyIncludes, model, this);
+    }
+    return instances;
   }
 
   /**
@@ -265,10 +444,12 @@ export class DMLAbstract extends BaseAbstract {
    */
   async count(model, options = {}) {
     this._log('DML.count', model.modelName, options);
-    const { tableName, schema } = this._schema(model);
-    let sql = `SELECT COUNT(*) as cnt FROM "${tableName}"`;
+    const { tableName, schema, alias } = this._schema(model);
+    let sql = alias
+      ? `SELECT COUNT(*) as cnt FROM ${this._q(tableName)} AS ${this._q(alias)}`
+      : `SELECT COUNT(*) as cnt FROM ${this._q(tableName)}`;
     const params = [];
-    const where = this._buildWhere(options.where, schema);
+    const where = this._buildWhere(options.where, schema, alias);
     sql += where.sql;
     params.push(...where.params);
     const row = await this._executeGet(sql, params);
@@ -287,10 +468,10 @@ export class DMLAbstract extends BaseAbstract {
     const { tableName, schema } = this._schema(model);
     const colValues = this._toColumnNames(values, schema);
     this._applyTimestamps(colValues, schema);
-    const setClauses = Object.keys(colValues).map(k => `"${k}" = ?`);
+    const setClauses = Object.keys(colValues).map(k => `${this._q(k)} = ?`);
     const params = [...Object.values(colValues).map(v => this._serializeValue(v))];
     const where = this._buildWhere(options.where, schema);
-    const sql = `UPDATE "${tableName}" SET ${setClauses.join(', ')}${where.sql}`;
+    const sql = `UPDATE ${this._q(tableName)} SET ${setClauses.join(', ')}${where.sql}`;
     params.push(...where.params);
     await this._executeRun(sql, params);
     if (options.where) return await this.selectAll(model, options);
@@ -308,7 +489,7 @@ export class DMLAbstract extends BaseAbstract {
     const { tableName, schema } = this._schema(model);
     const params = [];
     const where = this._buildWhere(options.where, schema);
-    const sql = `DELETE FROM "${tableName}"${where.sql}`;
+    const sql = `DELETE FROM ${this._q(tableName)}${where.sql}`;
     params.push(...where.params);
     const info = await this._executeRun(sql, params);
     return info.changes;
@@ -336,9 +517,9 @@ export class DMLAbstract extends BaseAbstract {
     }
     this._validateRecord(colRecord, schema, model.modelName);
     const cols = Object.keys(colRecord);
-    const colNames = cols.map(c => `"${c}"`).join(', ');
+    const colNames = cols.map(c => this._q(c)).join(', ');
     const placeholders = cols.map(() => '?').join(', ');
-    const sql = `INSERT INTO "${tableName}" (${colNames}) VALUES (${placeholders})`;
+    const sql = `INSERT INTO ${this._q(tableName)} (${colNames}) VALUES (${placeholders})`;
     const params = cols.map(c => this._serializeValue(colRecord[c]));
     const info = await this._executeRun(sql, params);
     if (schema.primaryKey && !colRecord[schema.primaryKey]) {

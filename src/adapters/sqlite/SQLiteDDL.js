@@ -42,17 +42,17 @@ export class SQLiteDDL extends DDLAbstract {
       const fkName = fk.constraintName;
       const onDelete = fk.onDelete || 'RESTRICT';
       const onUpdate = fk.onUpdate || 'RESTRICT';
-      colDefs.push(`CONSTRAINT "${fkName}" FOREIGN KEY ("${colName}") REFERENCES "${refTable}" ("${refCol}") ON DELETE ${onDelete} ON UPDATE ${onUpdate}`);
+      colDefs.push(`CONSTRAINT ${this._q(fkName)} FOREIGN KEY (${this._q(colName)}) REFERENCES ${this._q(refTable)} (${this._q(refCol)}) ON DELETE ${onDelete} ON UPDATE ${onUpdate}`);
       const schema = this._adapter.schemas.get(def.tableName);
       schema.foreignKeys.push({ ...fk });
     }
 
-    const sql = `CREATE TABLE "${def.tableName}" (\n  ${colDefs.join(',\n  ')}\n)`;
+    const sql = `CREATE TABLE ${this._q(def.tableName)} (\n  ${colDefs.join(',\n  ')}\n)`;
     this._db().prepare(sql).run();
   }
 
   async dropTable(tableName, options = {}) {
-    this._db().prepare(`DROP TABLE IF EXISTS "${tableName}"`).run();
+    this._db().prepare(`DROP TABLE IF EXISTS ${this._q(tableName)}`).run();
     await super.dropTable(tableName, options);
   }
 
