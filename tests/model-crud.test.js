@@ -187,6 +187,50 @@ describe('Model CRUD', () => {
     });
   });
 
+  describe('findAndCountAll', () => {
+    it('returns total count and paginated rows', async () => {
+      await User.create({ name: 'Ana', email: 'a@test.com' });
+      await User.create({ name: 'Juan', email: 'j@test.com' });
+      await User.create({ name: 'Luis', email: 'l@test.com' });
+
+      const result = await User.findAndCountAll({
+        order: [['name', 'ASC']],
+        limit: 2,
+        offset: 1
+      });
+
+      assert.equal(result.count, 3);
+      assert.equal(result.rows.length, 2);
+      assert.deepEqual(
+        result.rows.map(user => user.getDataValue('name')),
+        ['Juan', 'Luis']
+      );
+    });
+
+    it('counts and returns rows using where', async () => {
+      await User.create({ name: 'Ana', email: 'a@test.com', active: true });
+      await User.create({ name: 'Juan', email: 'j@test.com', active: false });
+      await User.create({ name: 'Luis', email: 'l@test.com', active: true });
+
+      const result = await User.findAndCountAll({
+        where: { active: true },
+        order: [['name', 'ASC']],
+        limit: 1
+      });
+
+      assert.equal(result.count, 2);
+      assert.equal(result.rows.length, 1);
+      assert.equal(result.rows[0].getDataValue('name'), 'Ana');
+    });
+
+    it('rejects invalid find options', async () => {
+      await assert.rejects(
+        () => User.findAndCountAll({ limit: 0 }),
+        (err) => err.code === 'SEQ_VALIDATION_LIMIT'
+      );
+    });
+  });
+
   describe('update', () => {
     it('updates matching records', async () => {
       await User.create({ name: 'Ana', email: 'a@test.com', balance: 100 });

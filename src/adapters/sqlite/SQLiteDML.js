@@ -87,9 +87,7 @@ export class SQLiteDML extends DMLAbstract {
       const colRecord = this._toColumnNames(values, schema);
       this._applyDefaults(colRecord, schema);
       this._applyTimestamps(colRecord, schema);
-      if (schema.autoIncrement && colRecord[schema.autoIncrement] === undefined) {
-        delete colRecord[schema.autoIncrement];
-      }
+      if (schema.autoIncrement && colRecord[schema.autoIncrement] === undefined) delete colRecord[schema.autoIncrement];
       this._validateRecord(colRecord, schema, model.modelName);
 
       const cols = Object.keys(colRecord);
@@ -99,9 +97,7 @@ export class SQLiteDML extends DMLAbstract {
       const params = cols.map(c => this._serializeValue(colRecord[c]));
       const info = this._execute(sql, params);
 
-      if (schema.primaryKey && !colRecord[schema.primaryKey]) {
-        colRecord[schema.primaryKey] = Number(info.lastInsertRowid);
-      }
+      if (schema.primaryKey && !colRecord[schema.primaryKey]) colRecord[schema.primaryKey] = Number(info.lastInsertRowid);
       const attrRecord = this._toAttrNames(colRecord, schema);
       return new model(attrRecord, { _isNew: false });
     };

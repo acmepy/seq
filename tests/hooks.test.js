@@ -91,6 +91,32 @@ describe('DML hooks', () => {
     assert.deepEqual(calls, ['beforeFind', 'afterFind:1', 'beforeCount', 'afterCount:1']);
   });
 
+  it('runs find and count hooks through findAndCountAll', async () => {
+    await User.bulkCreate([
+      { name: 'Ana', active: true },
+      { name: 'Juan', active: false },
+      { name: 'Luis', active: true }
+    ]);
+    const calls = [];
+
+    User.addHook('beforeFind', options => {
+      calls.push('beforeFind');
+      options.where = { active: true };
+    });
+    User.addHook('afterFind', result => calls.push(`afterFind:${result.length}`));
+    User.addHook('beforeCount', options => {
+      calls.push('beforeCount');
+      options.where = { active: true };
+    });
+    User.addHook('afterCount', count => calls.push(`afterCount:${count}`));
+
+    const result = await User.findAndCountAll({ limit: 1 });
+
+    assert.equal(result.count, 2);
+    assert.equal(result.rows.length, 1);
+    assert.deepEqual(calls.sort(), ['afterCount:2', 'afterFind:1', 'beforeCount', 'beforeFind'].sort());
+  });
+
   it('runs update, destroy, truncate, and bulk create hooks', async () => {
     const calls = [];
     User.addHook('beforeBulkCreate', records => {

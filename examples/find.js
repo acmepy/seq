@@ -60,6 +60,15 @@ printTasks('Offset 2 (skip first 2)', offset);
 const page2 = await Task.findAll({ limit: 2, offset: 2 });
 printTasks('Pagination: page 2, size 2', page2);
 
+// 8. findAndCountAll - total matching rows + current page
+const pendingPage = await Task.findAndCountAll({
+  where: { completed: false },
+  order: [['priority', 'DESC']],
+  limit: 2,
+  offset: 0
+});
+printTasks(`findAndCountAll: pending page 1 of ${pendingPage.count} total`, pendingPage.rows);
+
 // 8. findAll + where + order + limit — pending tasks, priority desc, top 2
 const topPending = await Task.findAll({
   where: { completed: false },

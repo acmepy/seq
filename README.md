@@ -333,11 +333,19 @@ const byPk = await User.findByPk(1);
 const one = await User.findOne({ where: { email: 'ana@example.com' } });
 const all = await User.findAll({ where: { active: true }, limit: 10 });
 const total = await User.count({ where: { active: true } });
+const page = await User.findAndCountAll({
+  where: { active: true },
+  order: [['name', 'ASC']],
+  limit: 10,
+  offset: 0
+});
 
 await User.update({ active: false }, { where: { name: 'Luis' } });
 await User.destroy({ where: { name: 'Luis' } });
 await User.truncate();
 ```
+
+`findAndCountAll()` retorna `{ count, rows }`. `rows` respeta `limit`, `offset` y `order`; `count` devuelve el total de registros que coinciden con el `where` sin paginacion.
 
 Instancias:
 
@@ -475,7 +483,7 @@ Hooks disponibles:
 | --- | --- |
 | `create()` | `beforeCreate`, `afterCreate` |
 | `bulkCreate()` | `beforeBulkCreate`, `afterBulkCreate` |
-| `findOne()`, `findAll()` | `beforeFind`, `afterFind` |
+| `findOne()`, `findAll()`, `findAndCountAll()` | `beforeFind`, `afterFind` |
 | `count()` | `beforeCount`, `afterCount` |
 | `update()` | `beforeUpdate`, `afterUpdate` |
 | `destroy()` | `beforeDestroy`, `afterDestroy` |

@@ -320,6 +320,29 @@ export class Model {
   }
 
   /**
+   * Finds records and returns the total count for the same base query.
+   * Pagination options apply only to rows, matching Sequelize's common usage.
+   * @param {object} [options]
+   * @returns {Promise<{ count: number, rows: Model[] }>}
+   */
+  static async findAndCountAll(options = {}) {
+    this._log('trace', `${this.modelName}.findAndCountAll`, options);
+    const findOptions = { ...options };
+    const countOptions = { ...options };
+    delete countOptions.attributes;
+    delete countOptions.order;
+    delete countOptions.limit;
+    delete countOptions.offset;
+
+    const [count, rows] = await Promise.all([
+      this.count(countOptions),
+      this.findAll(findOptions)
+    ]);
+
+    return { count, rows };
+  }
+
+  /**
    * Updates records matching the where clause.
    * @param {object} values
    * @param {object} [options]
