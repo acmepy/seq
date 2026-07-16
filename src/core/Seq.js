@@ -232,7 +232,7 @@ export class Seq {
 
     const junctions = this._buildJunctionTables();
     for (const assoc of junctions) {
-      const through = assoc.through;
+      const through = this._getAssociationThroughTable(assoc);
       if (existingTables.includes(through)) {
         if (force) {
           await this._adapter.ddl.dropTable(through);
@@ -391,7 +391,7 @@ export class Seq {
   _buildJunctionTableDefinition(assoc) {
     const source = assoc.source;
     const target = assoc.target;
-    const through = assoc.through;
+    const through = this._getAssociationThroughTable(assoc);
     const fkAttr = assoc.foreignKey;
     const otherKeyAttr = assoc.otherKey;
 
@@ -482,12 +482,21 @@ export class Seq {
     for (const modelClass of this._registry.all()) {
       for (const assoc of Object.values(modelClass.associations || {})) {
         if (assoc.type !== 'belongsToMany') continue;
-        if (seen.has(assoc.through)) continue;
-        seen.add(assoc.through);
+        if (assoc.throughModel) continue;
+        const through = this._getAssociationThroughTable(assoc);
+        if (seen.has(through)) continue;
+        seen.add(through);
         junctions.push(assoc);
       }
     }
     return junctions;
+  }
+
+  _getAssociationThroughTable(assoc) {
+    return assoc.throughModel?._resolvedTableName
+      || assoc.throughModel?.tableName
+      || assoc.throughTable
+      || assoc.through;
   }
 
   _buildForeignKeys(modelClass, attrToColumn) {

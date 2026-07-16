@@ -98,6 +98,30 @@ describe('Associations', () => {
       assert.equal(User.associations.Role.otherKey, 'roleId');
     });
 
+    it('belongsToMany accepts a through model', () => {
+      class Role extends Model {}
+      Role.init(
+        { id: { type: DataTypes.INTEGER, primaryKey: true, autoIncrement: true }, name: { type: DataTypes.STRING(50) } },
+        { modelName: 'Role', tableName: 'roles' }
+      );
+      class UserRole extends Model {}
+      UserRole.init(
+        {
+          userId: { type: DataTypes.INTEGER, allowNull: false },
+          roleId: { type: DataTypes.INTEGER, allowNull: false }
+        },
+        { modelName: 'UserRole', tableName: 'users_roles', timestamps: false }
+      );
+
+      User.belongsToMany(Role, { through: UserRole, foreignKey: 'userId', otherKey: 'roleId', as: 'roles' });
+
+      assert.equal(User.associations.Role.type, 'belongsToMany');
+      assert.equal(User.associations.Role.through, UserRole);
+      assert.equal(User.associations.Role.throughModel, UserRole);
+      assert.equal(User.associations.Role.throughTable, 'users_roles');
+      assert.equal(User.associations.Role.as, 'roles');
+    });
+
     it('hasMany requires target to have FK attribute', () => {
       class Bad extends Model {}
       Bad.init(

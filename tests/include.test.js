@@ -1,4 +1,4 @@
-import { describe, it, beforeEach } from 'node:test';
+import { describe, it, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { Seq, Model, DataTypes } from '../src/index.js';
 import { SQLiteAdapter } from '../src/adapters/sqlite/SQLiteAdapter.js';
@@ -777,5 +777,88 @@ describe('Aliases & Include', () => {
       assert.ok(Array.isArray(ana.getDataValue('tasks')));
       assert.equal(ana.getDataValue('tasks').length, 2);
     });
+  });
+});
+
+describe('belongsToMany with through model', () => {
+  let seq, adapter, User, Role, UserRole;
+
+  beforeEach(async () => {
+    class _User extends Model {}
+    _User.init(
+      {
+        id: { type: DataTypes.INTEGER, primaryKey: true, autoIncrement: true },
+        name: { type: DataTypes.STRING(100), allowNull: false },
+      },
+      { modelName: 'User', tableName: 'users', timestamps: false }
+    );
+    User = _User;
+
+    class _Role extends Model {}
+    _Role.init(
+      {
+        id: { type: DataTypes.INTEGER, primaryKey: true, autoIncrement: true },
+        name: { type: DataTypes.STRING(50), allowNull: false },
+      },
+      { modelName: 'Role', tableName: 'roles', timestamps: false }
+    );
+    Role = _Role;
+
+    class _UserRole extends Model {}
+    _UserRole.init(
+      {
+        userId: { type: DataTypes.INTEGER, allowNull: false, field: 'user_id' },
+        roleId: { type: DataTypes.INTEGER, allowNull: false, field: 'role_id' },
+        note: { type: DataTypes.STRING(50), allowNull: true },
+      },
+      { modelName: 'UserRole', tableName: 'users_roles', timestamps: false }
+    );
+    UserRole = _UserRole;
+
+    User.belongsToMany(Role, { through: UserRole, foreignKey: 'userId', otherKey: 'roleId', as: 'roles' });
+    Role.belongsToMany(User, { through: UserRole, foreignKey: 'roleId', otherKey: 'userId', as: 'users' });
+
+    adapter = new SQLiteAdapter({ database: ':memory:' });
+    await adapter.connect();
+    seq = new Seq({ adapter, models: [User, Role, UserRole], logging: false });
+    await seq.init();
+    await seq.sync();
+
+    const ana = await User.create({ name: 'Ana' });
+    const juan = await User.create({ name: 'Juan' });
+    const admin = await Role.create({ name: 'admin' });
+    const editor = await Role.create({ name: 'editor' });
+
+    await UserRole.create({ userId: ana.getDataValue('id'), roleId: admin.getDataValue('id'), note: 'owner' });
+    await UserRole.create({ userId: ana.getDataValue('id'), roleId: editor.getDataValue('id'), note: 'writer' });
+    await UserRole.create({ userId: juan.getDataValue('id'), roleId: admin.getDataValue('id'), note: 'support' });
+  });
+
+  afterEach(async () => {
+    if (seq) await seq.close();
+  });
+
+  it('syncs the through model table instead of creating an automatic junction table', async () => {
+    const tables = await adapter.ddl.listTables();
+
+    assert.ok(tables.includes('users_roles'));
+    assert.ok(!tables.includes('user_roles'));
+    assert.deepEqual(Object.keys(adapter.schemas.get('users_roles').columns), ['userId', 'roleId', 'note']);
+  });
+
+  it('lazy loads belongsToMany through a model table', async () => {
+    const users = await User.findAll({ include: Role });
+    const ana = users.find(user => user.getDataValue('name') === 'Ana');
+    const roles = ana.getDataValue('roles').map(role => role.getDataValue('name')).sort();
+
+    assert.deepEqual(roles, ['admin', 'editor']);
+  });
+
+  it('eager loads belongsToMany through a model table', async () => {
+    const users = await User.findAll({ include: Role, eager: true });
+    const juan = users.find(user => user.getDataValue('name') === 'Juan');
+    const roles = juan.getDataValue('roles').map(role => role.getDataValue('name'));
+
+    assert.deepEqual(roles, ['admin']);
   });
 });

@@ -14,6 +14,8 @@ export class Association {
     this.onDelete = options.onDelete || 'RESTRICT';
     this.onUpdate = options.onUpdate || 'RESTRICT';
     this.through = options.through || null;
+    this.throughModel = options.throughModel || null;
+    this.throughTable = options.throughTable || options.through || null;
     this.otherKey = options.otherKey || null;
     this.constraintName = options.constraintName || null;
   }

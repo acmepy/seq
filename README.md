@@ -438,7 +438,7 @@ Task.belongsTo(User, { foreignKey: 'userId' });
 const users = await User.findAll({ include: Task });
 ```
 
-Para muchos-a-muchos, `sync()` crea la tabla intermedia a partir de `through`.
+Para muchos-a-muchos, `through` puede ser el nombre de la tabla intermedia o un modelo que represente esa tabla.
 
 ```js
 User.belongsToMany(Role, {
@@ -455,6 +455,25 @@ Role.belongsToMany(User, {
 
 const users = await User.findAll({ include: Role });
 const eagerUsers = await User.findAll({ include: Role, eager: true });
+```
+
+Si `through` es un modelo, ese modelo debe estar incluido en `models` para que `sync()` cree su tabla. Seq usa su `tableName` real y no genera una tabla intermedia automatica adicional.
+
+```js
+const UserRole = seq.define('UserRole', {
+  userId: { type: DataTypes.INTEGER, allowNull: false },
+  roleId: { type: DataTypes.INTEGER, allowNull: false }
+}, {
+  tableName: 'users_roles',
+  timestamps: false
+});
+
+User.belongsToMany(Role, {
+  through: UserRole,
+  foreignKey: 'userId',
+  otherKey: 'roleId',
+  as: 'roles'
+});
 ```
 
 Tambien se puede pasar un objeto de include:

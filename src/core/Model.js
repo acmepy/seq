@@ -126,6 +126,21 @@ export class Model {
     return def?.type?.key === 'VIRTUAL' || def?.type?.constructor?.name === 'VirtualType';
   }
 
+  static _resolveThrough(through) {
+    if (typeof through === 'string') {
+      return { through, throughModel: null, throughTable: through };
+    }
+    const throughModel = through?.model || through;
+    if (typeof throughModel === 'function') {
+      const throughTable = throughModel._resolvedTableName
+        || throughModel.tableName
+        || throughModel.modelName
+        || throughModel.name;
+      return { through, throughModel, throughTable };
+    }
+    return { through, throughModel: null, throughTable: through };
+  }
+
   /**
    * Hook for automatic initialization when registered with Seq.
    * Override in subclasses.
@@ -180,9 +195,10 @@ export class Model {
 
     const fkAttr = options.foreignKey || this._defaultForeignKeyName(this.modelName, this.primaryKeyAttribute || 'id');
     const otherKey = options.otherKey || this._defaultForeignKeyName(target.modelName || target.name, target.primaryKeyAttribute || 'id');
+    const throughInfo = this._resolveThrough(options.through);
     if (!this.associations) this.associations = {};
     if (!options.as) options.as = (target.modelName || target.name || 'unknown').toLowerCase() + 's';
-    const assoc = new Association('belongsToMany', this, target, { ...options, foreignKey: fkAttr, otherKey });
+    const assoc = new Association('belongsToMany', this, target, { ...options, ...throughInfo, foreignKey: fkAttr, otherKey });
     this.associations[target.modelName || target.name || 'unknown'] = assoc;
     return this;
   }

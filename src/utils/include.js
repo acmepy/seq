@@ -203,7 +203,12 @@ async function _loadBelongsToMany(instances, inc, assoc, alias, dml) {
   const targetPK = target.primaryKeyAttribute || 'id';
   const fkAttr = assoc.foreignKey;
   const otherKeyAttr = assoc.otherKey;
-  const through = assoc.through;
+  const through = dml._associationThroughTable
+    ? dml._associationThroughTable(assoc)
+    : (assoc.throughTable || assoc.through);
+  const throughSchema = dml._adapter.schemas.get(through);
+  const fkCol = throughSchema?.attrToColumn?.[fkAttr] || fkAttr;
+  const otherKeyCol = throughSchema?.attrToColumn?.[otherKeyAttr] || otherKeyAttr;
 
   const sourceIds = _definedValues(instances, i => i.getDataValue(sourcePK));
 
@@ -216,7 +221,7 @@ async function _loadBelongsToMany(instances, inc, assoc, alias, dml) {
 
   const q = (name) => dml._adapter._quoteIdentifier(name);
   const placeholders = sourceIds.map(() => '?').join(', ');
-  const junctionSQL = `SELECT ${q(fkAttr)}, ${q(otherKeyAttr)} FROM ${q(through)} WHERE ${q(fkAttr)} IN (${placeholders})`;
+  const junctionSQL = `SELECT ${q(fkCol)} AS ${q(fkAttr)}, ${q(otherKeyCol)} AS ${q(otherKeyAttr)} FROM ${q(through)} WHERE ${q(fkCol)} IN (${placeholders})`;
   const serializedParams = sourceIds.map(id => dml._serializeValue(id));
   const junctionRows = await dml._executeQueryAll(junctionSQL, serializedParams);
   const junctionRowsBySource = _groupBy(junctionRows, row => row[fkAttr]);

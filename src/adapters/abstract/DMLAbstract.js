@@ -39,6 +39,13 @@ export class DMLAbstract extends BaseAbstract {
     return { tableName, schema, alias: model.alias || null };
   }
 
+  _associationThroughTable(assoc) {
+    return assoc.throughModel?._resolvedTableName
+      || assoc.throughModel?.tableName
+      || assoc.throughTable
+      || assoc.through;
+  }
+
   /**
    * Generates a column reference, optionally prefixed with a table alias.
    * @param {string} colName
@@ -274,9 +281,10 @@ export class DMLAbstract extends BaseAbstract {
       const fkAttr = assoc.foreignKey;
 
       if (assoc.type === 'belongsToMany') {
-        const junctionSchema = this._adapter.schemas.get(assoc.through);
+        const throughTable = this._associationThroughTable(assoc);
+        const junctionSchema = this._adapter.schemas.get(throughTable);
         if (!junctionSchema) continue;
-        const junctionAlias = assoc.through;
+        const junctionAlias = throughTable;
         const junctionFKCol = junctionSchema.attrToColumn[fkAttr] || fkAttr;
         const junctionOtherKeyCol = junctionSchema.attrToColumn[assoc.otherKey] || assoc.otherKey;
         const pkAttr = model.primaryKeyAttribute || 'id';
@@ -284,7 +292,7 @@ export class DMLAbstract extends BaseAbstract {
         const targetPKAttr = assoc.target.primaryKeyAttribute || 'id';
         const targetPKCol = targetSchema.attrToColumn[targetPKAttr] || targetPKAttr;
 
-        sql += ` LEFT JOIN ${this._q(assoc.through)} AS ${this._q(junctionAlias)} ON ${this._colRef(pkCol, parentAlias)} = ${this._colRef(junctionFKCol, junctionAlias)}`;
+        sql += ` LEFT JOIN ${this._q(throughTable)} AS ${this._q(junctionAlias)} ON ${this._colRef(pkCol, parentAlias)} = ${this._colRef(junctionFKCol, junctionAlias)}`;
 
         let onClause = `${this._colRef(junctionOtherKeyCol, junctionAlias)} = ${this._colRef(targetPKCol, joinAlias)}`;
         if (inc.where) {
