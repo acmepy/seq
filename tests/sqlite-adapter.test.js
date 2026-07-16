@@ -35,6 +35,49 @@ describe('SQLite Adapter', () => {
       assert.equal(map.fkStrategy, 'alter');
       assert.equal(map.eager, true);
     });
+
+    it('loads better-sqlite3 on connect and reports when it is missing', async () => {
+      const originalLoadDatabase = SQLiteAdapter._loadDatabase;
+      const errors = [];
+      let loadCalls = 0;
+
+      SQLiteAdapter._loadDatabase = async () => {
+        loadCalls++;
+        throw Object.assign(new Error('Cannot find package "better-sqlite3"'), {
+          code: 'ERR_MODULE_NOT_FOUND'
+        });
+      };
+
+      try {
+        const sqlite = new SQLiteAdapter({ database: ':memory:' });
+        const missingSeq = new Seq({
+          adapter: sqlite,
+          logging: {
+            info: false,
+            error: (...args) => errors.push(args)
+          }
+        });
+        assert.equal(loadCalls, 0);
+
+        await assert.rejects(
+          () => missingSeq.init(),
+          error => {
+            assert.equal(error.name, 'AdapterError');
+            assert.equal(error.code, 'SEQ_SQLITE_MISSING_DEPENDENCY');
+            assert.match(error.message, /better-sqlite3/);
+            assert.equal(error.details.dependency, 'better-sqlite3');
+            return true;
+          }
+        );
+      } finally {
+        SQLiteAdapter._loadDatabase = originalLoadDatabase;
+      }
+
+      assert.equal(loadCalls, 1);
+      assert.equal(errors.length, 1);
+      assert.equal(errors[0][0], '[Seq]');
+      assert.match(errors[0][1], /better-sqlite3/);
+    });
   });
 
   after(async () => {

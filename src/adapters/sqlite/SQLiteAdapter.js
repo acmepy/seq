@@ -1,8 +1,10 @@
-import Database from 'better-sqlite3';
 import { BaseAdapter } from '../BaseAdapter.js';
+import { AdapterError } from '../../core/errors/AdapterError.js';
 import { SQLiteDDL } from './SQLiteDDL.js';
 import { SQLiteDML } from './SQLiteDML.js';
 import { SQLiteTCL } from './SQLiteTCL.js';
+
+let Database = null;
 
 export class SQLiteAdapter extends BaseAdapter {
   constructor(options = {}) {
@@ -15,11 +17,49 @@ export class SQLiteAdapter extends BaseAdapter {
     this.tcl = new SQLiteTCL(this);
   }
 
+  static async _loadDatabase() {
+    if (!Database) {
+      const module = await import('better-sqlite3');
+      Database = module.default;
+    }
+    return Database;
+  }
+
   async connect() {
-    this._db = new Database(this._dbPath);
+    const DatabaseConstructor = await this._loadDatabaseDependency();
+    this._db = new DatabaseConstructor(this._dbPath);
     this._db.pragma('journal_mode = WAL');
     this._db.pragma('foreign_keys = ON');
     this._log('info', 'conectado');
+  }
+
+  async _loadDatabaseDependency() {
+    try {
+      return await this.constructor._loadDatabase();
+    } catch (error) {
+      const message = `
+-------------------------------------------------------------------------------------------------------------
+
+SQLiteAdapter requiere la dependencia "better-sqlite3". Instalala con: npm install better-sqlite3
+
+-------------------------------------------------------------------------------------------------------------
+
+`;
+      this._dependencyWarning(message);
+      throw new AdapterError(message, {
+        code: 'SEQ_SQLITE_MISSING_DEPENDENCY',
+        cause: error,
+        details: { dependency: 'better-sqlite3' }
+      });
+    }
+  }
+
+  _dependencyWarning(message) {
+    if (this._seq) {
+      this._log('error', message);
+      return;
+    }
+    console.error(`[Seq] ${message}`);
   }
 
   async close() {

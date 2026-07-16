@@ -1,43 +1,7 @@
-import { Seq, Model, DataTypes, SQLiteAdapter } from '../src/index.js';
-
-class User extends Model {
-  static define(seq) {
-    return this.init(
-      {
-        id: { type: DataTypes.INTEGER, primaryKey: true, autoIncrement: true },
-        name: { type: DataTypes.STRING(100), allowNull: false }
-      },
-      { seq, modelName: 'User', timestamps: true }
-    );
-  }
-}
-
-class Task extends Model {
-  static define(seq) {
-    return this.init(
-      {
-        id: { type: DataTypes.INTEGER, primaryKey: true, autoIncrement: true },
-        title: { type: DataTypes.STRING(100), allowNull: false },
-        completed: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: false },
-        userId: { type: DataTypes.INTEGER, allowNull: false }
-      },
-      { seq, modelName: 'Task', timestamps: true }
-    );
-  }
-}
-
-class Profile extends Model {
-  static define(seq) {
-    return this.init(
-      {
-        id: { type: DataTypes.INTEGER, primaryKey: true, autoIncrement: true },
-        bio: { type: DataTypes.STRING(200) },
-        userId: { type: DataTypes.INTEGER, allowNull: false, unique: true }
-      },
-      { seq, modelName: 'Profile', timestamps: true }
-    );
-  }
-}
+import { Seq, SQLiteAdapter } from '../src/index.js';
+import { User } from './models/User.js';
+import { Task } from './models/Task.js';
+import { Profile } from './models/Profile.js';
 
 User.hasMany(Task, { foreignKey: 'userId', onDelete: 'CASCADE' });
 Task.belongsTo(User, { foreignKey: 'userId' });
@@ -57,8 +21,8 @@ const seq = new Seq({
 await seq.init();
 await seq.sync();
 
-const ana = await User.create({ name: 'Ana' });
-const juan = await User.create({ name: 'Juan' });
+const ana = await User.create({ name: 'Ana', email: 'ana@example.com' });
+const juan = await User.create({ name: 'Juan', email: 'juan@example.com' });
 
 await Task.bulkCreate([
   { title: 'Design FK system', userId: ana.getDataValue('id'), completed: true },

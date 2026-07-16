@@ -1,6 +1,6 @@
 {
   "name": "seq",
-  "version": "0.4.2",
+  "version": "0.4.3",
   "description": "seq es un micro orm, modular, flexible y de facil integracion",
   "type": "module",
   "main": "src/index.js",
@@ -26,10 +26,18 @@
     "oracle"
   ],
   "dependencies": {
-    "better-sqlite3": "^12.11.1",
     "yep": "github:acmepy/yep"
   },
-  "author": "",
+  "peerDependencies": {
+    "better-sqlite3": "^12.11.1"
+  },
+  "peerDependenciesMeta": {
+    "better-sqlite3": { "optional": true }
+  },
+  "devDependencies": {
+    "better-sqlite3": "^12.11.1"
+  },
+  "author": "Hugo",
   "license": "MIT",
   "engines": {
     "node": ">=22.0.0"

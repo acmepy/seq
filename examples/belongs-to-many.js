@@ -1,53 +1,8 @@
-import { Seq, Model, DataTypes, SQLiteAdapter } from '../src/index.js';
-
-class User extends Model {
-  static define(seq) {
-    return this.init(
-      {
-        id: { type: DataTypes.INTEGER, primaryKey: true, autoIncrement: true },
-        name: { type: DataTypes.STRING(100), allowNull: false }
-      },
-      { seq, modelName: 'User', timestamps: false }
-    );
-  }
-}
-
-class Role extends Model {
-  static define(seq) {
-    return this.init(
-      {
-        id: { type: DataTypes.INTEGER, primaryKey: true, autoIncrement: true },
-        name: { type: DataTypes.STRING(50), allowNull: false }
-      },
-      { seq, modelName: 'Role', timestamps: false }
-    );
-  }
-}
-
-class Permission extends Model {
-  static define(seq) {
-    return this.init(
-      {
-        id: { type: DataTypes.INTEGER, primaryKey: true, autoIncrement: true },
-        name: { type: DataTypes.STRING(50), allowNull: false }
-      },
-      { seq, modelName: 'Permission', timestamps: false }
-    );
-  }
-}
-
-class Task extends Model {
-  static define(seq) {
-    return this.init(
-      {
-        id: { type: DataTypes.INTEGER, primaryKey: true, autoIncrement: true },
-        title: { type: DataTypes.STRING(100), allowNull: false },
-        userId: { type: DataTypes.INTEGER, allowNull: false }
-      },
-      { seq, modelName: 'Task', timestamps: false }
-    );
-  }
-}
+import { Seq, SQLiteAdapter } from '../src/index.js';
+import { User } from './models/User.js';
+import { Task } from './models/Task.js';
+import { Role } from './models/Role.js';
+import { Permission } from './models/Permission.js';
 
 User.hasMany(Task, { foreignKey: 'userId' });
 Task.belongsTo(User, { foreignKey: 'userId' });
@@ -70,8 +25,8 @@ const syncResult = await seq.sync();
 console.log('\n--- Sync result ---');
 console.log('  Created:', syncResult.created);
 
-const ana = await User.create({ name: 'Ana' });
-const juan = await User.create({ name: 'Juan' });
+const ana = await User.create({ name: 'Ana', email: 'ana@example.com' });
+const juan = await User.create({ name: 'Juan', email: 'juan@example.com' });
 
 const admin = await Role.create({ name: 'admin' });
 const editor = await Role.create({ name: 'editor' });
