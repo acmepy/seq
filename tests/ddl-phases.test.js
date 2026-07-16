@@ -87,6 +87,33 @@ describe('DDL Phases', () => {
       const def = seq._buildTableDefinition(User);
       assert.equal(Object.keys(def.columns.email).includes('unique'), false);
     });
+
+    it('excludes virtual attributes from physical columns', async () => {
+      class User extends Model {}
+      User.init(
+        {
+          id: { type: DataTypes.INTEGER, primaryKey: true, autoIncrement: true },
+          firstName: { type: DataTypes.STRING(100), allowNull: false },
+          lastName: { type: DataTypes.STRING(100), allowNull: false },
+          fullName: {
+            type: DataTypes.VIRTUAL,
+            get() {
+              return `${this.getDataValue('firstName')} ${this.getDataValue('lastName')}`;
+            }
+          }
+        },
+        { modelName: 'User', tableName: 'users', timestamps: false }
+      );
+
+      seq = new Seq({ adapter: new SQLiteAdapter({ database: ':memory:' }), models: [User], logging: false });
+      await seq.init();
+
+      const def = seq._buildTableDefinition(User);
+      assert.ok(!def.columns.fullName);
+      assert.ok(!def.attrToColumn.fullName);
+      assert.ok(!def.columnToAttr.fullName);
+      assert.deepEqual(def.virtualAttributes, ['fullName']);
+    });
   });
 
   describe('schema storage', () => {

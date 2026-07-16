@@ -168,7 +168,12 @@ export class MapDML extends DMLAbstract {
     if (options.limit) results = results.slice(0, options.limit);
 
     if (Array.isArray(options.attributes) && options.attributes.length > 0) {
-      const selected = new Set(options.attributes.map(attr => schema.attrToColumn[attr] || attr));
+      const virtualAttributes = new Set(schema.virtualAttributes || []);
+      const selected = new Set(
+        options.attributes
+          .filter(attr => !virtualAttributes.has(attr))
+          .map(attr => schema.attrToColumn[attr] || attr)
+      );
       results = results.map(record => {
         const projected = {};
         for (const key of selected) {

@@ -32,7 +32,9 @@ export class Model {
     }
 
     for (const key of Object.keys(attrs)) {
-      if (key in values) {
+      if (Ctor._isVirtualAttribute(attrs[key]) && !(key in values) && attrs[key].defaultValue === undefined) {
+        continue;
+      } else if (key in values) {
         this.dataValues[key] = values[key];
       } else if (attrs[key].defaultValue !== undefined) {
         const dv = attrs[key].defaultValue;
@@ -118,6 +120,10 @@ export class Model {
   static _normalizeDataType(type) {
     if (typeof type === 'function' && type._defaultType) return type._defaultType();
     return type;
+  }
+
+  static _isVirtualAttribute(def) {
+    return def?.type?.key === 'VIRTUAL' || def?.type?.constructor?.name === 'VirtualType';
   }
 
   /**
@@ -400,6 +406,10 @@ export class Model {
    * @returns {*}
    */
   getDataValue(key) {
+    const attr = this.constructor.rawAttributes?.[key];
+    if (this.constructor._isVirtualAttribute(attr) && typeof attr.get === 'function') {
+      return attr.get.call(this);
+    }
     return this.dataValues[key];
   }
 
@@ -409,6 +419,12 @@ export class Model {
    * @param {*} value
    */
   setDataValue(key, value) {
+    const attr = this.constructor.rawAttributes?.[key];
+    if (this.constructor._isVirtualAttribute(attr) && typeof attr.set === 'function') {
+      attr.set.call(this, value);
+      this._changed[key] = true;
+      return;
+    }
     this.dataValues[key] = value;
     this._changed[key] = true;
   }
@@ -418,7 +434,14 @@ export class Model {
    * @returns {object}
    */
   get() {
-    return clone(this.dataValues);
+    const values = clone(this.dataValues);
+    const attrs = this.constructor.rawAttributes || {};
+    for (const [key, attr] of Object.entries(attrs)) {
+      if (this.constructor._isVirtualAttribute(attr) && typeof attr.get === 'function') {
+        values[key] = attr.get.call(this);
+      }
+    }
+    return values;
   }
 
   /**

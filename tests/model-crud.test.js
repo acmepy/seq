@@ -457,6 +457,60 @@ describe('Model CRUD', () => {
     });
   });
 
+  describe('virtual attributes', () => {
+    it('computes virtual values without persisting them', async () => {
+      class Person extends Model {}
+      Person.init(
+        {
+          id: { type: DataTypes.INTEGER, primaryKey: true, autoIncrement: true, allowNull: false },
+          firstName: { type: DataTypes.STRING(100), allowNull: false },
+          lastName: { type: DataTypes.STRING(100), allowNull: false },
+          fullName: {
+            type: DataTypes.VIRTUAL(DataTypes.STRING(200), ['firstName', 'lastName']),
+            get() {
+              return `${this.getDataValue('firstName')} ${this.getDataValue('lastName')}`;
+            },
+            set(value) {
+              const [firstName, ...lastName] = String(value).split(' ');
+              this.setDataValue('firstName', firstName);
+              this.setDataValue('lastName', lastName.join(' '));
+            }
+          }
+        },
+        { modelName: 'Person', tableName: 'people', timestamps: false }
+      );
+
+      const virtualSeq = new Seq({ adapter, models: [Person], logging: false });
+      await virtualSeq.init();
+      await virtualSeq.sync();
+
+      const created = await Person.create({
+        firstName: 'Ana',
+        lastName: 'Demo',
+        fullName: 'Ignored Value'
+      });
+      assert.equal(created.getDataValue('fullName'), 'Ana Demo');
+      assert.equal(created.toJSON().fullName, 'Ana Demo');
+
+      const raw = adapter._db.prepare('SELECT * FROM people LIMIT 1').get();
+      assert.deepEqual(Object.keys(raw).sort(), ['firstName', 'id', 'lastName'].sort());
+
+      const found = await Person.findOne({
+        attributes: ['id', 'firstName', 'lastName', 'fullName'],
+        where: { id: created.getDataValue('id') }
+      });
+      assert.equal(found.getDataValue('fullName'), 'Ana Demo');
+
+      found.setDataValue('fullName', 'Luis Tester');
+      await found.save();
+
+      const updated = await Person.findByPk(created.getDataValue('id'));
+      assert.equal(updated.getDataValue('firstName'), 'Luis');
+      assert.equal(updated.getDataValue('lastName'), 'Tester');
+      assert.equal(updated.getDataValue('fullName'), 'Luis Tester');
+    });
+  });
+
   describe('parameter validation', () => {
     describe('findAll', () => {
       it('rejects where as array', async () => {

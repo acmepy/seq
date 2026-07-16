@@ -316,8 +316,29 @@ export default function init(seq) {
 | `ARRAY(type)` | `DataTypes.ARRAY(DataTypes.STRING(50))` |
 | `OBJECT` | `DataTypes.OBJECT` |
 | `JSON` | `DataTypes.JSON` |
+| `VIRTUAL` | `DataTypes.VIRTUAL` |
 
 Cada tipo implementa `validate(value)` y retorna `{ valid, message }`. Los valores `null` son validos a nivel de tipo; la nulabilidad de un atributo se controla con `allowNull`.
+
+Los atributos `VIRTUAL` existen solo en la instancia del modelo: no crean columnas, no se insertan ni se actualizan en la base. Se pueden usar con `get` y `set` para valores derivados.
+
+```js
+const User = seq.define('User', {
+  firstName: { type: DataTypes.STRING(100), allowNull: false },
+  lastName: { type: DataTypes.STRING(100), allowNull: false },
+  fullName: {
+    type: DataTypes.VIRTUAL(DataTypes.STRING(200), ['firstName', 'lastName']),
+    get() {
+      return `${this.getDataValue('firstName')} ${this.getDataValue('lastName')}`;
+    },
+    set(value) {
+      const [firstName, ...lastName] = String(value).split(' ');
+      this.setDataValue('firstName', firstName);
+      this.setDataValue('lastName', lastName.join(' '));
+    }
+  }
+}, { timestamps: false });
+```
 
 ## CRUD
 

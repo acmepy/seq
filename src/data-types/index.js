@@ -7,6 +7,7 @@ import { DateType } from './DateType.js';
 import { ArrayType } from './ArrayType.js';
 import { ObjectType } from './ObjectType.js';
 import { JSONType } from './JSONType.js';
+import { VirtualType } from './VirtualType.js';
 
 /**
  * Factory object exposing all available data types.
@@ -14,6 +15,9 @@ import { JSONType } from './JSONType.js';
  */
 const STRING = (length) => new StringType(length);
 STRING._defaultType = () => new StringType();
+
+const VIRTUAL = (returnType, fields) => new VirtualType(returnType, fields);
+VIRTUAL._defaultType = () => new VirtualType();
 
 export const DataTypes = {
   INTEGER: new IntegerType(),
@@ -30,7 +34,8 @@ export const DataTypes = {
     return new ArrayType(itemType);
   },
   OBJECT: new ObjectType(),
-  JSON: new JSONType()
+  JSON: new JSONType(),
+  VIRTUAL
 };
 
 DataTypes._INTEGER = new IntegerType();
@@ -38,3 +43,4 @@ DataTypes._BOOLEAN = new BooleanType();
 DataTypes._DATE = new DateType();
 DataTypes._OBJECT = new ObjectType();
 DataTypes._JSON = new JSONType();
+DataTypes._VIRTUAL = new VirtualType();

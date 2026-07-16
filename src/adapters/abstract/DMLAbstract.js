@@ -218,9 +218,11 @@ export class DMLAbstract extends BaseAbstract {
 
   _buildSelectList(attributes, schema, alias = null) {
     if (!Array.isArray(attributes) || attributes.length === 0) return '*';
-    return attributes
-      .map(attr => this._colRef(schema.attrToColumn[attr] || attr, alias))
-      .join(', ');
+    const virtualAttributes = new Set(schema.virtualAttributes || []);
+    const columns = attributes
+      .filter(attr => !virtualAttributes.has(attr))
+      .map(attr => this._colRef(schema.attrToColumn[attr] || attr, alias));
+    return columns.length > 0 ? columns.join(', ') : '*';
   }
 
   /**
@@ -575,7 +577,9 @@ export class DMLAbstract extends BaseAbstract {
   _toColumnNames(record, schema) {
     const result = {};
     const map = schema.attrToColumn;
+    const virtualAttributes = new Set(schema.virtualAttributes || []);
     for (const [key, value] of Object.entries(record)) {
+      if (virtualAttributes.has(key)) continue;
       result[map[key] || key] = value;
     }
     return result;

@@ -229,6 +229,7 @@ export class DDLAbstract extends BaseAbstract {
       timestamps: definition.timestamps || false,
       createdAt: definition.createdAt || 'createdAt',
       updatedAt: definition.updatedAt || 'updatedAt',
+      virtualAttributes: [...(definition.virtualAttributes || [])],
       attrToColumn: definition.attrToColumn || {},
       columnToAttr: definition.columnToAttr || {}
     };

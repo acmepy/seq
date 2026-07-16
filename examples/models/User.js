@@ -42,6 +42,26 @@ export class User extends Model {
           type: DataTypes.JSON,
           allowNull: true,
           defaultValue: () => ({})
+        },
+        label: {
+          type: DataTypes.VIRTUAL(DataTypes.STRING(250), ['name', 'email']),
+          get() {
+            const name = this.getDataValue('name');
+            const email = this.getDataValue('email');
+            if (!name && !email) return null;
+            if (!email) return name;
+            if (!name) return email;
+            return `${name} <${email}>`;
+          },
+          set(value) {
+            const match = String(value).match(/^(.+?)\s*<([^>]+)>$/);
+            if (match) {
+              this.setDataValue('name', match[1].trim());
+              this.setDataValue('email', match[2].trim());
+              return;
+            }
+            this.setDataValue('name', String(value));
+          }
         }
       },
       {

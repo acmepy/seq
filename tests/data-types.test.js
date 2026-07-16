@@ -10,6 +10,7 @@ import { DateType } from '../src/data-types/DateType.js';
 import { ArrayType } from '../src/data-types/ArrayType.js';
 import { ObjectType } from '../src/data-types/ObjectType.js';
 import { JSONType } from '../src/data-types/JSONType.js';
+import { VirtualType } from '../src/data-types/VirtualType.js';
 
 describe('DataTypes', () => {
   describe('AbstractDataType', () => {
@@ -362,6 +363,27 @@ describe('DataTypes', () => {
 
     it('toString returns JSON', () => {
       assert.equal(DataTypes.JSON.toString(), 'JSON');
+    });
+  });
+
+  describe('VIRTUAL', () => {
+    it('creates a virtual type with optional return type and fields', () => {
+      const returnType = DataTypes.STRING(100);
+      const type = DataTypes.VIRTUAL(returnType, ['firstName', 'lastName']);
+
+      assert.ok(type instanceof VirtualType);
+      assert.equal(type.key, 'VIRTUAL');
+      assert.equal(type.returnType, returnType);
+      assert.deepEqual(type.fields, ['firstName', 'lastName']);
+      assert.equal(type.toString(), 'VIRTUAL(STRING(100))');
+    });
+
+    it('supports DataTypes.VIRTUAL as a default type', () => {
+      const type = DataTypes.VIRTUAL._defaultType();
+
+      assert.ok(type instanceof VirtualType);
+      assert.equal(type.toString(), 'VIRTUAL');
+      assert.ok(type.validate('anything').valid);
     });
   });
 });

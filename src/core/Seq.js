@@ -326,10 +326,15 @@ export class Seq {
     const uniqueConstraints = [];
     const attrToColumn = {};
     const columnToAttr = {};
+    const virtualAttributes = [];
 
     const sourceTable = modelClass._resolvedTableName || this._resolveTableName(modelClass);
 
     for (const [name, def] of Object.entries(attributes)) {
+      if (modelClass._isVirtualAttribute?.(def)) {
+        virtualAttributes.push(name);
+        continue;
+      }
       const columnName = this._resolveColumnName(def, name);
       attrToColumn[name] = columnName;
       columnToAttr[columnName] = name;
@@ -371,6 +376,7 @@ export class Seq {
       timestamps: modelClass.options?.timestamps || false,
       createdAt: modelClass.options?.createdAt || 'createdAt',
       updatedAt: modelClass.options?.updatedAt || 'updatedAt',
+      virtualAttributes,
       attrToColumn,
       columnToAttr
     };
@@ -503,6 +509,7 @@ export class Seq {
     };
 
     for (const [attrName, def] of Object.entries(modelClass.rawAttributes || {})) {
+      if (modelClass._isVirtualAttribute?.(def)) continue;
       if (def.references) {
         const refModel = this.getModel(def.references.model);
         if (!refModel) continue;
