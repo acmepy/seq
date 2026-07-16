@@ -66,6 +66,7 @@ const seq = new Seq({
   logging: false
 });
 
+await seq.authenticate();
 await seq.init();
 await seq.sync();
 
@@ -550,10 +551,13 @@ await seq.transaction(async transaction => {
 ## Sincronizacion
 
 ```js
+await seq.authenticate();
 await seq.sync();
 await seq.sync({ alter: true });
 await seq.sync({ force: true });
 ```
+
+`authenticate()` valida que el adapter pueda conectarse a la fuente de datos. En SQLite abre la conexion si hace falta y ejecuta una consulta liviana (`SELECT 1`).
 
 `sync()` crea tablas faltantes. Con `alter` intenta ajustar tablas existentes. Con `force` elimina y recrea.
 

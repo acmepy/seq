@@ -105,4 +105,3 @@ for (const u of usersMixed2) {
 }
 
 await seq.close();
-await adapter.close();

@@ -78,10 +78,50 @@ describe('SQLite Adapter', () => {
       assert.equal(errors[0][0], '[Seq]');
       assert.match(errors[0][1], /better-sqlite3/);
     });
+
+    it('authenticates by connecting and running a lightweight query', async () => {
+      const sqlite = new SQLiteAdapter({ database: ':memory:' });
+      const trace = [];
+      const authSeq = new Seq({
+        adapter: sqlite,
+        logging: {
+          info: false,
+          trace: (...args) => trace.push(args),
+          error: false
+        }
+      });
+
+      try {
+        const result = await authSeq.authenticate();
+
+        assert.equal(result, true);
+        assert.ok(sqlite._db);
+        assert.deepEqual(sqlite._db.prepare('SELECT 1 AS ok').get(), { ok: 1 });
+        assert.ok(trace.some(args => String(args[1]).includes('SELECT 1 AS ok')));
+      } finally {
+        await authSeq.close();
+      }
+    });
+
+    it('does not reconnect when authenticate is called on an active SQLite connection', async () => {
+      const sqlite = new SQLiteAdapter({ database: ':memory:' });
+      const authSeq = new Seq({ adapter: sqlite, logging: false });
+
+      try {
+        await authSeq.authenticate();
+        const db = sqlite._db;
+
+        await authSeq.authenticate();
+
+        assert.equal(sqlite._db, db);
+      } finally {
+        await authSeq.close();
+      }
+    });
   });
 
   after(async () => {
-    await adapter.close();
+    if (seq) await seq.close();
   });
 
   describe('basic CRUD', () => {

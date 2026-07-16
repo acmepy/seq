@@ -91,4 +91,3 @@ if (userRoleSchema) {
 }
 
 await seq.close();
-await adapter.close();

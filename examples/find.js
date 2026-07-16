@@ -113,4 +113,3 @@ const mixedTasks = await Task.findAll({
 printTasks('Mixed: completed=false AND priority >= 2', mixedTasks);
 
 await seq.close();
-await adapter.close();

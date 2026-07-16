@@ -21,6 +21,16 @@ export class BaseAdapter {
   async connect() {}
 
   /**
+   * Validates that the data source is reachable.
+   * Adapters with a real connection should override this with a lightweight query.
+   * @returns {Promise<boolean>}
+   */
+  async authenticate() {
+    await this.connect();
+    return true;
+  }
+
+  /**
    * Closes the connection (no-op for in-memory adapters).
    */
   async close() {}

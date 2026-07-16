@@ -78,4 +78,3 @@ console.log('Hook log:');
 hookLog.forEach(entry => console.log(`- ${entry}`));
 
 await seq.close();
-await adapter.close();

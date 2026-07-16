@@ -26,11 +26,18 @@ export class SQLiteAdapter extends BaseAdapter {
   }
 
   async connect() {
+    if (this._db) return;
     const DatabaseConstructor = await this._loadDatabaseDependency();
     this._db = new DatabaseConstructor(this._dbPath);
     this._db.pragma('journal_mode = WAL');
     this._db.pragma('foreign_keys = ON');
     this._log('info', 'conectado');
+  }
+
+  async authenticate() {
+    await this.connect();
+    await this.dml._executeGet('SELECT 1 AS ok', []);
+    return true;
   }
 
   async _loadDatabaseDependency() {

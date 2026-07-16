@@ -3,7 +3,6 @@ import { User } from './models/User.js';
 import { Product } from './models/Product.js';
 
 const adapter = new SQLiteAdapter({ database: ':memory:' });
-await adapter.connect();
 
 const seq = new Seq({
   adapter,
@@ -20,6 +19,7 @@ const seq = new Seq({
   }
 });
 
+await seq.authenticate();
 await seq.init();
 
 const syncResult = await seq.sync();
@@ -61,4 +61,3 @@ await Product.destroy({ where: { productName: 'Mouse' } });
 console.log('Products after destroy:', (await Product.findAll()).map(p => p.toJSON()));
 
 await seq.close();
-await adapter.close();

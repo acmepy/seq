@@ -41,4 +41,3 @@ console.log('  columns:', Object.keys(schema.columns));
 console.log('  virtualAttributes:', schema.virtualAttributes);
 
 await seq.close();
-await adapter.close();

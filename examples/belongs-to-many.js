@@ -130,4 +130,3 @@ if (rolePermsSchema) {
 }
 
 await seq.close();
-await adapter.close();

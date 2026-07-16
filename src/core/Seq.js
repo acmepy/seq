@@ -55,6 +55,16 @@ export class Seq {
   }
 
   /**
+   * Validates that the configured adapter can reach its data source.
+   * @returns {Promise<boolean>}
+   */
+  async authenticate() {
+    if (typeof this._adapter.authenticate === 'function') return this._adapter.authenticate();
+    await this._adapter.connect();
+    return true;
+  }
+
+  /**
    * Initializes the ORM: validates config, registers models, initializes adapter.
    */
   async init() {
