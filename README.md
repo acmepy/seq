@@ -106,7 +106,12 @@ import {
 
 ```js
 const seq = new Seq({
-  adapter: new SQLiteAdapter({ database: 'app.sqlite' }),
+  adapter: new SQLiteAdapter({
+    database: 'app.sqlite',
+    caseStyle: 'lower',
+    fkStrategy: 'inline',
+    eager: false
+  }),
   models: [User, Task],
   logging: {
     info: console.log,
@@ -134,6 +139,35 @@ Opciones principales:
 | `naming.tables` | Convencion de tablas: `snake_case` o `camelCase`. |
 | `naming.columns` | Convencion de columnas: `snake_case` o `camelCase`. |
 | `naming.prefix` | Prefijo global opcional para tablas. |
+
+## Configuracion de adapters
+
+Los adapters aceptan opciones comunes para ajustar convenciones y estrategias internas:
+
+```js
+const adapter = new SQLiteAdapter({
+  database: 'app.sqlite',
+  caseStyle: 'lower',   // 'lower', 'upper' o null
+  fkStrategy: 'inline', // 'alter', 'inline' o 'none'
+  eager: true           // default para includes
+});
+```
+
+| Opcion | Descripcion |
+| --- | --- |
+| `caseStyle` | Fuerza el case fisico de tablas/columnas: `'lower'`, `'upper'` o `null` para no transformar. |
+| `fkStrategy` | Estrategia de FK: `'alter'`, `'inline'` o `'none'`. SQLite usa `'inline'` por defecto y Map usa `'none'`. |
+| `eager` | Default global del adapter para includes. Si es `true`, `findAll({ include })` usa JOIN salvo override con `eager: false`. |
+
+Defaults:
+
+| Adapter | `caseStyle` | `fkStrategy` | `eager` |
+| --- | --- | --- | --- |
+| `BaseAdapter` | `'lower'` | `'alter'` | `false` |
+| `SQLiteAdapter` | `'lower'` | `'inline'` | `false` |
+| `MapAdapter` | `'lower'` | `'none'` | `false` |
+
+La prioridad de `eager` es: include individual, opcion de query, opcion del adapter, y finalmente `false`.
 
 ## Logging
 

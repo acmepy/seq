@@ -508,7 +508,11 @@ describe('Model CRUD', () => {
       loggingSeq = new Seq({
         adapter,
         models: [User],
-        logging: (...args) => logCalls.push(args)
+        logging: {
+          info: false,
+          trace: (...args) => logCalls.push(args),
+          error: false
+        }
       });
       User.seq = loggingSeq;
       await loggingSeq.sync();

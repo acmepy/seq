@@ -4,6 +4,7 @@ import { Seq } from '../src/core/Seq.js';
 import { Model } from '../src/core/Model.js';
 import { DataTypes } from '../src/data-types/index.js';
 import { SQLiteAdapter } from '../src/adapters/sqlite/SQLiteAdapter.js';
+import { MapAdapter } from '../src/adapters/map/MapAdapter.js';
 
 describe('SQLite Adapter', () => {
   let seq, adapter;
@@ -11,6 +12,29 @@ describe('SQLite Adapter', () => {
   before(async () => {
     adapter = new SQLiteAdapter({ database: ':memory:' });
     await adapter.connect();
+  });
+
+  describe('adapter options', () => {
+    it('accepts caseStyle, fkStrategy and eager overrides', () => {
+      const sqlite = new SQLiteAdapter({
+        database: ':memory:',
+        caseStyle: 'upper',
+        fkStrategy: 'none',
+        eager: true
+      });
+      const map = new MapAdapter({
+        caseStyle: null,
+        fkStrategy: 'alter',
+        eager: true
+      });
+
+      assert.equal(sqlite.caseStyle, 'upper');
+      assert.equal(sqlite.fkStrategy, 'none');
+      assert.equal(sqlite.eager, true);
+      assert.equal(map.caseStyle, null);
+      assert.equal(map.fkStrategy, 'alter');
+      assert.equal(map.eager, true);
+    });
   });
 
   after(async () => {

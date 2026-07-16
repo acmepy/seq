@@ -6,21 +6,13 @@ import { SQLiteTCL } from './SQLiteTCL.js';
 
 export class SQLiteAdapter extends BaseAdapter {
   constructor(options = {}) {
-    super(options);
+    super({ fkStrategy: 'inline', ...options });
     this._db = null;
     this._dbPath = options.database || ':memory:';
     this.ddl = new SQLiteDDL(this);
     this.dml = new SQLiteDML(this);
     this.dcl = null;
     this.tcl = new SQLiteTCL(this);
-  }
-
-  get caseStyle() {
-    return 'lower';
-  }
-
-  get fkStrategy() {
-    return 'inline';
   }
 
   async connect() {

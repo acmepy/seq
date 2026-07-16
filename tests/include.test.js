@@ -526,6 +526,59 @@ describe('Aliases & Include', () => {
       assert.ok(Array.isArray(ana.getDataValue('tasks')));
       assert.ok(ana.getDataValue('profile'));
     });
+
+    it('uses adapter eager as the default include strategy', async () => {
+      const calls = [];
+
+      class AdapterUser extends Model {}
+      AdapterUser.init(
+        {
+          id: { type: DataTypes.INTEGER, primaryKey: true, autoIncrement: true },
+          name: { type: DataTypes.STRING(100), allowNull: false },
+        },
+        { modelName: 'AdapterUser', tableName: 'adapter_users', timestamps: false }
+      );
+
+      class AdapterTask extends Model {}
+      AdapterTask.init(
+        {
+          id: { type: DataTypes.INTEGER, primaryKey: true, autoIncrement: true },
+          title: { type: DataTypes.STRING(100), allowNull: false },
+          adapterUserId: { type: DataTypes.INTEGER, allowNull: false },
+        },
+        { modelName: 'AdapterTask', tableName: 'adapter_tasks', timestamps: false }
+      );
+
+      AdapterUser.hasMany(AdapterTask, { foreignKey: 'adapterUserId' });
+      AdapterTask.belongsTo(AdapterUser, { foreignKey: 'adapterUserId' });
+
+      const eagerAdapter = new SQLiteAdapter({ database: ':memory:', eager: true });
+      const eagerSeq = new Seq({
+        adapter: eagerAdapter,
+        models: [AdapterUser, AdapterTask],
+        logging: {
+          info: false,
+          trace: (...args) => calls.push(args),
+          error: false
+        }
+      });
+
+      await eagerSeq.init();
+      await eagerSeq.sync();
+      await AdapterUser.create({ name: 'Ana' });
+      await AdapterTask.create({ title: 'Buy milk', adapterUserId: 1 });
+
+      calls.length = 0;
+      const users = await AdapterUser.findAll({ include: AdapterTask });
+      assert.equal(users[0].getDataValue('adaptertasks').length, 1);
+      assert.ok(calls.some(args => args[1]?.includes?.('LEFT JOIN')));
+
+      calls.length = 0;
+      await AdapterUser.findAll({ include: { model: AdapterTask, eager: false } });
+      assert.equal(calls.some(args => args[1]?.includes?.('LEFT JOIN')), false);
+
+      await eagerSeq.close();
+    });
   });
 
   // ---------------------------------------------------------------------------

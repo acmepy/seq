@@ -374,7 +374,7 @@ export class DMLAbstract extends BaseAbstract {
     //this._log('DML.selectAll', model.modelName, options);
     const { tableName, schema, alias } = this._schema(model);
     const includes = options.include || [];
-    const globalEager = options.eager || false;
+    const globalEager = options.eager ?? this._adapter.eager ?? false;
     const eagerIncludes = [];
     const lazyIncludes = [];
     for (const inc of includes) {

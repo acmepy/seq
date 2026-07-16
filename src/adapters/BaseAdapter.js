@@ -5,6 +5,9 @@
 export class BaseAdapter {
   constructor(options = {}) {
     this.options = options;
+    this._caseStyle = options.caseStyle !== undefined ? options.caseStyle : 'lower';
+    this._fkStrategy = options.fkStrategy !== undefined ? options.fkStrategy : 'alter';
+    this._eager = options.eager !== undefined ? options.eager : false;
     this.schemas = new Map();
     this.ddl = null;
     this.dml = null;
@@ -61,7 +64,7 @@ export class BaseAdapter {
    * @returns {string} 'lower' | 'upper' | undefined
    */
   get caseStyle() {
-    return 'lower';
+    return this._caseStyle;
   }
 
   /**
@@ -72,7 +75,16 @@ export class BaseAdapter {
    * @returns {string} 'alter' | 'inline' | 'none'
    */
   get fkStrategy() {
-    return 'alter';
+    return this._fkStrategy;
+  }
+
+  /**
+   * Returns the default include loading strategy for this adapter.
+   * Query-level `eager` and include-level `eager` can override this value.
+   * @returns {boolean}
+   */
+  get eager() {
+    return this._eager;
   }
 
   /**

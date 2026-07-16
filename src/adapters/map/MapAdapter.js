@@ -11,7 +11,7 @@ import { clone } from '../../utils/clone.js';
  */
 export class MapAdapter extends BaseAdapter {
   constructor(options = {}) {
-    super(options);
+    super({ fkStrategy: 'none', ...options });
     /** @type {Map<string, Map<*|null, object>>} */
     this.database = new Map();
     /** @type {Map<string, number>} */
@@ -21,19 +21,6 @@ export class MapAdapter extends BaseAdapter {
     this.dml = new MapDML(this);
     this.dcl = new MapDCL(this);
     this.tcl = new MapTCL(this);
-  }
-
-  /**
-   * Returns the case style for identifiers.
-   * In-memory adapter uses lowercase by default.
-   * @returns {string}
-   */
-  get caseStyle() {
-    return 'lower';
-  }
-
-  get fkStrategy() {
-    return 'none';
   }
 
   /**
