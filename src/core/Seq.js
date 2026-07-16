@@ -248,7 +248,7 @@ export class Seq {
       }
     }
 
-    this._log('info', 'Sync complete:', result);
+    this._log('info', 'Sync complete');
     return result;
   }
 

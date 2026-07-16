@@ -26,9 +26,20 @@ export class MapDDL extends DDLAbstract {
 
   async dropTable(tableName, options = {}) {
     if (!this._adapter.database.has(tableName)) throw new AdapterError(`Table "${tableName}" does not exist`, {code: 'SEQ_ADAPTER_TABLE_NOT_FOUND'});
+    await this.truncateTable(tableName, options);
     await super.dropTable(tableName, options);
     this._adapter.database.delete(tableName);
     this._adapter.sequences.delete(tableName);
+  }
+
+  async truncateTable(tableName, options = {}) {
+    const table = this._adapter.database.get(tableName);
+    if (!table) {
+      if (options.ifExists) return;
+      throw new AdapterError(`Table "${tableName}" does not exist`, {code: 'SEQ_ADAPTER_TABLE_NOT_FOUND'});
+    }
+    table.clear();
+    this._adapter.sequences.set(tableName, 1);
   }
 
   async hasTable(tableName) {

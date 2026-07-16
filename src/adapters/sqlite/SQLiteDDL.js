@@ -10,6 +10,11 @@ export class SQLiteDDL extends DDLAbstract {
     return this._adapter._db;
   }
 
+  async _execute(sql, params = []) {
+    this._log('trace', {sql, params});
+    this._db().prepare(sql).run(...params);
+  }
+
   async createTableStructure(def) {
     const colDefs = [];
     for (const [attrName, colDef] of Object.entries(def.columns)) {
@@ -52,8 +57,24 @@ export class SQLiteDDL extends DDLAbstract {
   }
 
   async dropTable(tableName, options = {}) {
+    await this.truncateTable(tableName, { ...options, ifExists: true, ignoreForeignKeys: true });
     await this._execute(`DROP TABLE IF EXISTS ${this._q(tableName)}`);
     await super.dropTable(tableName, options);
+  }
+
+  async truncateTable(tableName, options = {}) {
+    if (options.ifExists && !(await this.hasTable(tableName))) return;
+
+    const ignoreForeignKeys = options.ignoreForeignKeys !== false;
+    const foreignKeysBefore = this._db().pragma('foreign_keys', { simple: true });
+
+    try {
+      if (ignoreForeignKeys && foreignKeysBefore) this._db().pragma('foreign_keys = OFF');
+      await this._execute(`DELETE FROM ${this._q(tableName)}`);
+      await this._execute('DELETE FROM sqlite_sequence WHERE name = ?', [tableName]);
+    } finally {
+      if (ignoreForeignKeys && foreignKeysBefore) this._db().pragma('foreign_keys = ON');
+    }
   }
 
   async hasTable(tableName) {
@@ -70,10 +91,6 @@ export class SQLiteDDL extends DDLAbstract {
   async listTables() {
     const rows = this._db().prepare("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'").all();
     return rows.map(r => r.name);
-  }
-
-  async _execute(sql, params = []) {
-    this._db().prepare(sql).run(...params);
   }
 
   async addForeignKey(tableName, fk) {

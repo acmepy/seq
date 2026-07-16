@@ -106,9 +106,18 @@ export class DDLAbstract extends BaseAbstract {
    * @param {object} [options]
    */
   async dropTable(tableName, options = {}) {
-    //this._log('DDL.dropTable', tableName);
-    //await this._dropTablePhysical(tableName, options);
+    this._log('trace', 'DDL.dropTable', tableName);
     this._adapter.schemas.delete(tableName);
+  }
+
+  /**
+   * Removes all data from a table without removing its schema.
+   * Adapters can use this as a pre-drop cleanup step for physical databases.
+   * @param {string} tableName
+   * @param {object} [options]
+   */
+  async truncateTable(tableName, options = {}) {
+    throw new AdapterError('DDL truncateTable is not implemented by this adapter', { code: 'SEQ_DDL_NOT_IMPLEMENTED' });
   }
 
   /**

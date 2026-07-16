@@ -224,6 +224,45 @@ describe('SQLite Adapter', () => {
       const tables = await adapter.ddl.listTables();
       assert.ok(tables.includes('Foo'));
     });
+
+    it('truncates data before dropping a table', async () => {
+      const trace = [];
+      const sqlite = new SQLiteAdapter({ database: ':memory:' });
+
+      class Temp extends Model {}
+      Temp.init(
+        { id: { type: DataTypes.INTEGER, primaryKey: true, autoIncrement: true } },
+        { modelName: 'Temp', tableName: 'temps', timestamps: false }
+      );
+
+      const tracedSeq = new Seq({
+        adapter: sqlite,
+        models: [Temp],
+        logging: {
+          info: false,
+          trace: (...args) => trace.push(args),
+          error: false
+        }
+      });
+
+      try {
+        await tracedSeq.init();
+        await tracedSeq.sync();
+        await Temp.create({ id: 1 });
+
+        await sqlite.ddl.dropTable('temps');
+
+        assert.equal(await sqlite.ddl.hasTable('temps'), false);
+        const sql = trace.map(args => args[1]?.sql || args[1]).filter(Boolean);
+        const deleteIndex = sql.findIndex(entry => entry.includes('DELETE FROM') && entry.includes('temps'));
+        const dropIndex = sql.findIndex(entry => entry.includes('DROP TABLE IF EXISTS') && entry.includes('temps'));
+        assert.ok(deleteIndex >= 0, 'expected DELETE before DROP');
+        assert.ok(dropIndex >= 0, 'expected DROP TABLE');
+        assert.ok(deleteIndex < dropIndex, 'DELETE should run before DROP TABLE');
+      } finally {
+        await tracedSeq.close();
+      }
+    });
   });
 
   describe('naming conventions', () => {
