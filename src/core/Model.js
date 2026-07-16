@@ -24,6 +24,13 @@ export class Model {
     const Ctor = this.constructor;
     const attrs = Ctor.rawAttributes || {};
 
+    if (options._partial) {
+      for (const [key, value] of Object.entries(values)) {
+        this.dataValues[key] = value;
+      }
+      return;
+    }
+
     for (const key of Object.keys(attrs)) {
       if (key in values) {
         this.dataValues[key] = values[key];
@@ -37,9 +44,7 @@ export class Model {
 
     // Include any extra values not in attributes (e.g. timestamps added externally)
     for (const key of Object.keys(values)) {
-      if (!(key in this.dataValues)) {
-        this.dataValues[key] = values[key];
-      }
+      if (!(key in this.dataValues)) this.dataValues[key] = values[key];
     }
   }
 
@@ -50,23 +55,17 @@ export class Model {
    * @returns {typeof Model}
    */
   static init(attributes, options = {}) {
-    if (!attributes || typeof attributes !== 'object') {
-      throw new Error('Model.init requires an attributes object');
-    }
+    if (!attributes || typeof attributes !== 'object') throw new Error('Model.init requires an attributes object');
 
     this.rawAttributes = {};
     this.primaryKeyAttribute = null;
     this.autoIncrementAttribute = null;
 
     for (const [name, def] of Object.entries(attributes)) {
-      if (!def.type) {
-        throw new Error(`Attribute "${name}" must have a type`);
-      }
-      this.rawAttributes[name] = { ...def };
+      if (!def.type) throw new Error(`Attribute "${name}" must have a type`);
+      this.rawAttributes[name] = { ...def, type: this._normalizeDataType(def.type) };
       if (def.primaryKey) {
-        if (this.primaryKeyAttribute) {
-          throw new Error('Model must not have more than one primaryKey attribute');
-        }
+        if (this.primaryKeyAttribute) throw new Error('Model must not have more than one primaryKey attribute');
         this.primaryKeyAttribute = name;
       }
       if (def.autoIncrement) {
@@ -116,6 +115,11 @@ export class Model {
     return this;
   }
 
+  static _normalizeDataType(type) {
+    if (typeof type === 'function' && type._defaultType) return type._defaultType();
+    return type;
+  }
+
   /**
    * Hook for automatic initialization when registered with Seq.
    * Override in subclasses.
@@ -130,15 +134,10 @@ export class Model {
   }
 
   static hasMany(target, options = {}) {
-    if (!target) {
-      throw new ModelError('hasMany requires a target model', { code: 'SEQ_ASSOCIATION_INVALID_TARGET' });
-    }
+    if (!target) throw new ModelError('hasMany requires a target model', { code: 'SEQ_ASSOCIATION_INVALID_TARGET' });
     const fkAttr = options.foreignKey || this._defaultForeignKeyName(this.modelName, target.primaryKeyAttribute || 'id');
     if (target.rawAttributes && !target.rawAttributes[fkAttr]) {
-      throw new ModelError(
-        `Target model "${target.modelName}" must have a "${fkAttr}" attribute for hasMany association`,
-        { code: 'SEQ_ASSOCIATION_MISSING_FK', details: { target: target.modelName, foreignKey: fkAttr } }
-      );
+      throw new ModelError(`Target model "${target.modelName}" must have a "${fkAttr}" attribute for hasMany association`, { code: 'SEQ_ASSOCIATION_MISSING_FK', details: { target: target.modelName, foreignKey: fkAttr } });
     }
     if (!this.associations) this.associations = {};
     if (!options.as) options.as = (target.modelName || target.name || 'unknown').toLowerCase() + 's';
@@ -148,16 +147,9 @@ export class Model {
   }
 
   static hasOne(target, options = {}) {
-    if (!target) {
-      throw new ModelError('hasOne requires a target model', { code: 'SEQ_ASSOCIATION_INVALID_TARGET' });
-    }
+    if (!target) throw new ModelError('hasOne requires a target model', { code: 'SEQ_ASSOCIATION_INVALID_TARGET' });
     const fkAttr = options.foreignKey || this._defaultForeignKeyName(this.modelName, target.primaryKeyAttribute || 'id');
-    if (target.rawAttributes && !target.rawAttributes[fkAttr]) {
-      throw new ModelError(
-        `Target model "${target.modelName}" must have a "${fkAttr}" attribute for hasOne association`,
-        { code: 'SEQ_ASSOCIATION_MISSING_FK', details: { target: target.modelName, foreignKey: fkAttr } }
-      );
-    }
+    if (target.rawAttributes && !target.rawAttributes[fkAttr]) throw new ModelError(`Target model "${target.modelName}" must have a "${fkAttr}" attribute for hasOne association`, { code: 'SEQ_ASSOCIATION_MISSING_FK', details: { target: target.modelName, foreignKey: fkAttr } });
     if (!this.associations) this.associations = {};
     if (!options.as) options.as = (target.modelName || target.name || 'unknown').toLowerCase();
     const assoc = new Association('hasOne', this, target, { ...options, foreignKey: fkAttr });
@@ -166,16 +158,9 @@ export class Model {
   }
 
   static belongsTo(target, options = {}) {
-    if (!target) {
-      throw new ModelError('belongsTo requires a target model', { code: 'SEQ_ASSOCIATION_INVALID_TARGET' });
-    }
+    if (!target) throw new ModelError('belongsTo requires a target model', { code: 'SEQ_ASSOCIATION_INVALID_TARGET' });
     const fkAttr = options.foreignKey || this._defaultForeignKeyName(target.modelName || target.name, target.primaryKeyAttribute || 'id');
-    if (this.rawAttributes && !this.rawAttributes[fkAttr]) {
-      throw new ModelError(
-        `Model "${this.modelName}" must have a "${fkAttr}" attribute for belongsTo association`,
-        { code: 'SEQ_ASSOCIATION_MISSING_FK', details: { source: this.modelName, foreignKey: fkAttr } }
-      );
-    }
+    if (this.rawAttributes && !this.rawAttributes[fkAttr]) throw new ModelError(`Model "${this.modelName}" must have a "${fkAttr}" attribute for belongsTo association`,{ code: 'SEQ_ASSOCIATION_MISSING_FK', details: { source: this.modelName, foreignKey: fkAttr } });
     if (!this.associations) this.associations = {};
     if (!options.as) options.as = (target.modelName || target.name || 'unknown').toLowerCase();
     const assoc = new Association('belongsTo', this, target, { ...options, foreignKey: fkAttr });
@@ -255,7 +240,7 @@ export class Model {
    * @returns {Promise<Model>}
    */
   static async create(values = {}, options = {}) {
-    this._log('info', `${this.modelName}.create`, values);
+    this._log('trace', `${this.modelName}.create`, values);
     if (options.hooks !== false) await this._runHooks('beforeCreate', values, options);
     const result = await this._adapter.dml.insert(this, values, options);
     if (options.hooks !== false) await this._runHooks('afterCreate', result, options);
@@ -269,7 +254,7 @@ export class Model {
    * @returns {Promise<Model[]>}
    */
   static async bulkCreate(records = [], options = {}) {
-    this._log('info', `${this.modelName}.bulkCreate`, records);
+    this._log('trace', `${this.modelName}.bulkCreate`, records);
     if (options.hooks !== false) await this._runHooks('beforeBulkCreate', records, options);
     const result = await this._adapter.dml.bulkInsert(this, records, options);
     if (options.hooks !== false) await this._runHooks('afterBulkCreate', result, options);
@@ -283,10 +268,8 @@ export class Model {
    * @returns {Promise<Model|null>}
    */
   static async findByPk(id, options = {}) {
-    this._log('info', `${this.modelName}.findByPk`, id);
-    if (!this.primaryKeyAttribute) {
-      throw new Error(`Model "${this.modelName}" has no primary key`);
-    }
+    this._log('trace', `${this.modelName}.findByPk`, id);
+    if (!this.primaryKeyAttribute) throw new Error(`Model "${this.modelName}" has no primary key`);
     const where = { [this.primaryKeyAttribute]: id };
     return this.findOne({ ...options, where });
   }
@@ -297,7 +280,7 @@ export class Model {
    * @returns {Promise<Model|null>}
    */
   static async findOne(options = {}) {
-    this._log('info', `${this.modelName}.findOne`, options);
+    this._log('trace', `${this.modelName}.findOne`, options);
     if (options.hooks !== false) await this._runHooks('beforeFind', options);
     const result = await this._adapter.dml.selectOne(this, options);
     if (options.hooks !== false) await this._runHooks('afterFind', result, options);
@@ -316,7 +299,7 @@ export class Model {
     if (options.limit !== undefined && (!Number.isInteger(options.limit) || options.limit < 1))  throw new ValidationLimitError();
     if (options.offset !== undefined && (!Number.isInteger(options.offset) || options.offset < 0)) throw new ValidationOffsetError();
     if (options.include) options.include = normalizeInclude(options.include);
-    this._log('info', `${this.modelName}.findAll`, options);
+    this._log('trace', `${this.modelName}.findAll`, options);
     const result = await this._adapter.dml.selectAll(this, options);
     if (options.hooks !== false) await this._runHooks('afterFind', result, options);
     return result;
@@ -330,7 +313,7 @@ export class Model {
   static async count(options = {}) {
     if (options.hooks !== false) await this._runHooks('beforeCount', options);
     if (options.where !== undefined && (typeof options.where !== 'object' || Array.isArray(options.where))) throw new ValidationWhereError();
-    this._log('info', `${this.modelName}.count`, options);
+    this._log('trace', `${this.modelName}.count`, options);
     const result = await this._adapter.dml.count(this, options);
     if (options.hooks !== false) await this._runHooks('afterCount', result, options);
     return result;
@@ -344,7 +327,7 @@ export class Model {
    */
   static async update(values, options = {}) {
     if (options.where !== undefined && (typeof options.where !== 'object' || Array.isArray(options.where)))throw new ValidationWhereError();
-    this._log('info', `${this.modelName}.update`, values, options);
+    this._log('trace', `${this.modelName}.update`, values, options);
     if (options.hooks !== false) await this._runHooks('beforeUpdate', values, options);
     const result = await this._adapter.dml.update(this, values, options);
     if (options.hooks !== false) await this._runHooks('afterUpdate', result, options);
@@ -358,7 +341,7 @@ export class Model {
    */
   static async destroy(options = {}) {
     if (options.where !== undefined && (typeof options.where !== 'object' || Array.isArray(options.where)))throw new ValidationWhereError();
-    this._log('info', `${this.modelName}.destroy`, options);
+    this._log('trace', `${this.modelName}.destroy`, options);
     if (options.hooks !== false) await this._runHooks('beforeDestroy', options);
     const result = await this._adapter.dml.delete(this, options);
     if (options.hooks !== false) await this._runHooks('afterDestroy', result, options);
@@ -371,7 +354,7 @@ export class Model {
    * @returns {Promise<void>}
    */
   static async truncate(options = {}) {
-    this._log('info', `${this.modelName}.truncate`);
+    this._log('trace', `${this.modelName}.truncate`);
     if (options.hooks !== false) await this._runHooks('beforeTruncate', options);
     const result = await this._adapter.dml.truncate(this, options);
     if (options.hooks !== false) await this._runHooks('afterTruncate', options);
@@ -476,9 +459,7 @@ export class Model {
    * @returns {Promise<Model>}
    */
   async update(values, options = {}) {
-    for (const [key, value] of Object.entries(values)) {
-      this.setDataValue(key, value);
-    }
+    for (const [key, value] of Object.entries(values)) this.setDataValue(key, value);
     this._isNew = false;
     return this.save(options);
   }

@@ -215,6 +215,59 @@ Opciones de atributo:
 | `references` | FK directa: `{ model, key, constraintName }`. |
 | `onDelete` | Accion FK: `RESTRICT`, `CASCADE` o `SET NULL`. |
 | `onUpdate` | Accion FK: `RESTRICT`, `CASCADE` o `SET NULL`. |
+| `validate.len` | Valida longitud con `[min, max]`. |
+| `validate.isEmail` | Valida formato de email basico. |
+
+## Compatibilidad con `sequelize.define`
+
+Tambien se puede definir modelos con un estilo cercano a Sequelize usando `seq.define(nombre, atributos, opciones)`. Esto permite migrar archivos existentes con cambios pequenos: cambiar el import, recibir una instancia `Seq`, y mantener `associate(models)` si ya existe.
+
+```js
+import { DataTypes } from 'seq';
+
+export default function init(seq) {
+  const usuarios = seq.define(
+    'usuarios',
+    {
+      id: { type: DataTypes.STRING, primaryKey: true },
+      usuario: {
+        type: DataTypes.STRING(20),
+        allowNull: false,
+        unique: true,
+        validate: { len: [3, 20] }
+      },
+      correo: {
+        type: DataTypes.STRING,
+        allowNull: false,
+        validate: { isEmail: true }
+      },
+      rolId: {
+        type: DataTypes.INTEGER,
+        allowNull: false,
+        references: { model: 'roles', key: 'id' }
+      }
+    },
+    {
+      timestamps: false,
+      tableName: 'repUsuarios',
+      labels: {
+        usuario: 'Usuario',
+        correo: 'Correo'
+      }
+    }
+  );
+
+  usuarios.associate = (models) => {
+    usuarios.belongsTo(models.roles, { foreignKey: 'rolId' });
+  };
+
+  usuarios.list = async () => await usuarios.findAll({ attributes: ['id', 'usuario'] });
+
+  return usuarios;
+}
+```
+
+`seq.models` conserva comportamiento de array y ademas expone accesos por nombre de modelo o tabla, por ejemplo `seq.models.usuarios` y `seq.models.repUsuarios`.
 
 ## Tipos de datos
 
@@ -223,7 +276,7 @@ Opciones de atributo:
 | `INTEGER` | `DataTypes.INTEGER` |
 | `DECIMAL(p, s)` | `DataTypes.DECIMAL(12, 2)` |
 | `NUMBER(p, s)` | `DataTypes.NUMBER(10, 0)` |
-| `STRING(len)` | `DataTypes.STRING(100)` |
+| `STRING(len)` | `DataTypes.STRING` o `DataTypes.STRING(100)` |
 | `BOOLEAN` | `DataTypes.BOOLEAN` |
 | `DATE` | `DataTypes.DATE` |
 | `ARRAY(type)` | `DataTypes.ARRAY(DataTypes.STRING(50))` |

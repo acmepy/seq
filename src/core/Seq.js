@@ -1,4 +1,5 @@
 import { ModelRegistry } from './ModelRegistry.js';
+import { Model } from './Model.js';
 import { ConfigurationError } from './errors/ConfigurationError.js';
 import { applyConvention, applyCase } from '../utils/naming.js';
 
@@ -18,12 +19,7 @@ export class Seq {
    * @param {string} [options.naming.prefix] - Global prefix for table names
    */
   constructor(options = {}) {
-    if (!options.adapter) {
-      throw new ConfigurationError('An adapter is required', {
-        code: 'SEQ_MISSING_ADAPTER'
-      });
-    }
-
+    if (!options.adapter) throw new ConfigurationError('An adapter is required', {code: 'SEQ_MISSING_ADAPTER'});
     this._adapter = options.adapter;
     this._adapter._seq = this;
     this._logging = this._normalizeLogging(options.logging);
@@ -47,7 +43,7 @@ export class Seq {
    * @returns {Array}
    */
   get models() {
-    return this._registry.all();
+    return this._buildModelMap(this._registry.all());
   }
 
   /**
@@ -92,6 +88,8 @@ export class Seq {
       this.registerModel(modelClass);
     }
 
+    this._runModelAssociations();
+
     this._initialized = true;
     this._log('info', 'Seq initialized');
   }
@@ -102,6 +100,78 @@ export class Seq {
    */
   registerModel(modelClass) {
     this._registry.register(modelClass);
+  }
+
+  /**
+   * Defines and registers a model using a Sequelize-like API.
+   * @param {string} modelName
+   * @param {object} attributes
+   * @param {object} [options={}]
+   * @returns {typeof Model}
+   */
+  define(modelName, attributes, options = {}) {
+    function DefinedModel(values = {}, options = {}) {
+      if (!new.target) return new DefinedModel(values, options);
+      return Reflect.construct(Model, [values, options], new.target);
+    }
+
+    Object.setPrototypeOf(DefinedModel, Model);
+    Object.defineProperty(DefinedModel, 'name', {
+      value: modelName,
+      configurable: true
+    });
+    DefinedModel.prototype = Object.create(Model.prototype, {
+      constructor: {
+        value: DefinedModel,
+        writable: true,
+        configurable: true
+      }
+    });
+
+    DefinedModel.init(attributes, {
+      ...this._define,
+      ...options,
+      modelName,
+      seq: this
+    });
+    this._copyModelStatics(DefinedModel);
+
+    if (!this._modelClasses.includes(DefinedModel)) this._modelClasses.push(DefinedModel);
+    if (this._initialized) {
+      DefinedModel._resolvedTableName = this._resolveTableName(DefinedModel);
+      this.registerModel(DefinedModel);
+      this._runModelAssociations();
+    }
+
+    return DefinedModel;
+  }
+
+  _copyModelStatics(modelClass) {
+    for (const key of Object.getOwnPropertyNames(Model)) {
+      if (['length', 'name', 'prototype'].includes(key)) continue;
+      if (Object.prototype.hasOwnProperty.call(modelClass, key)) continue;
+      Object.defineProperty(modelClass, key, Object.getOwnPropertyDescriptor(Model, key));
+    }
+  }
+
+  _buildModelMap(models) {
+    const result = [...models];
+    for (const model of models) {
+      result[model.modelName] = model;
+      if (model.tableName && !result[model.tableName]) {
+        result[model.tableName] = model;
+      }
+    }
+    return result;
+  }
+
+  _runModelAssociations() {
+    const models = this.models;
+    for (const modelClass of this._registry.all()) {
+      if (typeof modelClass.associate !== 'function' || modelClass._associationsApplied) continue;
+      modelClass.associate(models);
+      modelClass._associationsApplied = true;
+    }
   }
 
   /**
@@ -222,15 +292,9 @@ export class Seq {
     const convention = this._naming.tables;
     const prefix = this._naming.prefix;
     const caseStyle = this._adapter.caseStyle;
-
-    if (!convention) {
-      return modelClass.modelName;
-    }
-
+    if (!convention) return modelClass.modelName;
     let name = applyConvention(modelClass.modelName, convention);
-    if (prefix) {
-      name = `${prefix}_${name}`;
-    }
+    if (prefix) name = `${prefix}_${name}`;
     return applyCase(name, caseStyle);
   }
 
@@ -243,17 +307,10 @@ export class Seq {
    * @private
    */
   _resolveColumnName(def, attrName) {
-    if (def.field) {
-      return def.field;
-    }
-
+    if (def.field) return def.field;
     const convention = this._naming.columns;
     const caseStyle = this._adapter.caseStyle;
-
-    if (!convention) {
-      return attrName;
-    }
-
+    if (!convention) return attrName;
     return applyCase(applyConvention(attrName, convention), caseStyle);
   }
 
@@ -283,6 +340,7 @@ export class Seq {
         autoIncrement: def.autoIncrement || false,
         allowNull: def.allowNull !== undefined ? def.allowNull : true,
         defaultValue: def.defaultValue,
+        validate: def.validate,
         field: columnName
       };
 

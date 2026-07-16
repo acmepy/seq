@@ -43,9 +43,7 @@ export class MapDML extends DMLAbstract {
     const table = this._adapter.database.get(tableName);
     const schema = this._adapter.schemas.get(tableName);
 
-    if (!schema) {
-      throw new AdapterError(`Table "${tableName}" does not exist`, { code: 'SEQ_ADAPTER_TABLE_NOT_FOUND' });
-    }
+    if (!schema) throw new AdapterError(`Table "${tableName}" does not exist`, { code: 'SEQ_ADAPTER_TABLE_NOT_FOUND' });
 
     const colRecord = this._toColumnNames(values, schema);
 
@@ -72,12 +70,8 @@ export class MapDML extends DMLAbstract {
       const now = new Date();
       const createdCol = schema.attrToColumn[schema.createdAt] || schema.createdAt;
       const updatedCol = schema.attrToColumn[schema.updatedAt] || schema.updatedAt;
-      if (!colRecord[createdCol]) {
-        colRecord[createdCol] = now;
-      }
-      if (!colRecord[updatedCol]) {
-        colRecord[updatedCol] = now;
-      }
+      if (!colRecord[createdCol]) colRecord[createdCol] = now;
+      if (!colRecord[updatedCol])  colRecord[updatedCol] = now;
     }
 
     this._validateRecord(colRecord, schema, model.modelName);
@@ -115,9 +109,7 @@ export class MapDML extends DMLAbstract {
    */
   async bulkInsert(model, records, options = {}) {
     const results = [];
-    for (const record of records) {
-      results.push(await this.insert(model, record, options));
-    }
+    for (const record of records) results.push(await this.insert(model, record, options));
     return results;
   }
 
@@ -145,9 +137,7 @@ export class MapDML extends DMLAbstract {
     const schema = this._adapter.schemas.get(tableName);
     let results = [];
 
-    for (const [, record] of table) {
-      results.push(clone(record));
-    }
+    for (const [, record] of table) results.push(clone(record));
 
     if (options.where) {
       const colWhere = this._translateWhere(options.where, schema);
@@ -174,17 +164,26 @@ export class MapDML extends DMLAbstract {
       });
     }
 
-    if (options.offset) {
-      results = results.slice(options.offset);
-    }
+    if (options.offset) results = results.slice(options.offset);
+    if (options.limit) results = results.slice(0, options.limit);
 
-    if (options.limit) {
-      results = results.slice(0, options.limit);
+    if (Array.isArray(options.attributes) && options.attributes.length > 0) {
+      const selected = new Set(options.attributes.map(attr => schema.attrToColumn[attr] || attr));
+      results = results.map(record => {
+        const projected = {};
+        for (const key of selected) {
+          if (key in record) projected[key] = record[key];
+        }
+        return projected;
+      });
     }
 
     return results.map(record => {
       const attrRecord = schema ? this._toAttrNames(record, schema) : record;
-      return new model(attrRecord, { _isNew: false });
+      return new model(attrRecord, {
+        _isNew: false,
+        _partial: Array.isArray(options.attributes) && options.attributes.length > 0
+      });
     });
   }
 

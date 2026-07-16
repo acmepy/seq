@@ -28,8 +28,11 @@ export class SQLiteDML extends DMLAbstract {
     return this._db().prepare(sql).run(...params);
   }
 
-  _mapRows(rows, model, schema) {
-    return rows.map(row => new model(this._toAttrNames(row, schema), { _isNew: false }));
+  _mapRows(rows, model, schema, options = {}) {
+    return rows.map(row => new model(this._toAttrNames(row, schema), {
+      _isNew: false,
+      _partial: Array.isArray(options.attributes) && options.attributes.length > 0
+    }));
   }
 
   // ---------------------------------------------------------------------------

@@ -12,6 +12,9 @@ import { JSONType } from './JSONType.js';
  * Factory object exposing all available data types.
  * Usage: DataTypes.INTEGER, DataTypes.STRING(100), DataTypes.DECIMAL(12, 2)
  */
+const STRING = (length) => new StringType(length);
+STRING._defaultType = () => new StringType();
+
 export const DataTypes = {
   INTEGER: new IntegerType(),
   DECIMAL(precision, scale) {
@@ -20,9 +23,7 @@ export const DataTypes = {
   NUMBER(precision, scale) {
     return new NumberType(precision, scale);
   },
-  STRING(length) {
-    return new StringType(length);
-  },
+  STRING,
   BOOLEAN: new BooleanType(),
   DATE: new DateType(),
   ARRAY(itemType) {

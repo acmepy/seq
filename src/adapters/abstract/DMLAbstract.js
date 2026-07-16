@@ -216,6 +216,13 @@ export class DMLAbstract extends BaseAbstract {
     return '';
   }
 
+  _buildSelectList(attributes, schema, alias = null) {
+    if (!Array.isArray(attributes) || attributes.length === 0) return '*';
+    return attributes
+      .map(attr => this._colRef(schema.attrToColumn[attr] || attr, alias))
+      .join(', ');
+  }
+
   /**
    * Builds a SELECT clause with table-qualified column aliases for JOINs.
    * Format: "alias"."col" AS "alias__col"
@@ -381,16 +388,13 @@ export class DMLAbstract extends BaseAbstract {
     const params = [];
     if (eagerIncludes.length > 0) {
       const qualifiedSelect = this._buildQualifiedSelect(model, schema, alias, eagerIncludes);
-      sql = alias
-        ? `SELECT ${qualifiedSelect} FROM ${this._q(tableName)} AS ${this._q(alias)}`
-        : `SELECT ${qualifiedSelect} FROM ${this._q(tableName)}`;
+      sql = `SELECT ${qualifiedSelect} FROM ${this._q(tableName)}` + (alias ? ` AS ${this._q(alias)}` :``)
       const joins = this._buildJoinClause(eagerIncludes, model, alias, resolveIncludeAlias);
       sql += joins.sql;
       params.push(...joins.params);
     } else {
-      sql = alias
-        ? `SELECT * FROM ${this._q(tableName)} AS ${this._q(alias)}`
-        : `SELECT * FROM ${this._q(tableName)}`;
+      const selectList = this._buildSelectList(options.attributes, schema, alias);
+      sql = `SELECT ${selectList} FROM ${this._q(tableName)}` + (alias ? ` AS ${this._q(alias)}` :``)
     }
     const where = this._buildWhere(options.where, schema, alias);
     sql += where.sql;
@@ -402,7 +406,7 @@ export class DMLAbstract extends BaseAbstract {
     if (eagerIncludes.length > 0) {
       instances = processJoinedRows(rows, model, eagerIncludes, this);
     } else {
-      instances = this._mapRows(rows, model, schema);
+      instances = this._mapRows(rows, model, schema, options);
     }
     if (lazyIncludes.length > 0) {
       await loadIncludes(instances, lazyIncludes, model, this);
@@ -419,9 +423,7 @@ export class DMLAbstract extends BaseAbstract {
   async count(model, options = {}) {
     //this._log('DML.count', model.modelName, options);
     const { tableName, schema, alias } = this._schema(model);
-    let sql = alias
-      ? `SELECT COUNT(*) as cnt FROM ${this._q(tableName)} AS ${this._q(alias)}`
-      : `SELECT COUNT(*) as cnt FROM ${this._q(tableName)}`;
+    let sql = `SELECT COUNT(*) as cnt FROM ${this._q(tableName)}` + (alias ? ` AS ${this._q(alias)}` :``)
     const params = [];
     const where = this._buildWhere(options.where, schema, alias);
     sql += where.sql;
@@ -731,6 +733,39 @@ export class DMLAbstract extends BaseAbstract {
             }
           );
         }
+      }
+
+      if (value !== null && value !== undefined && colDef.validate) {
+        this._validateCustomRules(value, colDef.validate, attrName, modelName);
+      }
+    }
+  }
+
+  _validateCustomRules(value, rules, attrName, modelName) {
+    if (rules.len) {
+      const [min, max] = rules.len;
+      const length = String(value).length;
+      if (length < min || length > max) {
+        throw new ValidationError(
+          `Field "${attrName}" length must be between ${min} and ${max} characters in model "${modelName}"`,
+          {
+            code: 'SEQ_VALIDATION_LEN',
+            details: { model: modelName, field: attrName, min, max, actualLength: length }
+          }
+        );
+      }
+    }
+
+    if (rules.isEmail) {
+      const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+      if (typeof value !== 'string' || !emailPattern.test(value)) {
+        throw new ValidationError(
+          `Field "${attrName}" must be a valid email in model "${modelName}"`,
+          {
+            code: 'SEQ_VALIDATION_EMAIL',
+            details: { model: modelName, field: attrName, value }
+          }
+        );
       }
     }
   }
