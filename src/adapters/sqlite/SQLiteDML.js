@@ -14,17 +14,17 @@ export class SQLiteDML extends DMLAbstract {
   // ---------------------------------------------------------------------------
 
   async _executeQueryAll(sql, params) {
-    this._log(sql, JSON.stringify(params).replaceAll(`"`, `'`));
+    this._log('trace', sql, { sql, params });
     return this._db().prepare(sql).all(...params);
   }
 
   async _executeGet(sql, params) {
-    this._log(sql, JSON.stringify(params).replaceAll(`"`, `'`));
+    this._log('trace', sql, { sql, params });
     return this._db().prepare(sql).get(...params);
   }
 
   _execute(sql, params = []) {
-    this._log(sql, JSON.stringify(params).replaceAll(`"`, `'`));
+    this._log('trace', sql, { sql, params });
     return this._db().prepare(sql).run(...params);
   }
 

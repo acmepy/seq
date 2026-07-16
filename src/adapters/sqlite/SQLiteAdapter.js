@@ -27,14 +27,14 @@ export class SQLiteAdapter extends BaseAdapter {
     this._db = new Database(this._dbPath);
     this._db.pragma('journal_mode = WAL');
     this._db.pragma('foreign_keys = ON');
-    this._log('conectado');
+    this._log('info', 'conectado');
   }
 
   async close() {
     if (this._db) {
       this._db.close();
       this._db = null;
-      this._log('desconectado');
+      this._log('info', 'desconectado');
     }
   }
 

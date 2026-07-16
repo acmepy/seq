@@ -10,7 +10,7 @@ export class Seq {
    * @param {object} options - Configuration options
    * @param {import('../adapters/BaseAdapter.js').BaseAdapter} options.adapter - The adapter to use
    * @param {Array} [options.models=[]] - Model classes to register
-   * @param {boolean|function} [options.logging=false] - Logging configuration
+   * @param {boolean|function|object} [options.logging] - Logging configuration
    * @param {object} [options.define={}] - Default model definition options
    * @param {object} [options.naming={}] - Naming convention options
    * @param {string} [options.naming.tables] - Table name convention: 'camelCase' | 'snake_case'
@@ -26,7 +26,7 @@ export class Seq {
 
     this._adapter = options.adapter;
     this._adapter._seq = this;
-    this._logging = options.logging || false;
+    this._logging = this._normalizeLogging(options.logging);
     this._define = options.define || {};
     this._naming = options.naming || {};
     this._registry = new ModelRegistry();
@@ -93,7 +93,7 @@ export class Seq {
     }
 
     this._initialized = true;
-    this._log('Seq initialized');
+    this._log('info', 'Seq initialized');
   }
 
   /**
@@ -178,7 +178,7 @@ export class Seq {
       }
     }
 
-    this._log('Sync complete:', result);
+    this._log('info', 'Sync complete:', result);
     return result;
   }
 
@@ -511,15 +511,65 @@ export class Seq {
   }
 
   /**
-   * Logs a message if logging is enabled.
+   * Normalizes logging configuration into per-level handlers.
+   * @param {boolean|function|object|undefined} logging
+   * @returns {{info: Function|false, trace: Function|false, warning: Function|false, error: Function|false}}
+   * @private
+   */
+  _normalizeLogging(logging) {
+    const disabled = { info: false, trace: false, warning: false, error: false };
+    const defaults = {
+      info: console.log.bind(console),
+      trace: false,
+      warning: false,
+      error: console.error.bind(console)
+    };
+
+    if (logging === undefined || logging === true) return { ...defaults };
+    if (logging === false || logging === null) return disabled;
+    if (typeof logging === 'function') return { ...defaults, info: logging };
+
+    if (typeof logging === 'object') {
+      return {
+        ...defaults,
+        ...logging,
+        warning: logging.warning ?? logging.warn ?? defaults.warning,
+        trace: logging.trace ?? defaults.trace
+      };
+    }
+
+    return disabled;
+  }
+
+  _formatLogValue(value) {
+    if (value === null || typeof value !== 'object') return value;
+
+    let output;
+    try {
+      output = JSON.stringify(value);
+    } catch {
+      output = String(value);
+    }
+
+    return output.replace(/["']/g, '');
+  }
+
+  /**
+   * Logs a message if the selected level is enabled.
+   * @param {string} [level]
    * @param {...*} args
    * @private
    */
   _log(...args) {
-    if (this._logging === true) {
-      console.log('[Seq]', ...args);
-    } else if (typeof this._logging === 'function') {
-      this._logging('[Seq]', ...args);
+    const levels = new Set(['info', 'trace', 'warning', 'error']);
+    let level = 'info';
+    let payload = args;
+
+    if (args.length > 1 && levels.has(args[0])) [level, ...payload] = args;
+
+    const logger = this._logging?.[level];
+    if (typeof logger === 'function') {
+      logger('[Seq]', ...payload.map(value => this._formatLogValue(value)));
     }
   }
 }

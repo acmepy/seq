@@ -518,7 +518,7 @@ describe('Model CRUD', () => {
       await User.findAll({ where: { active: true } });
       const findallLog = logCalls.find(args => args[1]?.includes?.('User.findAll'));
       assert.ok(findallLog, 'Expected a findAll log entry');
-      assert.deepEqual(findallLog[2], { where: { active: true } });
+      assert.equal(findallLog[2], '{where:{active:true}}');
     });
 
     it('logs findOne with options', async () => {
@@ -538,7 +538,7 @@ describe('Model CRUD', () => {
       await User.create({ name: 'Test', email: 'test@test.com' });
       const createLog = logCalls.find(args => args[1]?.includes?.('User.create'));
       assert.ok(createLog, 'Expected a create log entry');
-      assert.equal(createLog[2].name, 'Test');
+      assert.equal(createLog[2], '{name:Test,email:test@test.com}');
     });
 
     it('logs count with options', async () => {
@@ -551,7 +551,7 @@ describe('Model CRUD', () => {
       await User.update({ name: 'Updated' }, { where: { id: 1 } });
       const updateLog = logCalls.find(args => args[1]?.includes?.('User.update'));
       assert.ok(updateLog, 'Expected an update log entry');
-      assert.equal(updateLog[2].name, 'Updated');
+      assert.equal(updateLog[2], '{name:Updated}');
     });
 
     it('logs destroy with options', async () => {

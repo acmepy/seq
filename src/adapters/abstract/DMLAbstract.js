@@ -132,12 +132,32 @@ export class DMLAbstract extends BaseAbstract {
     }
   }
 
+  _whereEntries(where) {
+    return [
+      ...Object.entries(where),
+      ...Object.getOwnPropertySymbols(where).map(symbol => [symbol, where[symbol]])
+    ];
+  }
+
   _buildConditions(where, schema, alias = null) {
     const colWhere = this._translateWhere(where, schema);
     const params = [];
     const conditions = [];
 
-    for (const [k, v] of Object.entries(colWhere)) {
+    for (const [k, v] of this._whereEntries(colWhere)) {
+      if (k === Op.and || k === Op.or) {
+        const logical = k === Op.and ? 'AND' : 'OR';
+        const parts = [];
+        for (const item of v) {
+          const child = this._buildConditions(item, schema, alias);
+          if (child.conditions.length === 0) continue;
+          parts.push(`(${child.conditions.join(' AND ')})`);
+          params.push(...child.params);
+        }
+        if (parts.length > 0) conditions.push(`(${parts.join(` ${logical} `)})`);
+        continue;
+      }
+
       const condition = this._buildCondition(this._colRef(k, alias), v);
       conditions.push(condition.sql);
       params.push(...condition.params);
@@ -160,6 +180,7 @@ export class DMLAbstract extends BaseAbstract {
   _buildWhere(where, schema, alias = null) {
     if (!where) return { sql: '', params: [] };
     const { conditions, params } = this._buildConditions(where, schema, alias);
+    if (conditions.length === 0) return { sql: '', params: [] };
     return { sql: ` WHERE ${conditions.join(' AND ')}`, params };
   }
 
@@ -580,7 +601,18 @@ export class DMLAbstract extends BaseAbstract {
    * @returns {object}
    */
   _translateWhere(where, schema) {
-    return this._toColumnNames(where, schema);
+    const result = {};
+    const map = schema.attrToColumn;
+
+    for (const [key, value] of this._whereEntries(where)) {
+      if (key === Op.and || key === Op.or) {
+        result[key] = value.map(item => this._translateWhere(item, schema));
+      } else {
+        result[map[key] || key] = value;
+      }
+    }
+
+    return result;
   }
 
   /**
@@ -590,7 +622,16 @@ export class DMLAbstract extends BaseAbstract {
    * @returns {boolean}
    */
   _matchWhere(record, where) {
-    for (const [key, value] of Object.entries(where)) {
+    for (const [key, value] of this._whereEntries(where)) {
+      if (key === Op.and) {
+        if (!value.every(item => this._matchWhere(record, item))) return false;
+        continue;
+      }
+      if (key === Op.or) {
+        if (!value.some(item => this._matchWhere(record, item))) return false;
+        continue;
+      }
+
       const { op, value: opValue } = resolveWhereValue(value);
       const recordValue = record[key];
       switch (op) {

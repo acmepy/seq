@@ -12,7 +12,12 @@ const seq = new Seq({
     tables: 'snake_case',
     columns: 'snake_case'
   },
-  logging: console.log
+  logging: {
+    info: console.log,
+    trace: console.debug,
+    warning: console.warn,
+    error: console.error
+  }
 });
 
 await seq.init();

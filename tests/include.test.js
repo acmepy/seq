@@ -124,9 +124,9 @@ describe('Aliases & Include', () => {
       assert.equal(assoc.as, 'tasks');
     });
 
-    it('hasOne auto-generates plural as', () => {
+    it('hasOne auto-generates singular as', () => {
       const assoc = User.associations[Profile.modelName];
-      assert.equal(assoc.as, 'profiles');
+      assert.equal(assoc.as, 'profile');
     });
 
     it('belongsTo auto-generates singular as', () => {
@@ -272,7 +272,7 @@ describe('Aliases & Include', () => {
       assert.equal(users.length, 2);
 
       const ana = users.find(u => u.getDataValue('name') === 'Ana');
-      const profile = ana.getDataValue('profiles');
+      const profile = ana.getDataValue('profile');
       assert.ok(profile);
       assert.equal(profile.getDataValue('bio'), 'Developer');
     });
@@ -280,7 +280,7 @@ describe('Aliases & Include', () => {
     it('returns null when no match', async () => {
       const users = await User.findAll({ include: Profile });
       const juan = users.find(u => u.getDataValue('name') === 'Juan');
-      assert.equal(juan.getDataValue('profiles'), null);
+      assert.equal(juan.getDataValue('profile'), null);
     });
   });
 
@@ -342,7 +342,7 @@ describe('Aliases & Include', () => {
 
       const ana = users.find(u => u.getDataValue('name') === 'Ana');
       assert.ok(Array.isArray(ana.getDataValue('tasks')));
-      assert.ok(ana.getDataValue('profiles'));
+      assert.ok(ana.getDataValue('profile'));
     });
   });
 
@@ -429,7 +429,7 @@ describe('Aliases & Include', () => {
       assert.equal(users.length, 2);
 
       const ana = users.find(u => u.getDataValue('name') === 'Ana');
-      const profile = ana.getDataValue('profiles');
+      const profile = ana.getDataValue('profile');
       assert.ok(profile);
       assert.equal(profile.getDataValue('bio'), 'Developer');
     });
@@ -437,7 +437,7 @@ describe('Aliases & Include', () => {
     it('returns null when no match', async () => {
       const users = await User.findAll({ include: Profile, eager: true });
       const juan = users.find(u => u.getDataValue('name') === 'Juan');
-      assert.equal(juan.getDataValue('profiles'), null);
+      assert.equal(juan.getDataValue('profile'), null);
     });
   });
 
@@ -499,7 +499,7 @@ describe('Aliases & Include', () => {
 
       const ana = users.find(u => u.getDataValue('name') === 'Ana');
       assert.ok(Array.isArray(ana.getDataValue('tasks')));
-      assert.ok(ana.getDataValue('profiles'));
+      assert.ok(ana.getDataValue('profile'));
     });
   });
 
@@ -515,7 +515,7 @@ describe('Aliases & Include', () => {
       });
       const ana = users.find(u => u.getDataValue('name') === 'Ana');
       assert.ok(Array.isArray(ana.getDataValue('tasks')));
-      assert.ok(ana.getDataValue('profiles'));
+      assert.ok(ana.getDataValue('profile'));
     });
 
     it('global lazy with per-include eager override', async () => {
@@ -524,7 +524,7 @@ describe('Aliases & Include', () => {
       });
       const ana = users.find(u => u.getDataValue('name') === 'Ana');
       assert.ok(Array.isArray(ana.getDataValue('tasks')));
-      assert.ok(ana.getDataValue('profiles'));
+      assert.ok(ana.getDataValue('profile'));
     });
   });
 

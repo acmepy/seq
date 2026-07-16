@@ -159,7 +159,7 @@ export class Model {
       );
     }
     if (!this.associations) this.associations = {};
-    if (!options.as) options.as = (target.modelName || target.name || 'unknown').toLowerCase() + 's';
+    if (!options.as) options.as = (target.modelName || target.name || 'unknown').toLowerCase();
     const assoc = new Association('hasOne', this, target, { ...options, foreignKey: fkAttr });
     this.associations[target.modelName || target.name || 'unknown'] = assoc;
     return this;
@@ -255,7 +255,7 @@ export class Model {
    * @returns {Promise<Model>}
    */
   static async create(values = {}, options = {}) {
-    //this._log(`${this.modelName}.create`, values);
+    this._log('info', `${this.modelName}.create`, values);
     if (options.hooks !== false) await this._runHooks('beforeCreate', values, options);
     const result = await this._adapter.dml.insert(this, values, options);
     if (options.hooks !== false) await this._runHooks('afterCreate', result, options);
@@ -269,7 +269,7 @@ export class Model {
    * @returns {Promise<Model[]>}
    */
   static async bulkCreate(records = [], options = {}) {
-    //this._log(`${this.modelName}.bulkCreate`, records);
+    this._log('info', `${this.modelName}.bulkCreate`, records);
     if (options.hooks !== false) await this._runHooks('beforeBulkCreate', records, options);
     const result = await this._adapter.dml.bulkInsert(this, records, options);
     if (options.hooks !== false) await this._runHooks('afterBulkCreate', result, options);
@@ -283,7 +283,7 @@ export class Model {
    * @returns {Promise<Model|null>}
    */
   static async findByPk(id, options = {}) {
-    //this._log(`${this.modelName}.findByPk`, id);
+    this._log('info', `${this.modelName}.findByPk`, id);
     if (!this.primaryKeyAttribute) {
       throw new Error(`Model "${this.modelName}" has no primary key`);
     }
@@ -297,7 +297,7 @@ export class Model {
    * @returns {Promise<Model|null>}
    */
   static async findOne(options = {}) {
-    //this._log(`${this.modelName}.findOne`, options);
+    this._log('info', `${this.modelName}.findOne`, options);
     if (options.hooks !== false) await this._runHooks('beforeFind', options);
     const result = await this._adapter.dml.selectOne(this, options);
     if (options.hooks !== false) await this._runHooks('afterFind', result, options);
@@ -316,7 +316,7 @@ export class Model {
     if (options.limit !== undefined && (!Number.isInteger(options.limit) || options.limit < 1))  throw new ValidationLimitError();
     if (options.offset !== undefined && (!Number.isInteger(options.offset) || options.offset < 0)) throw new ValidationOffsetError();
     if (options.include) options.include = normalizeInclude(options.include);
-    //this._log(`${this.modelName}.findAll`, options);
+    this._log('info', `${this.modelName}.findAll`, options);
     const result = await this._adapter.dml.selectAll(this, options);
     if (options.hooks !== false) await this._runHooks('afterFind', result, options);
     return result;
@@ -330,7 +330,7 @@ export class Model {
   static async count(options = {}) {
     if (options.hooks !== false) await this._runHooks('beforeCount', options);
     if (options.where !== undefined && (typeof options.where !== 'object' || Array.isArray(options.where))) throw new ValidationWhereError();
-    this._log(`${this.modelName}.count`, options);
+    this._log('info', `${this.modelName}.count`, options);
     const result = await this._adapter.dml.count(this, options);
     if (options.hooks !== false) await this._runHooks('afterCount', result, options);
     return result;
@@ -344,7 +344,7 @@ export class Model {
    */
   static async update(values, options = {}) {
     if (options.where !== undefined && (typeof options.where !== 'object' || Array.isArray(options.where)))throw new ValidationWhereError();
-    //this._log(`${this.modelName}.update`, values, options);
+    this._log('info', `${this.modelName}.update`, values, options);
     if (options.hooks !== false) await this._runHooks('beforeUpdate', values, options);
     const result = await this._adapter.dml.update(this, values, options);
     if (options.hooks !== false) await this._runHooks('afterUpdate', result, options);
@@ -358,7 +358,7 @@ export class Model {
    */
   static async destroy(options = {}) {
     if (options.where !== undefined && (typeof options.where !== 'object' || Array.isArray(options.where)))throw new ValidationWhereError();
-    //this._log(`${this.modelName}.destroy`, options);
+    this._log('info', `${this.modelName}.destroy`, options);
     if (options.hooks !== false) await this._runHooks('beforeDestroy', options);
     const result = await this._adapter.dml.delete(this, options);
     if (options.hooks !== false) await this._runHooks('afterDestroy', result, options);
@@ -371,7 +371,7 @@ export class Model {
    * @returns {Promise<void>}
    */
   static async truncate(options = {}) {
-    //this._log(`${this.modelName}.truncate`);
+    this._log('info', `${this.modelName}.truncate`);
     if (options.hooks !== false) await this._runHooks('beforeTruncate', options);
     const result = await this._adapter.dml.truncate(this, options);
     if (options.hooks !== false) await this._runHooks('afterTruncate', options);
