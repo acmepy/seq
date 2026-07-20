@@ -3,6 +3,12 @@
  * Defines the contract for DDL, DML, DCL and TCL operations.
  */
 export class BaseAdapter {
+  /**
+   * @param {object} [options]
+   * @param {'lower'|'upper'|null} [options.caseStyle]
+   * @param {'alter'|'inline'|'none'} [options.fkStrategy]
+   * @param {boolean} [options.eager]
+   */
   constructor(options = {}) {
     this.options = options;
     this._caseStyle = options.caseStyle !== undefined ? options.caseStyle : 'lower';
@@ -99,7 +105,7 @@ export class BaseAdapter {
 
   /**
    * Normalizes a value for storage.
-   * @param {object} attribute - The attribute definition
+   * @param {import('../../types/index.d.ts').AttributeDefinition} attribute - The attribute definition
    * @param {*} value - The value to normalize
    * @returns {*}
    */

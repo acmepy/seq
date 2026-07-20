@@ -8,12 +8,14 @@ import { normalizeInclude } from '../utils/include.js';
 /**
  * Base Model class. All user-defined models must extend this.
  * Provides static methods for CRUD operations and instance methods for record manipulation.
+ *
+ * @template TValues
  */
 export class Model {
   /**
    * Creates a new Model instance representing a record.
-   * @param {object} values - The record values
-   * @param {object} [options] - Creation options
+   * @param {Partial<TValues>} values - The record values.
+   * @param {import('../../types/index.d.ts').BuildOptions} [options] - Creation options.
    */
   constructor(values = {}, options = {}) {
     this._options = options;
@@ -25,9 +27,7 @@ export class Model {
     const attrs = Ctor.rawAttributes || {};
 
     if (options._partial) {
-      for (const [key, value] of Object.entries(values)) {
-        this.dataValues[key] = value;
-      }
+      for (const [key, value] of Object.entries(values)) this.dataValues[key] = value;
       return;
     }
 
@@ -52,8 +52,8 @@ export class Model {
 
   /**
    * Initializes the model with attributes and options.
-   * @param {object} attributes - Attribute definitions
-   * @param {object} options - Model options (seq, modelName, tableName, timestamps, etc.)
+   * @param {import('../../types/index.d.ts').AttributeMap} attributes - Attribute definitions.
+   * @param {import('../../types/index.d.ts').ModelOptions} options - Model options.
    * @returns {typeof Model}
    */
   static init(attributes, options = {}) {
@@ -71,9 +71,7 @@ export class Model {
         this.primaryKeyAttribute = name;
       }
       if (def.autoIncrement) {
-        if (this.autoIncrementAttribute) {
-          throw new Error('Model must not have more than one autoIncrement attribute');
-        }
+        if (this.autoIncrementAttribute) throw new Error('Model must not have more than one autoIncrement attribute');
         this.autoIncrementAttribute = name;
       }
     }
@@ -87,18 +85,10 @@ export class Model {
       const updatedAtField = options.updatedAt || 'updatedAt';
 
       if (!this.rawAttributes[createdAtField]) {
-        this.rawAttributes[createdAtField] = {
-          type: DataTypes.DATE,
-          allowNull: true,
-          defaultValue: () => new Date()
-        };
+        this.rawAttributes[createdAtField] = {type: DataTypes.DATE, allowNull: true, defaultValue: () => new Date()};
       }
       if (!this.rawAttributes[updatedAtField]) {
-        this.rawAttributes[updatedAtField] = {
-          type: DataTypes.DATE,
-          allowNull: true,
-          defaultValue: () => new Date()
-        };
+        this.rawAttributes[updatedAtField] = {type: DataTypes.DATE, allowNull: true, defaultValue: () => new Date()};
       }
     }
 
@@ -157,9 +147,7 @@ export class Model {
   static hasMany(target, options = {}) {
     if (!target) throw new ModelError('hasMany requires a target model', { code: 'SEQ_ASSOCIATION_INVALID_TARGET' });
     const fkAttr = options.foreignKey || this._defaultForeignKeyName(this.modelName, target.primaryKeyAttribute || 'id');
-    if (target.rawAttributes && !target.rawAttributes[fkAttr]) {
-      throw new ModelError(`Target model "${target.modelName}" must have a "${fkAttr}" attribute for hasMany association`, { code: 'SEQ_ASSOCIATION_MISSING_FK', details: { target: target.modelName, foreignKey: fkAttr } });
-    }
+    if (target.rawAttributes && !target.rawAttributes[fkAttr]) throw new ModelError(`Target model "${target.modelName}" must have a "${fkAttr}" attribute for hasMany association`, { code: 'SEQ_ASSOCIATION_MISSING_FK', details: { target: target.modelName, foreignKey: fkAttr } });
     if (!this.associations) this.associations = {};
     if (!options.as) options.as = (target.modelName || target.name || 'unknown').toLowerCase() + 's';
     const assoc = new Association('hasMany', this, target, { ...options, foreignKey: fkAttr });
@@ -229,7 +217,7 @@ export class Model {
   /**
    * Registers a model hook.
    * @param {string} name
-   * @param {function} handler
+   * @param {Function} handler
    * @returns {typeof Model}
    */
   static addHook(name, handler) {
@@ -257,9 +245,11 @@ export class Model {
 
   /**
    * Creates a new record.
+   * @template {typeof Model} T
+   * @this {T}
    * @param {object} values
-   * @param {object} [options]
-   * @returns {Promise<Model>}
+   * @param {import('../../types/index.d.ts').MutationOptions} [options]
+   * @returns {Promise<InstanceType<T>>}
    */
   static async create(values = {}, options = {}) {
     this._log('trace', `${this.modelName}.create`, values);
@@ -271,9 +261,11 @@ export class Model {
 
   /**
    * Creates multiple records.
+   * @template {typeof Model} T
+   * @this {T}
    * @param {object[]} records
-   * @param {object} [options]
-   * @returns {Promise<Model[]>}
+   * @param {import('../../types/index.d.ts').MutationOptions} [options]
+   * @returns {Promise<Array<InstanceType<T>>>}
    */
   static async bulkCreate(records = [], options = {}) {
     this._log('trace', `${this.modelName}.bulkCreate`, records);
@@ -285,9 +277,11 @@ export class Model {
 
   /**
    * Finds a record by primary key.
+   * @template {typeof Model} T
+   * @this {T}
    * @param {*} id
-   * @param {object} [options]
-   * @returns {Promise<Model|null>}
+   * @param {import('../../types/index.d.ts').QueryOptions} [options]
+   * @returns {Promise<InstanceType<T>|null>}
    */
   static async findByPk(id, options = {}) {
     this._log('trace', `${this.modelName}.findByPk`, id);
@@ -298,8 +292,10 @@ export class Model {
 
   /**
    * Finds one record matching the options.
-   * @param {object} [options]
-   * @returns {Promise<Model|null>}
+   * @template {typeof Model} T
+   * @this {T}
+   * @param {import('../../types/index.d.ts').QueryOptions} [options]
+   * @returns {Promise<InstanceType<T>|null>}
    */
   static async findOne(options = {}) {
     this._log('trace', `${this.modelName}.findOne`, options);
@@ -311,8 +307,10 @@ export class Model {
 
   /**
    * Finds all records matching the options.
-   * @param {object} [options]
-   * @returns {Promise<Model[]>}
+   * @template {typeof Model} T
+   * @this {T}
+   * @param {import('../../types/index.d.ts').QueryOptions} [options]
+   * @returns {Promise<Array<InstanceType<T>>>}
    */
   static async findAll(options = {}) {
     if (options.hooks !== false) await this._runHooks('beforeFind', options);
@@ -329,7 +327,7 @@ export class Model {
 
   /**
    * Counts records matching the options.
-   * @param {object} [options]
+   * @param {import('../../types/index.d.ts').QueryOptions} [options]
    * @returns {Promise<number>}
    */
   static async count(options = {}) {
@@ -344,8 +342,10 @@ export class Model {
   /**
    * Finds records and returns the total count for the same base query.
    * Pagination options apply only to rows, matching Sequelize's common usage.
-   * @param {object} [options]
-   * @returns {Promise<{ count: number, rows: Model[] }>}
+   * @template {typeof Model} T
+   * @this {T}
+   * @param {import('../../types/index.d.ts').QueryOptions} [options]
+   * @returns {Promise<{ count: number, rows: Array<InstanceType<T>> }>}
    */
   static async findAndCountAll(options = {}) {
     this._log('trace', `${this.modelName}.findAndCountAll`, options);
@@ -367,7 +367,7 @@ export class Model {
   /**
    * Updates records matching the where clause.
    * @param {object} values
-   * @param {object} [options]
+   * @param {import('../../types/index.d.ts').MutationOptions} [options]
    * @returns {Promise<Model[]>}
    */
   static async update(values, options = {}) {
@@ -381,7 +381,7 @@ export class Model {
 
   /**
    * Destroys records matching the where clause.
-   * @param {object} [options]
+   * @param {import('../../types/index.d.ts').MutationOptions} [options]
    * @returns {Promise<number>}
    */
   static async destroy(options = {}) {
@@ -395,7 +395,7 @@ export class Model {
 
   /**
    * Truncates all records in the table.
-   * @param {object} [options]
+   * @param {import('../../types/index.d.ts').MutationOptions} [options]
    * @returns {Promise<void>}
    */
   static async truncate(options = {}) {
@@ -408,9 +408,11 @@ export class Model {
 
   /**
    * Builds a new instance without persisting it.
+   * @template {typeof Model} T
+   * @this {T}
    * @param {object} values
-   * @param {object} [options]
-   * @returns {Model}
+   * @param {import('../../types/index.d.ts').BuildOptions} [options]
+   * @returns {InstanceType<T>}
    */
   static build(values = {}, options = {}) {
     return new this(values, options);
@@ -423,9 +425,7 @@ export class Model {
    */
   getDataValue(key) {
     const attr = this.constructor.rawAttributes?.[key];
-    if (this.constructor._isVirtualAttribute(attr) && typeof attr.get === 'function') {
-      return attr.get.call(this);
-    }
+    if (this.constructor._isVirtualAttribute(attr) && typeof attr.get === 'function') return attr.get.call(this);
     return this.dataValues[key];
   }
 
@@ -447,22 +447,20 @@ export class Model {
 
   /**
    * Returns a plain object with all data values.
-   * @returns {object}
+   * @returns {TValues & Record<string, *>}
    */
   get() {
     const values = clone(this.dataValues);
     const attrs = this.constructor.rawAttributes || {};
     for (const [key, attr] of Object.entries(attrs)) {
-      if (this.constructor._isVirtualAttribute(attr) && typeof attr.get === 'function') {
-        values[key] = attr.get.call(this);
-      }
+      if (this.constructor._isVirtualAttribute(attr) && typeof attr.get === 'function') values[key] = attr.get.call(this);
     }
     return values;
   }
 
   /**
    * Returns a JSON-safe plain object.
-   * @returns {object}
+   * @returns {TValues & Record<string, *>}
    */
   toJSON() {
     return this.get();
@@ -470,8 +468,8 @@ export class Model {
 
   /**
    * Saves the instance (create or update).
-   * @param {object} [options]
-   * @returns {Promise<Model>}
+   * @param {import('../../types/index.d.ts').MutationOptions} [options]
+   * @returns {Promise<this>}
    */
   async save(options = {}) {
     const Ctor = this.constructor;
@@ -482,11 +480,7 @@ export class Model {
     }
 
     if (this._isNew) {
-      const result = await Ctor._adapter.dml.insert(
-        Ctor,
-        this.dataValues,
-        options
-      );
+      const result = await Ctor._adapter.dml.insert(Ctor, this.dataValues, options);
       Object.assign(this.dataValues, result.dataValues);
       this._isNew = false;
       this._changed = {};
@@ -498,14 +492,8 @@ export class Model {
     }
     const pk = Ctor.primaryKeyAttribute;
     const where = { [pk]: this.dataValues[pk] };
-    const result = await Ctor._adapter.dml.update(
-      Ctor,
-      this.dataValues,
-      { ...options, where }
-    );
-    if (result && result.length > 0) {
-      Object.assign(this.dataValues, result[0].dataValues);
-    }
+    const result = await Ctor._adapter.dml.update(Ctor, this.dataValues, { ...options, where });
+    if (result && result.length > 0) Object.assign(this.dataValues, result[0].dataValues);
     this._changed = {};
     if (options.hooks !== false) {
       await Ctor._runHooks('afterUpdate', this, options);
@@ -516,9 +504,9 @@ export class Model {
 
   /**
    * Updates values and saves the instance.
-   * @param {object} values
-   * @param {object} [options]
-   * @returns {Promise<Model>}
+   * @param {Partial<TValues>} values
+   * @param {import('../../types/index.d.ts').MutationOptions} [options]
+   * @returns {Promise<this>}
    */
   async update(values, options = {}) {
     for (const [key, value] of Object.entries(values)) this.setDataValue(key, value);
@@ -528,7 +516,7 @@ export class Model {
 
   /**
    * Destroys this record.
-   * @param {object} [options]
+   * @param {import('../../types/index.d.ts').MutationOptions} [options]
    * @returns {Promise<void>}
    */
   async destroy(options = {}) {

@@ -8,15 +8,7 @@ import { applyConvention, applyCase } from '../utils/naming.js';
  */
 export class Seq {
   /**
-   * @param {object} options - Configuration options
-   * @param {import('../adapters/BaseAdapter.js').BaseAdapter} options.adapter - The adapter to use
-   * @param {Array} [options.models=[]] - Model classes to register
-   * @param {boolean|function|object} [options.logging] - Logging configuration
-   * @param {object} [options.define={}] - Default model definition options
-   * @param {object} [options.naming={}] - Naming convention options
-   * @param {string} [options.naming.tables] - Table name convention: 'camelCase' | 'snake_case'
-   * @param {string} [options.naming.columns] - Column name convention: 'camelCase' | 'snake_case'
-   * @param {string} [options.naming.prefix] - Global prefix for table names
+   * @param {import('../../types/index.d.ts').SeqOptions} options - Configuration options.
    */
   constructor(options = {}) {
     if (!options.adapter) throw new ConfigurationError('An adapter is required', {code: 'SEQ_MISSING_ADAPTER'});
@@ -40,7 +32,8 @@ export class Seq {
 
   /**
    * Returns all registered models.
-   * @returns {Array}
+   * The result behaves as an array and also exposes models by model/table name.
+   * @returns {import('../../types/index.d.ts').ModelStatic[] & Record<string, import('../../types/index.d.ts').ModelStatic>}
    */
   get models() {
     return this._buildModelMap(this._registry.all());
@@ -75,38 +68,27 @@ export class Seq {
     for (const modelClass of this._modelClasses) {
       if (modelClass.attributes && modelClass.options) {
         // Option B: static attributes/options
-        modelClass.init(modelClass.attributes, {
-          ...modelClass.options,
-          seq: this
-        });
+        modelClass.init(modelClass.attributes, { ...modelClass.options, seq: this});
       } else if (!modelClass.seq) {
         // Option A: static define() method
-        if (modelClass.define && modelClass.define !== Function.prototype.define) {
-          modelClass.define(this);
-        }
+        if (modelClass.define && modelClass.define !== Function.prototype.define) modelClass.define(this);
       }
       if (!modelClass.seq) modelClass.seq = this;
     }
 
     // Phase 1.5: Resolve table names so DML operations use correct names
-    for (const modelClass of this._modelClasses) {
-      modelClass._resolvedTableName = this._resolveTableName(modelClass);
-    }
+    for (const modelClass of this._modelClasses)  modelClass._resolvedTableName = this._resolveTableName(modelClass);
 
     // Phase 2: Register models (now that modelName is set)
-    for (const modelClass of this._modelClasses) {
-      this.registerModel(modelClass);
-    }
-
+    for (const modelClass of this._modelClasses) this.registerModel(modelClass);
     this._runModelAssociations();
-
     this._initialized = true;
     this._log('info', 'Seq initialized');
   }
 
   /**
    * Registers a model class.
-   * @param {typeof import('./Model.js').Model} modelClass
+   * @param {import('../../types/index.d.ts').ModelStatic} modelClass
    */
   registerModel(modelClass) {
     this._registry.register(modelClass);
@@ -115,8 +97,8 @@ export class Seq {
   /**
    * Defines and registers a model using a Sequelize-like API.
    * @param {string} modelName
-   * @param {object} attributes
-   * @param {object} [options={}]
+   * @param {import('../../types/index.d.ts').AttributeMap} attributes
+   * @param {import('../../types/index.d.ts').ModelOptions} [options={}]
    * @returns {typeof Model}
    */
   define(modelName, attributes, options = {}) {
@@ -126,24 +108,10 @@ export class Seq {
     }
 
     Object.setPrototypeOf(DefinedModel, Model);
-    Object.defineProperty(DefinedModel, 'name', {
-      value: modelName,
-      configurable: true
-    });
-    DefinedModel.prototype = Object.create(Model.prototype, {
-      constructor: {
-        value: DefinedModel,
-        writable: true,
-        configurable: true
-      }
-    });
+    Object.defineProperty(DefinedModel, 'name', {value: modelName, configurable: true});
+    DefinedModel.prototype = Object.create(Model.prototype, {constructor: {value: DefinedModel, writable: true, configurable: true}});
 
-    DefinedModel.init(attributes, {
-      ...this._define,
-      ...options,
-      modelName,
-      seq: this
-    });
+    DefinedModel.init(attributes, {...this._define, ...options, modelName, seq: this});
     this._copyModelStatics(DefinedModel);
 
     if (!this._modelClasses.includes(DefinedModel)) this._modelClasses.push(DefinedModel);
@@ -168,9 +136,7 @@ export class Seq {
     const result = [...models];
     for (const model of models) {
       result[model.modelName] = model;
-      if (model.tableName && !result[model.tableName]) {
-        result[model.tableName] = model;
-      }
+      if (model.tableName && !result[model.tableName]) result[model.tableName] = model;
     }
     return result;
   }
@@ -187,7 +153,7 @@ export class Seq {
   /**
    * Gets a model by name.
    * @param {string} name
-   * @returns {typeof import('./Model.js').Model|undefined}
+   * @returns {import('../../types/index.d.ts').ModelStatic|undefined}
    */
   getModel(name) {
     return this._registry.get(name);
@@ -207,7 +173,7 @@ export class Seq {
    * @param {object} [options={}]
    * @param {boolean} [options.force=false] - Drop and recreate tables
    * @param {boolean} [options.alter=false] - Alter existing tables
-   * @returns {Promise<{created: string[], existing: string[], altered: string[], dropped: string[]}>}
+   * @returns {Promise<import('../../types/index.d.ts').SyncResult>}
    */
   async sync(options = {}) {
     const { force = false, alter = false } = options;
@@ -264,8 +230,9 @@ export class Seq {
 
   /**
    * Executes a transactional callback.
-   * @param {function} callback - Async function receiving a transaction object
-   * @returns {Promise<*>}
+   * @template TResult
+   * @param {function(*): Promise<TResult>|TResult} callback - Function receiving a transaction object.
+   * @returns {Promise<TResult>}
    */
   async transaction(callback) {
     const transaction = await this._adapter.tcl.begin();
@@ -290,14 +257,12 @@ export class Seq {
   /**
    * Resolves the effective table name for a model.
    * Applies naming convention, prefix, and adapter case style.
-   * @param {typeof import('./Model.js').Model} modelClass
+   * @param {import('../../types/index.d.ts').ModelStatic} modelClass
    * @returns {string}
    * @private
    */
   _resolveTableName(modelClass) {
-    if (modelClass._tableNameExplicit) {
-      return modelClass.tableName;
-    }
+    if (modelClass._tableNameExplicit) return modelClass.tableName;
 
     const convention = this._naming.tables;
     const prefix = this._naming.prefix;
@@ -326,7 +291,7 @@ export class Seq {
 
   /**
    * Builds a table definition from a model class for DDL operations.
-   * @param {typeof import('./Model.js').Model} modelClass
+   * @param {import('../../types/index.d.ts').ModelStatic} modelClass
    * @returns {object}
    * @private
    */
@@ -359,12 +324,7 @@ export class Seq {
         field: columnName
       };
 
-      if (def.unique) {
-        uniqueConstraints.push({
-          columns: [columnName],
-          constraintName: `uk_${sourceTable}_${columnName}`
-        });
-      }
+      if (def.unique)  uniqueConstraints.push({columns: [columnName], constraintName: `uk_${sourceTable}_${columnName}`});
     }
 
     const pkAttr = modelClass.primaryKeyAttribute;
@@ -422,26 +382,11 @@ export class Seq {
     const otherKeyCol = otherKeyAttr;
 
     const columns = {
-      [fkAttr]: {
-        type: sourcePKType,
-        primaryKey: false,
-        autoIncrement: false,
-        allowNull: false,
-        field: fkCol
-      },
-      [otherKeyAttr]: {
-        type: targetPKType,
-        primaryKey: false,
-        autoIncrement: false,
-        allowNull: false,
-        field: otherKeyCol
-      }
+      [fkAttr]: {type: sourcePKType, primaryKey: false, autoIncrement: false, allowNull: false, field: fkCol},
+      [otherKeyAttr]: {type: targetPKType, primaryKey: false, autoIncrement: false, allowNull: false, field: otherKeyCol}
     };
 
-    const uniqueConstraints = [{
-      columns: [fkCol, otherKeyCol],
-      constraintName: `uk_${through}_${fkCol}_${otherKeyCol}`
-    }];
+    const uniqueConstraints = [{columns: [fkCol, otherKeyCol], constraintName: `uk_${through}_${fkCol}_${otherKeyCol}`}];
 
     const foreignKeys = [
       {
@@ -511,11 +456,8 @@ export class Seq {
 
   _buildForeignKeys(modelClass, attrToColumn) {
     const fkMap = new Map();
-
     const sourceTable = modelClass._resolvedTableName || this._resolveTableName(modelClass);
-
     const autoConstraintName = (refTable) => `fk_${sourceTable}_${refTable}`;
-
     const upsertFK = (fkCol, entry) => {
       const existing = fkMap.get(fkCol);
       if (!existing) {
@@ -590,7 +532,6 @@ export class Seq {
         });
       }
     }
-
     return Array.from(fkMap.values());
   }
 
@@ -602,39 +543,24 @@ export class Seq {
    */
   _normalizeLogging(logging) {
     const disabled = { info: false, trace: false, warning: false, error: false };
-    const defaults = {
-      info: console.log.bind(console),
-      trace: false,
-      warning: false,
-      error: console.error.bind(console)
-    };
-
+    const defaults = {info: console.log.bind(console), trace: false, warning: false, error: console.error.bind(console)};
     if (logging === undefined || logging === true) return { ...defaults };
     if (logging === false || logging === null) return disabled;
     if (typeof logging === 'function') return { ...defaults, info: logging };
-
     if (typeof logging === 'object') {
-      return {
-        ...defaults,
-        ...logging,
-        warning: logging.warning ?? logging.warn ?? defaults.warning,
-        trace: logging.trace ?? defaults.trace
-      };
+      return {...defaults, ...logging, warning: logging.warning ?? logging.warn ?? defaults.warning, trace: logging.trace ?? defaults.trace};
     }
-
     return disabled;
   }
 
   _formatLogValue(value) {
     if (value === null || typeof value !== 'object') return value;
-
     let output;
     try {
       output = JSON.stringify(value);
     } catch {
       output = String(value);
     }
-
     return output.replace(/["']/g, '');
   }
 
@@ -648,12 +574,8 @@ export class Seq {
     const levels = new Set(['info', 'trace', 'warning', 'error']);
     let level = 'info';
     let payload = args;
-
     if (args.length > 1 && levels.has(args[0])) [level, ...payload] = args;
-
     const logger = this._logging?.[level];
-    if (typeof logger === 'function') {
-      logger('[Seq]', ...payload.map(value => this._formatLogValue(value)));
-    }
+    if (typeof logger === 'function')  logger('[Seq]', ...payload.map(value => this._formatLogValue(value)));
   }
 }

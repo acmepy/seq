@@ -1,9 +1,9 @@
 export class Association {
   /**
-   * @param {string} type - 'hasMany' | 'hasOne' | 'belongsTo' | 'belongsToMany'
-   * @param {typeof import('./Model.js').Model} source
-   * @param {typeof import('./Model.js').Model} target
-   * @param {object} options
+   * @param {'hasMany'|'hasOne'|'belongsTo'|'belongsToMany'} type
+   * @param {import('../../types/index.d.ts').ModelStatic} source
+   * @param {import('../../types/index.d.ts').ModelStatic} target
+   * @param {import('../../types/index.d.ts').AssociationOptions} options
    */
   constructor(type, source, target, options = {}) {
     this.type = type;
