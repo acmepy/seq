@@ -24,7 +24,7 @@ const seq = new Seq({
   logging: false
 });
 
-await seq.init();
+await seq.authenticate();
 await seq.sync();
 
 User.addHook('beforeCreate', userOrValues => {

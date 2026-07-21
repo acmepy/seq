@@ -20,7 +20,7 @@ const seq = new Seq({
   logging: console.log
 });
 
-await seq.init();
+await seq.authenticate();
 const syncResult = await seq.sync();
 console.log('\n--- Sync result ---');
 console.log('  Created:', syncResult.created);

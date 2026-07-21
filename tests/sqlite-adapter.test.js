@@ -103,6 +103,37 @@ describe('SQLite Adapter', () => {
       }
     });
 
+    it('initializes configured models during authenticate once', async () => {
+      const sqlite = new SQLiteAdapter({ database: ':memory:' });
+
+      class AuthUser extends Model {
+        static define(seq) {
+          return this.init(
+            {
+              id: { type: DataTypes.INTEGER, primaryKey: true, autoIncrement: true },
+              name: { type: DataTypes.STRING(100), allowNull: false }
+            },
+            { seq, modelName: 'AuthUser', timestamps: false }
+          );
+        }
+      }
+
+      const authSeq = new Seq({ adapter: sqlite, models: [AuthUser], logging: false });
+
+      try {
+        await authSeq.authenticate();
+
+        assert.equal(authSeq.hasModel('AuthUser'), true);
+        assert.equal(AuthUser.seq, authSeq);
+
+        await authSeq.authenticate();
+
+        assert.equal(authSeq.models.length, 1);
+      } finally {
+        await authSeq.close();
+      }
+    });
+
     it('does not reconnect when authenticate is called on an active SQLite connection', async () => {
       const sqlite = new SQLiteAdapter({ database: ':memory:' });
       const authSeq = new Seq({ adapter: sqlite, logging: false });

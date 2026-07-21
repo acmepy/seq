@@ -52,15 +52,17 @@ export class Seq {
    * @returns {Promise<boolean>}
    */
   async authenticate() {
-    if (typeof this._adapter.authenticate === 'function') return this._adapter.authenticate();
-    await this._adapter.connect();
-    return true;
+    const result = typeof this._adapter.authenticate === 'function' ? await this._adapter.authenticate() : (await this._adapter.connect(), true);
+    if (!this._initialized) await this.init();
+    return result;
   }
 
   /**
    * Initializes the ORM: validates config, registers models, initializes adapter.
    */
   async init() {
+    if (this._initialized) return;
+
     await this._adapter.connect();
     await this._adapter.initialize();
 

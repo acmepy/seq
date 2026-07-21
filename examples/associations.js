@@ -22,7 +22,7 @@ const seq = new Seq({
   logging: console.log
 });
 
-await seq.init();
+await seq.authenticate();
 await seq.sync();
 
 const ana = await User.create({ name: 'Ana', email: 'ana@example.com' });

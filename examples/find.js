@@ -11,7 +11,7 @@ const seq = new Seq({
   logging: console.log
 });
 
-await seq.init();
+await seq.authenticate();
 await seq.sync();
 
 // --- Seed data ---

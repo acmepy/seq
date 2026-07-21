@@ -67,7 +67,6 @@ const seq = new Seq({
 });
 
 await seq.authenticate();
-await seq.init();
 await seq.sync();
 
 const user = await User.create({
@@ -430,7 +429,7 @@ seq soporta:
 - `belongsTo`
 - `belongsToMany`
 
-Las asociaciones deben declararse antes de `seq.init()`. En `hasMany`, `hasOne` y `belongsTo`, el atributo FK debe existir en el modelo que lo guarda.
+Las asociaciones deben declararse antes de inicializar la instancia, ya sea con `seq.authenticate()` o `seq.init()`. En `hasMany`, `hasOne` y `belongsTo`, el atributo FK debe existir en el modelo que lo guarda.
 
 ```js
 User.hasMany(Task, { foreignKey: 'userId', onDelete: 'CASCADE' });
@@ -558,6 +557,15 @@ await seq.sync({ force: true });
 ```
 
 `authenticate()` valida que el adapter pueda conectarse a la fuente de datos. En SQLite abre la conexion si hace falta y ejecuta una consulta liviana (`SELECT 1`).
+
+Si la instancia todavia no fue inicializada, `authenticate()` tambien ejecuta `init()` internamente. Eso registra los modelos configurados, resuelve nombres de tablas y aplica asociaciones. `init()` es idempotente, por lo que llamarlo despues de `authenticate()` no vuelve a registrar modelos.
+
+Tambien se puede usar `init()` directamente cuando no se necesita la consulta de autenticacion:
+
+```js
+await seq.init();
+await seq.sync();
+```
 
 `sync()` crea tablas faltantes. Con `alter` intenta ajustar tablas existentes. Con `force` elimina y recrea.
 
