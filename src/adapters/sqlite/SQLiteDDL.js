@@ -11,7 +11,7 @@ export class SQLiteDDL extends DDLAbstract {
   }
 
   async _execute(sql, params = []) {
-    this._log('trace', {sql, params});
+    this._log('trace', sql, params);
     this._db().prepare(sql).run(...params);
   }
 

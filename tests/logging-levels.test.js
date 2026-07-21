@@ -121,5 +121,6 @@ describe('Logging levels', () => {
 
     assert.ok(calls.some(args => args[1]?.startsWith?.('INSERT INTO')));
     assert.ok(calls.some(args => args[1]?.startsWith?.('SELECT')));
+    assert.ok(calls.every(args => !String(args[2] || '').includes('sql:')));
   });
 });
