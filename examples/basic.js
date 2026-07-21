@@ -14,7 +14,7 @@ const seq = new Seq({
   logging: {
     info: console.log,
     trace: console.debug,
-    warning: console.warn,
+    warn: console.warn,
     error: console.error
   }
 });

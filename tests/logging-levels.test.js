@@ -17,7 +17,7 @@ describe('Logging levels', () => {
       seq._log('info', 'ready');
       seq._log('error', 'failed');
       seq._log('trace', 'hidden');
-      seq._log('warning', 'hidden');
+      seq._log('warn', 'hidden');
     } finally {
       console.log = originalLog;
       console.error = originalError;
@@ -57,19 +57,19 @@ describe('Logging levels', () => {
       logging: {
         info: false,
         trace: (...args) => calls.push(['trace', ...args]),
-        warning: (...args) => calls.push(['warning', ...args]),
+        warn: (...args) => calls.push(['warn', ...args]),
         error: (...args) => calls.push(['error', ...args])
       }
     });
 
     seq._log('info', 'hidden');
     seq._log('trace', 'sql');
-    seq._log('warning', 'heads up');
+    seq._log('warn', 'heads up');
     seq._log('error', 'boom');
 
     assert.deepEqual(calls, [
       ['trace', '[Seq]', 'sql'],
-      ['warning', '[Seq]', 'heads up'],
+      ['warn', '[Seq]', 'heads up'],
       ['error', '[Seq]', 'boom']
     ]);
   });

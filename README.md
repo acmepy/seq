@@ -116,7 +116,7 @@ const seq = new Seq({
   logging: {
     info: console.log,
     trace: false,
-    warning: false,
+    warn: false,
     error: console.error
   },
   define: {},
@@ -171,7 +171,7 @@ La prioridad de `eager` es: include individual, opcion de query, opcion del adap
 
 ## Logging
 
-Por defecto, `seq` registra mensajes `info` con `console.log` y mensajes `error` con `console.error`. Los niveles `trace` y `warning` vienen desactivados.
+Por defecto, `seq` registra mensajes `info` con `console.log` y mensajes `error` con `console.error`. Los niveles `trace` y `warn` vienen desactivados.
 
 ```js
 const seq = new Seq({
@@ -180,7 +180,7 @@ const seq = new Seq({
   logging: {
     info: console.log,
     trace: console.debug,
-    warning: console.warn,
+    warn: console.warn,
     error: console.error
   }
 });
@@ -197,6 +197,29 @@ const seq = new Seq({
 ```
 
 Para mantener compatibilidad, `logging: true` activa los defaults y `logging: fn` usa esa funcion como logger de `info`. Los logs SQL del adapter SQLite se emiten en `trace`.
+
+La clave `warn` usa la misma convencion que `console.warn` y loggers como `com.acmepy.logger-js`, cuyos metodos reciben primero el origen del mensaje y luego los datos:
+
+```js
+import { createLogger, logger, LEVELS } from 'com.acmepy.logger-js';
+
+createLogger({
+  name: '[seq]',
+  displayConsole: true,
+  level: LEVELS.INFO
+});
+
+const seq = new Seq({
+  adapter,
+  models: [User],
+  logging: {
+    info: logger.info.bind(logger),
+    trace: logger.trace.bind(logger),
+    warn: logger.warn.bind(logger),
+    error: logger.error.bind(logger)
+  }
+});
+```
 
 ## Definir modelos
 

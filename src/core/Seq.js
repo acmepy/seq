@@ -540,17 +540,17 @@ export class Seq {
   /**
    * Normalizes logging configuration into per-level handlers.
    * @param {boolean|function|object|undefined} logging
-   * @returns {{info: Function|false, trace: Function|false, warning: Function|false, error: Function|false}}
+   * @returns {{info: Function|false, trace: Function|false, warn: Function|false, error: Function|false}}
    * @private
    */
   _normalizeLogging(logging) {
-    const disabled = { info: false, trace: false, warning: false, error: false };
-    const defaults = {info: console.log.bind(console), trace: false, warning: false, error: console.error.bind(console)};
+    const disabled = { info: false, trace: false, warn: false, error: false };
+    const defaults = {info: console.log.bind(console), trace: false, warn: false, error: console.error.bind(console)};
     if (logging === undefined || logging === true) return { ...defaults };
     if (logging === false || logging === null) return disabled;
     if (typeof logging === 'function') return { ...defaults, info: logging };
     if (typeof logging === 'object') {
-      return {...defaults, ...logging, warning: logging.warning ?? logging.warn ?? defaults.warning, trace: logging.trace ?? defaults.trace};
+      return {...defaults, ...logging, warn: logging.warn ?? defaults.warn, trace: logging.trace ?? defaults.trace};
     }
     return disabled;
   }
@@ -573,12 +573,12 @@ export class Seq {
    * @private
    */
   _log(...args) {
-    const levels = new Set(['info', 'trace', 'warning', 'error']);
+    const levels = new Set(['info', 'trace', 'warn', 'error']);
     let level = 'info';
     let payload = args;
     if (args.length > 1 && levels.has(args[0])) [level, ...payload] = args;
     const logger = this._logging?.[level];
-    //if (typeof logger === 'function')  logger('[Seq]', ...payload.map(value => this._formatLogValue(value)));
-    if (typeof logger === 'function')  logger('Seq', ...payload);
+    const target = typeof logger === 'function' ? this._logging : undefined;
+    if (typeof logger === 'function') logger.call(target, '[Seq]', ...payload.map(value => this._formatLogValue(value)));
   }
 }
