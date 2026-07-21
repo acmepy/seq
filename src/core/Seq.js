@@ -187,6 +187,7 @@ export class Seq {
       const tableName = definition.tableName;
 
       if (existingTables.includes(tableName)) {
+        if (!this._adapter.schemas.has(tableName)) this._adapter.ddl._registerSchema(definition);
         if (force) {
           await this._adapter.ddl.dropTable(tableName);
           await this._adapter.ddl.createTable(definition);
@@ -212,6 +213,7 @@ export class Seq {
     for (const assoc of junctions) {
       const through = this._getAssociationThroughTable(assoc);
       if (existingTables.includes(through)) {
+        if (!this._adapter.schemas.has(through)) this._adapter.ddl._registerSchema(this._buildJunctionTableDefinition(assoc));
         if (force) {
           await this._adapter.ddl.dropTable(through);
           await this._adapter.ddl.createTable(this._buildJunctionTableDefinition(assoc));

@@ -1,5 +1,8 @@
 import { describe, it, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
+import { rm } from 'node:fs/promises';
+import { join } from 'node:path';
+import { tmpdir } from 'node:os';
 import { Seq } from '../src/core/Seq.js';
 import { Model } from '../src/core/Model.js';
 import { DataTypes } from '../src/data-types/index.js';
@@ -57,6 +60,66 @@ describe('Seq.sync', () => {
     const result = await seq.sync();
     assert.deepEqual(result.created, []);
     assert.deepEqual(result.existing.sort(), ['products', 'users']);
+  });
+
+  it('registers schemas for existing SQLite tables after reopening', async () => {
+    const database = join(tmpdir(), `seq-reopen-${process.pid}-${Date.now()}.sqlite`);
+
+    class _Permission extends Model {}
+    _Permission.init(
+      {
+        id: { type: DataTypes.INTEGER, primaryKey: true, autoIncrement: true },
+        permission: { type: DataTypes.STRING(150), allowNull: false },
+        active: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: true }
+      },
+      { modelName: 'Permission', timestamps: true }
+    );
+
+    let firstSeq = new Seq({
+      adapter: new SQLiteAdapter({ database }),
+      models: [_Permission],
+      logging: false
+    });
+
+    try {
+      await firstSeq.init();
+      await firstSeq.sync();
+      await _Permission.create({ permission: 'users.list', active: true });
+      await firstSeq.close();
+      firstSeq = null;
+
+      class _ReopenedPermission extends Model {}
+      _ReopenedPermission.init(
+        {
+          id: { type: DataTypes.INTEGER, primaryKey: true, autoIncrement: true },
+          permission: { type: DataTypes.STRING(150), allowNull: false },
+          active: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: true }
+        },
+        { modelName: 'Permission', timestamps: true }
+      );
+
+      const reopenedSeq = new Seq({
+        adapter: new SQLiteAdapter({ database }),
+        models: [_ReopenedPermission],
+        logging: false
+      });
+
+      try {
+        await reopenedSeq.init();
+        const result = await reopenedSeq.sync();
+
+        assert.deepEqual(result.created, []);
+        assert.deepEqual(result.existing, ['Permission']);
+        assert.equal(await _ReopenedPermission.count(), 1);
+      } finally {
+        await reopenedSeq.close();
+      }
+    } finally {
+      if (firstSeq) await firstSeq.close();
+      await rm(database, { force: true });
+      await rm(`${database}-shm`, { force: true });
+      await rm(`${database}-wal`, { force: true });
+    }
   });
 
   it('recreates tables with force: true', async () => {
