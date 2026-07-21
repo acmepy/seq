@@ -578,6 +578,7 @@ export class Seq {
     let payload = args;
     if (args.length > 1 && levels.has(args[0])) [level, ...payload] = args;
     const logger = this._logging?.[level];
-    if (typeof logger === 'function')  logger('[Seq]', ...payload.map(value => this._formatLogValue(value)));
+    //if (typeof logger === 'function')  logger('[Seq]', ...payload.map(value => this._formatLogValue(value)));
+    if (typeof logger === 'function')  logger('Seq', ...payload);
   }
 }
