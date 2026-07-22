@@ -84,6 +84,7 @@ export class Seq {
     // Phase 2: Register models (now that modelName is set)
     for (const modelClass of this._modelClasses) this.registerModel(modelClass);
     this._runModelAssociations();
+    await this._registerExistingSchemas();
     this._initialized = true;
     this._log('info', 'Seq initialized');
   }
@@ -152,6 +153,30 @@ export class Seq {
     }
   }
 
+  async _registerExistingSchemas() {
+    if (typeof this._adapter.ddl?.listTables !== 'function') return;
+
+    let existingTables;
+    try {
+      existingTables = await this._adapter.ddl.listTables();
+    } catch (error) {
+      if (error?.code === 'SEQ_DDL_NOT_IMPLEMENTED') return;
+      throw error;
+    }
+
+    const existing = new Set(existingTables);
+    const definitions = [
+      ...this._registry.all().map(modelClass => this._buildTableDefinition(modelClass)),
+      ...this._buildJunctionTables().map(assoc => this._buildJunctionTableDefinition(assoc))
+    ];
+
+    for (const definition of definitions) {
+      if (!existing.has(definition.tableName) || this._adapter.schemas.has(definition.tableName)) continue;
+      const def = this._adapter.ddl.normalizeDefinition(definition);
+      this._adapter.ddl._registerSchema(def, { preserveConstraints: true });
+    }
+  }
+
   /**
    * Gets a model by name.
    * @param {string} name
@@ -187,7 +212,6 @@ export class Seq {
       const tableName = definition.tableName;
 
       if (existingTables.includes(tableName)) {
-        if (!this._adapter.schemas.has(tableName)) this._adapter.ddl._registerSchema(definition);
         if (force) {
           await this._adapter.ddl.dropTable(tableName);
           await this._adapter.ddl.createTable(definition);
@@ -213,7 +237,6 @@ export class Seq {
     for (const assoc of junctions) {
       const through = this._getAssociationThroughTable(assoc);
       if (existingTables.includes(through)) {
-        if (!this._adapter.schemas.has(through)) this._adapter.ddl._registerSchema(this._buildJunctionTableDefinition(assoc));
         if (force) {
           await this._adapter.ddl.dropTable(through);
           await this._adapter.ddl.createTable(this._buildJunctionTableDefinition(assoc));

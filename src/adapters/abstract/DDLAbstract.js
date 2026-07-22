@@ -213,9 +213,20 @@ export class DDLAbstract extends BaseAbstract {
   /**
    * Registers a table schema in the adapter's schema registry.
    * @param {object} def - Normalized definition
+   * @param {object} [options]
+   * @param {boolean} [options.preserveConstraints=false] - Keep constraints already present in the definition.
    */
-  _registerSchema(def) {
-    this._adapter.schemas.set(def.tableName, { ...def, uniqueConstraints: [], indexes: [], foreignKeys: [] });
+  _registerSchema(def, options = {}) {
+    this._adapter.schemas.set(def.tableName, {
+      ...def,
+      columns: { ...(def.columns || {}) },
+      uniqueConstraints: options.preserveConstraints ? [...(def.uniqueConstraints || [])] : [],
+      indexes: options.preserveConstraints ? [...(def.indexes || [])] : [],
+      foreignKeys: options.preserveConstraints ? [...(def.foreignKeys || [])] : [],
+      virtualAttributes: [...(def.virtualAttributes || [])],
+      attrToColumn: { ...(def.attrToColumn || {}) },
+      columnToAttr: { ...(def.columnToAttr || {}) }
+    });
   }
 
   /**
