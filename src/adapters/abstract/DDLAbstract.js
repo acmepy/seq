@@ -217,16 +217,9 @@ export class DDLAbstract extends BaseAbstract {
    * @param {boolean} [options.preserveConstraints=false] - Keep constraints already present in the definition.
    */
   _registerSchema(def, options = {}) {
-    this._adapter.schemas.set(def.tableName, {
-      ...def,
-      columns: { ...(def.columns || {}) },
-      uniqueConstraints: options.preserveConstraints ? [...(def.uniqueConstraints || [])] : [],
-      indexes: options.preserveConstraints ? [...(def.indexes || [])] : [],
-      foreignKeys: options.preserveConstraints ? [...(def.foreignKeys || [])] : [],
-      virtualAttributes: [...(def.virtualAttributes || [])],
-      attrToColumn: { ...(def.attrToColumn || {}) },
-      columnToAttr: { ...(def.columnToAttr || {}) }
-    });
+    const {columns = {}, virtualAttributes = {}, attrToColumn = {}, columnToAttr = {}} = def;
+    const [uniqueConstraints, indexes, foreignKeys] = options.preserveConstraints?[def.uniqueConstraints, def.indexes, def.foreignKeys]:[[], [], []];
+    this._adapter.schemas.set(def.tableName, {...def, columns, uniqueConstraints, indexes, foreignKeys, virtualAttributes, attrToColumn, columnToAttr});
   }
 
   /**
