@@ -111,7 +111,7 @@ describe('Seq.sync', () => {
         const result = await reopenedSeq.sync();
 
         assert.deepEqual(result.created, []);
-        assert.deepEqual(result.existing, ['Permission']);
+        assert.deepEqual(result.existing, ['permission']);
       } finally {
         await reopenedSeq.close();
       }

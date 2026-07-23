@@ -18,7 +18,6 @@ await adapter.connect();
 const seq = new Seq({
   adapter,
   models: [User, Task, Profile, Role, UserRole],
-  naming: { tables: 'snake_case', columns: 'snake_case' },
   logging: console.log
 });
 

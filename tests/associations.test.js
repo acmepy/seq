@@ -237,12 +237,14 @@ describe('Associations', () => {
 
       _User.hasMany(_Task, { foreignKey: 'userId' });
 
-      adapter = new SQLiteAdapter({ database: ':memory:' });
+      adapter = new SQLiteAdapter({
+        database: ':memory:',
+        naming: { columns: 'snake_case' }
+      });
       await adapter.connect();
       seq = new Seq({
         adapter,
         models: [_User, _Task],
-        naming: { columns: 'snake_case' },
         logging: false
       });
       await seq.init();

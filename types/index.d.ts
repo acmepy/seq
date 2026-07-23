@@ -4,6 +4,13 @@ export type NamingConvention = 'camelCase' | 'snake_case';
 export type CaseStyle = 'lower' | 'upper' | null;
 export type ForeignKeyStrategy = 'alter' | 'inline' | 'none';
 
+export interface NamingOptions {
+  tables?: NamingConvention;
+  columns?: NamingConvention;
+  prefix?: string;
+  caseStyle?: CaseStyle;
+}
+
 export interface Transaction {
   readonly id: number;
   active: boolean;
@@ -102,11 +109,6 @@ export interface SeqOptions {
   models?: ModelStatic[];
   logging?: boolean | Function | Record<string, Function | false>;
   define?: ModelOptions;
-  naming?: {
-    tables?: NamingConvention;
-    columns?: NamingConvention;
-    prefix?: string;
-  };
 }
 
 export interface SyncOptions {
@@ -181,7 +183,7 @@ export class ModelRegistry {
 }
 
 export interface AdapterOptions {
-  caseStyle?: CaseStyle;
+  naming?: NamingOptions;
   fkStrategy?: ForeignKeyStrategy;
   eager?: boolean;
 }
@@ -195,7 +197,7 @@ export class BaseAdapter {
   inspectDatabase(): Promise<object>;
   mapDataType(dataType: unknown): string;
   normalizeValue(attribute: AttributeDefinition, value: unknown): unknown;
-  get caseStyle(): CaseStyle;
+  get naming(): NamingOptions;
   get fkStrategy(): ForeignKeyStrategy;
   get eager(): boolean;
 }

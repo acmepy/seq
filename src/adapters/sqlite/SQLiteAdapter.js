@@ -7,6 +7,13 @@ import { SQLiteTCL } from './SQLiteTCL.js';
 let Database = null;
 
 export class SQLiteAdapter extends BaseAdapter {
+  static defaultNaming = {
+    tables: 'snake_case',
+    columns: 'snake_case',
+    prefix: undefined,
+    caseStyle: 'lower'
+  };
+
   constructor(options = {}) {
     super({ fkStrategy: 'inline', ...options });
     this._db = null;

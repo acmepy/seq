@@ -1,6 +1,8 @@
 import { describe, it, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
+import { BaseAdapter } from '../src/adapters/BaseAdapter.js';
 import { SQLiteAdapter } from '../src/adapters/sqlite/SQLiteAdapter.js';
+import { MapAdapter } from '../src/adapters/map/MapAdapter.js';
 import { Seq } from '../src/core/Seq.js';
 import { Model } from '../src/core/Model.js';
 import { DataTypes } from '../src/data-types/index.js';
@@ -86,29 +88,53 @@ describe('Naming Conventions', () => {
     });
   });
 
-  describe('Seq naming configuration', () => {
+  describe('Adapter naming configuration', () => {
     let adapter;
 
     beforeEach(() => {
       adapter = new SQLiteAdapter({ database: ':memory:' });
     });
 
-    it('accepts naming option', () => {
-      const seq = new Seq({
-        adapter,
-        naming: { tables: 'snake_case', columns: 'snake_case' }
+    it('uses SQLite naming defaults', () => {
+      assert.deepEqual(adapter.naming, {
+        tables: 'snake_case',
+        columns: 'snake_case',
+        prefix: undefined,
+        caseStyle: 'lower'
       });
-      assert.deepEqual(seq._naming, { tables: 'snake_case', columns: 'snake_case' });
     });
 
-    it('defaults naming to empty object', () => {
-      const seq = new Seq({ adapter });
-      assert.deepEqual(seq._naming, {});
+    it('uses Map naming defaults', () => {
+      const map = new MapAdapter();
+      assert.deepEqual(map.naming, {
+        tables: 'camelCase',
+        columns: 'camelCase',
+        prefix: undefined,
+        caseStyle: 'lower'
+      });
     });
 
-    it('has caseStyle from adapter', () => {
-      const seq = new Seq({ adapter });
-      assert.equal(seq._adapter.caseStyle, 'lower');
+    it('uses BaseAdapter naming defaults', () => {
+      const base = new BaseAdapter();
+      assert.deepEqual(base.naming, {
+        tables: undefined,
+        columns: undefined,
+        prefix: undefined,
+        caseStyle: undefined
+      });
+    });
+
+    it('accepts partial naming overrides in adapter options', () => {
+      const sqlite = new SQLiteAdapter({
+        database: ':memory:',
+        naming: { prefix: 'app', caseStyle: 'upper' }
+      });
+      assert.deepEqual(sqlite.naming, {
+        tables: 'snake_case',
+        columns: 'snake_case',
+        prefix: 'app',
+        caseStyle: 'upper'
+      });
     });
   });
 
@@ -126,8 +152,7 @@ describe('Naming Conventions', () => {
       const adapter = new SQLiteAdapter({ database: ':memory:' });
       const seq = new Seq({
         adapter,
-        models: [Product],
-        naming: { tables: 'snake_case' }
+        models: [Product]
       });
       await seq.init();
 
@@ -145,11 +170,13 @@ describe('Naming Conventions', () => {
         }
       }
 
-      const adapter = new SQLiteAdapter({ database: ':memory:' });
+      const adapter = new SQLiteAdapter({
+        database: ':memory:',
+        naming: { prefix: 'app' }
+      });
       const seq = new Seq({
         adapter,
-        models: [User],
-        naming: { tables: 'snake_case', prefix: 'app' }
+        models: [User]
       });
       await seq.init();
 
@@ -157,7 +184,7 @@ describe('Naming Conventions', () => {
       assert.equal(def.tableName, 'app_user');
     });
 
-    it('applies adapter caseStyle to table names', async () => {
+    it('applies lower caseStyle from naming to table names', async () => {
       class Order extends Model {
         static define(seq) {
           this.init({
@@ -166,16 +193,104 @@ describe('Naming Conventions', () => {
         }
       }
 
-      const adapter = new SQLiteAdapter({ database: ':memory:' });
+      const adapter = new SQLiteAdapter({
+        database: ':memory:',
+        naming: { tables: 'camelCase', caseStyle: 'lower' }
+      });
       const seq = new Seq({
         adapter,
-        models: [Order],
-        naming: { tables: 'snake_case' }
+        models: [Order]
       });
       await seq.init();
 
       const def = seq._buildTableDefinition(Order);
       assert.equal(def.tableName, 'order');
+    });
+
+    it('applies upper caseStyle from naming to table names', async () => {
+      class OrderItem extends Model {
+        static define(seq) {
+          this.init({
+            id: { type: DataTypes.INTEGER, primaryKey: true, autoIncrement: true }
+          }, { seq, modelName: 'OrderItem' });
+        }
+      }
+
+      const adapter = new SQLiteAdapter({
+        database: ':memory:',
+        naming: { caseStyle: 'upper' }
+      });
+      const seq = new Seq({
+        adapter,
+        models: [OrderItem]
+      });
+      await seq.init();
+
+      const def = seq._buildTableDefinition(OrderItem);
+      assert.equal(def.tableName, 'ORDER_ITEM');
+    });
+
+    it('leaves table case unchanged when naming caseStyle is null', async () => {
+      class UserProfile extends Model {
+        static define(seq) {
+          this.init({
+            id: { type: DataTypes.INTEGER, primaryKey: true, autoIncrement: true }
+          }, { seq, modelName: 'user_profile' });
+        }
+      }
+
+      const adapter = new SQLiteAdapter({
+        database: ':memory:',
+        naming: { tables: 'camelCase', caseStyle: null }
+      });
+      const seq = new Seq({
+        adapter,
+        models: [UserProfile]
+      });
+      await seq.init();
+
+      const def = seq._buildTableDefinition(UserProfile);
+      assert.equal(def.tableName, 'userProfile');
+    });
+
+    it('uses BaseAdapter naming defaults without convention or case transform', async () => {
+      class MixedCaseTable extends Model {
+        static define(seq) {
+          this.init({
+            id: { type: DataTypes.INTEGER, primaryKey: true, autoIncrement: true }
+          }, { seq, modelName: 'MixedCaseTable' });
+        }
+      }
+
+      const adapter = new BaseAdapter();
+      const seq = new Seq({
+        adapter,
+        models: [MixedCaseTable]
+      });
+      await seq.init();
+
+      const def = seq._buildTableDefinition(MixedCaseTable);
+      assert.equal(def.tableName, 'MixedCaseTable');
+    });
+
+    it('uses MapAdapter camelCase lower defaults for table names', async () => {
+      class UserProfile extends Model {
+        static define(seq) {
+          this.init({
+            id: { type: DataTypes.INTEGER, primaryKey: true, autoIncrement: true }
+          }, { seq, modelName: 'user_profile' });
+        }
+      }
+
+      const adapter = new MapAdapter();
+      const seq = new Seq({
+        adapter,
+        models: [UserProfile]
+      });
+      await seq.init();
+
+      const def = seq._buildTableDefinition(UserProfile);
+      assert.equal(def.tableName, 'userprofile');
     });
 
     it('respects explicit tableName - no convention applied', async () => {
@@ -187,11 +302,13 @@ describe('Naming Conventions', () => {
         }
       }
 
-      const adapter = new SQLiteAdapter({ database: ':memory:' });
+      const adapter = new SQLiteAdapter({
+        database: ':memory:',
+        naming: { prefix: 'app' }
+      });
       const seq = new Seq({
         adapter,
-        models: [User],
-        naming: { tables: 'snake_case', prefix: 'app' }
+        models: [User]
       });
       await seq.init();
 
@@ -199,7 +316,7 @@ describe('Naming Conventions', () => {
       assert.equal(def.tableName, 'tbl_users');
     });
 
-    it('combines convention + prefix + adapter case', async () => {
+    it('combines convention + prefix + naming caseStyle', async () => {
       class OrderItem extends Model {
         static define(seq) {
           this.init({
@@ -208,11 +325,13 @@ describe('Naming Conventions', () => {
         }
       }
 
-      const adapter = new SQLiteAdapter({ database: ':memory:' });
+      const adapter = new SQLiteAdapter({
+        database: ':memory:',
+        naming: { prefix: 'app' }
+      });
       const seq = new Seq({
         adapter,
-        models: [OrderItem],
-        naming: { tables: 'snake_case', prefix: 'app' }
+        models: [OrderItem]
       });
       await seq.init();
 
@@ -237,8 +356,7 @@ describe('Naming Conventions', () => {
       const adapter = new SQLiteAdapter({ database: ':memory:' });
       const seq = new Seq({
         adapter,
-        models: [Product],
-        naming: { columns: 'snake_case' }
+        models: [Product]
       });
       await seq.init();
 
@@ -261,8 +379,7 @@ describe('Naming Conventions', () => {
       const adapter = new SQLiteAdapter({ database: ':memory:' });
       const seq = new Seq({
         adapter,
-        models: [Product],
-        naming: { columns: 'snake_case' }
+        models: [Product]
       });
       await seq.init();
 
@@ -270,7 +387,7 @@ describe('Naming Conventions', () => {
       assert.equal(def.attrToColumn.productName, 'custom_name');
     });
 
-    it('applies adapter caseStyle to column names', async () => {
+    it('applies lower caseStyle from naming to column names', async () => {
       class User extends Model {
         static define(seq) {
           this.init({
@@ -281,20 +398,72 @@ describe('Naming Conventions', () => {
         }
       }
 
-      const adapter = new SQLiteAdapter({ database: ':memory:' });
+      const adapter = new SQLiteAdapter({
+        database: ':memory:',
+        naming: { columns: 'camelCase', caseStyle: 'lower' }
+      });
       const seq = new Seq({
         adapter,
-        models: [User],
-        naming: { columns: 'snake_case' }
+        models: [User]
       });
       await seq.init();
 
       const def = seq._buildTableDefinition(User);
-      assert.equal(def.attrToColumn.firstName, 'first_name');
-      assert.equal(def.attrToColumn.lastName, 'last_name');
+      assert.equal(def.attrToColumn.firstName, 'firstname');
+      assert.equal(def.attrToColumn.lastName, 'lastname');
     });
 
-    it('leaves column names unchanged when no convention set', async () => {
+    it('applies upper caseStyle from naming to column names', async () => {
+      class User extends Model {
+        static define(seq) {
+          this.init({
+            id: { type: DataTypes.INTEGER, primaryKey: true, autoIncrement: true },
+            firstName: { type: DataTypes.STRING(100) },
+            lastName: { type: DataTypes.STRING(100) }
+          }, { seq, modelName: 'User' });
+        }
+      }
+
+      const adapter = new SQLiteAdapter({
+        database: ':memory:',
+        naming: { caseStyle: 'upper' }
+      });
+      const seq = new Seq({
+        adapter,
+        models: [User]
+      });
+      await seq.init();
+
+      const def = seq._buildTableDefinition(User);
+      assert.equal(def.attrToColumn.firstName, 'FIRST_NAME');
+      assert.equal(def.attrToColumn.lastName, 'LAST_NAME');
+    });
+
+    it('leaves column case unchanged when naming caseStyle is null', async () => {
+      class User extends Model {
+        static define(seq) {
+          this.init({
+            id: { type: DataTypes.INTEGER, primaryKey: true, autoIncrement: true },
+            first_name: { type: DataTypes.STRING(100) }
+          }, { seq, modelName: 'User' });
+        }
+      }
+
+      const adapter = new SQLiteAdapter({
+        database: ':memory:',
+        naming: { columns: 'camelCase', caseStyle: null }
+      });
+      const seq = new Seq({
+        adapter,
+        models: [User]
+      });
+      await seq.init();
+
+      const def = seq._buildTableDefinition(User);
+      assert.equal(def.attrToColumn.first_name, 'firstName');
+    });
+
+    it('uses BaseAdapter naming defaults without column convention or case transform', async () => {
       class Product extends Model {
         static define(seq) {
           this.init({
@@ -304,7 +473,7 @@ describe('Naming Conventions', () => {
         }
       }
 
-      const adapter = new SQLiteAdapter({ database: ':memory:' });
+      const adapter = new BaseAdapter();
       const seq = new Seq({
         adapter,
         models: [Product]
@@ -313,6 +482,27 @@ describe('Naming Conventions', () => {
 
       const def = seq._buildTableDefinition(Product);
       assert.equal(def.attrToColumn.productName, 'productName');
+    });
+
+    it('uses MapAdapter camelCase lower defaults for column names', async () => {
+      class Product extends Model {
+        static define(seq) {
+          this.init({
+            id: { type: DataTypes.INTEGER, primaryKey: true, autoIncrement: true },
+            product_name: { type: DataTypes.STRING(100) }
+          }, { seq, modelName: 'Product' });
+        }
+      }
+
+      const adapter = new MapAdapter();
+      const seq = new Seq({
+        adapter,
+        models: [Product]
+      });
+      await seq.init();
+
+      const def = seq._buildTableDefinition(Product);
+      assert.equal(def.attrToColumn.product_name, 'productname');
     });
   });
 
@@ -327,11 +517,13 @@ describe('Naming Conventions', () => {
         }
       }
 
-      const adapter = new SQLiteAdapter({ database: ':memory:' });
+      const adapter = new SQLiteAdapter({
+        database: ':memory:',
+        naming: { prefix: 'app' }
+      });
       const seq = new Seq({
         adapter,
-        models: [UserProfile],
-        naming: { tables: 'snake_case', columns: 'snake_case', prefix: 'app' }
+        models: [UserProfile]
       });
       await seq.init();
       const result = await seq.sync();
@@ -351,11 +543,13 @@ describe('Naming Conventions', () => {
         }
       }
 
-      const adapter = new SQLiteAdapter({ database: ':memory:' });
+      const adapter = new SQLiteAdapter({
+        database: ':memory:',
+        naming: { prefix: 'shop' }
+      });
       const seq = new Seq({
         adapter,
-        models: [OrderItem],
-        naming: { tables: 'snake_case', columns: 'snake_case', prefix: 'shop' }
+        models: [OrderItem]
       });
       await seq.init();
       await seq.sync();

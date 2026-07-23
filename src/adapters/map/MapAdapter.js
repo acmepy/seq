@@ -10,6 +10,13 @@ import { clone } from '../../utils/clone.js';
  * Structure: Map<tableName, Map<primaryKey, record>>
  */
 export class MapAdapter extends BaseAdapter {
+  static defaultNaming = {
+    tables: 'camelCase',
+    columns: 'camelCase',
+    prefix: undefined,
+    caseStyle: 'lower'
+  };
+
   constructor(options = {}) {
     super({ fkStrategy: 'none', ...options });
     /** @type {Map<string, Map<*|null, object>>} */

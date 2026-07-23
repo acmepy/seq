@@ -16,7 +16,6 @@ export class Seq {
     this._adapter._seq = this;
     this._logging = this._normalizeLogging(options.logging);
     this._define = options.define || {};
-    this._naming = options.naming || {};
     this._registry = new ModelRegistry();
     this._initialized = false;
     this._modelClasses = options.models || [];
@@ -306,7 +305,7 @@ export class Seq {
 
   /**
    * Resolves the effective table name for a model.
-   * Applies naming convention, prefix, and adapter case style.
+   * Applies naming convention, prefix, and configured case style.
    * @param {import('../../types/index.d.ts').ModelStatic} modelClass
    * @returns {string}
    * @private
@@ -314,18 +313,18 @@ export class Seq {
   _resolveTableName(modelClass) {
     if (modelClass._tableNameExplicit) return modelClass.tableName;
 
-    const convention = this._naming.tables;
-    const prefix = this._naming.prefix;
-    const caseStyle = this._adapter.caseStyle;
-    if (!convention) return modelClass.modelName;
-    let name = applyConvention(modelClass.modelName, convention);
-    if (prefix) name = `${prefix}_${name}`;
+    const naming = this._adapter.naming || {};
+    const convention = naming.tables;
+    const prefix = naming.prefix;
+    const caseStyle = naming.caseStyle;
+    let name = convention ? applyConvention(modelClass.modelName, convention) : modelClass.modelName;
+    if (convention && prefix) name = `${prefix}_${name}`;
     return applyCase(name, caseStyle);
   }
 
   /**
    * Resolves the effective column name for an attribute.
-   * Applies naming convention and adapter case style.
+   * Applies naming convention and configured case style.
    * @param {object} def - Attribute definition
    * @param {string} attrName - Attribute name
    * @returns {string}
@@ -333,10 +332,11 @@ export class Seq {
    */
   _resolveColumnName(def, attrName) {
     if (def.field) return def.field;
-    const convention = this._naming.columns;
-    const caseStyle = this._adapter.caseStyle;
-    if (!convention) return attrName;
-    return applyCase(applyConvention(attrName, convention), caseStyle);
+    const naming = this._adapter.naming || {};
+    const convention = naming.columns;
+    const caseStyle = naming.caseStyle;
+    const name = convention ? applyConvention(attrName, convention) : attrName;
+    return applyCase(name, caseStyle);
   }
 
   /**

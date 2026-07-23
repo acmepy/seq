@@ -155,7 +155,6 @@ describe('Includes and data types', () => {
     const seq = new Seq({
       adapter: new SQLiteAdapter(),
       models: [User, Task],
-      naming: { tables: 'snake_case', columns: 'snake_case' },
       logging: false
     });
     await seq.init(); await seq.sync(); open.push(seq);

@@ -7,10 +7,6 @@ await adapter.connect();
 const seq = new Seq({
   adapter,
   models: [User],
-  naming: {
-    tables: 'snake_case',
-    columns: 'snake_case'
-  },
   logging: console.log
 });
 

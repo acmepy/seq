@@ -7,10 +7,6 @@ const adapter = new SQLiteAdapter({ database: ':memory:' });
 const seq = new Seq({
   adapter,
   models: [User, Product],
-  naming: {
-    tables: 'snake_case',
-    columns: 'snake_case'
-  },
   logging: {
     info: console.log,
     trace: console.debug,

@@ -15,23 +15,19 @@ describe('SQLite Adapter', () => {
   });
 
   describe('adapter options', () => {
-    it('accepts caseStyle, fkStrategy and eager overrides', () => {
+    it('accepts fkStrategy and eager overrides', () => {
       const sqlite = new SQLiteAdapter({
         database: ':memory:',
-        caseStyle: 'upper',
         fkStrategy: 'none',
         eager: true
       });
       const map = new MapAdapter({
-        caseStyle: null,
         fkStrategy: 'alter',
         eager: true
       });
 
-      assert.equal(sqlite.caseStyle, 'upper');
       assert.equal(sqlite.fkStrategy, 'none');
       assert.equal(sqlite.eager, true);
-      assert.equal(map.caseStyle, null);
       assert.equal(map.fkStrategy, 'alter');
       assert.equal(map.eager, true);
     });
@@ -274,7 +270,7 @@ describe('SQLite Adapter', () => {
       await seq.init();
       await seq.sync();
 
-      const exists = await adapter.ddl.hasTable('Dummy');
+      const exists = await adapter.ddl.hasTable('dummy');
       assert.equal(exists, true);
 
       const notExists = await adapter.ddl.hasTable('nonexistent');
@@ -293,7 +289,7 @@ describe('SQLite Adapter', () => {
       await seq.sync();
 
       const tables = await adapter.ddl.listTables();
-      assert.ok(tables.includes('Foo'));
+      assert.ok(tables.includes('foo'));
     });
 
     it('truncates data before dropping a table', async () => {
@@ -351,7 +347,6 @@ describe('SQLite Adapter', () => {
       seq = new Seq({
         adapter,
         models: [UserProfile],
-        naming: { tables: 'snake_case', columns: 'snake_case' },
         logging: false
       });
       await seq.init();

@@ -10,10 +10,6 @@ await adapter.connect();
 const seq = new Seq({
   adapter,
   models: [User, Task],
-  naming: {
-    tables: "snake_case",
-    columns: "snake_case",
-  },
   logging: {
     info: console.log,
     trace: console.log,

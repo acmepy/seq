@@ -493,7 +493,7 @@ describe('Model CRUD', () => {
       assert.equal(created.toJSON().fullName, 'Ana Demo');
 
       const raw = adapter._db.prepare('SELECT * FROM people LIMIT 1').get();
-      assert.deepEqual(Object.keys(raw).sort(), ['firstName', 'id', 'lastName'].sort());
+      assert.deepEqual(Object.keys(raw).sort(), ['first_name', 'id', 'last_name'].sort());
 
       const found = await Person.findOne({
         attributes: ['id', 'firstName', 'lastName', 'fullName'],

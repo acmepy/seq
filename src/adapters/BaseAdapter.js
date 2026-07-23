@@ -3,15 +3,23 @@
  * Defines the contract for DDL, DML, DCL and TCL operations.
  */
 export class BaseAdapter {
+  static defaultNaming = {
+    tables: undefined,
+    columns: undefined,
+    prefix: undefined,
+    caseStyle: undefined
+  };
+
   /**
    * @param {object} [options]
-   * @param {'lower'|'upper'|null} [options.caseStyle]
+   * @param {object} [options.naming]
    * @param {'alter'|'inline'|'none'} [options.fkStrategy]
    * @param {boolean} [options.eager]
    */
   constructor(options = {}) {
-    this.options = options;
-    this._caseStyle = options.caseStyle !== undefined ? options.caseStyle : 'lower';
+    const defaultNaming = this.constructor.defaultNaming || BaseAdapter.defaultNaming;
+    this._naming = { ...BaseAdapter.defaultNaming, ...defaultNaming, ...(options.naming || {}) };
+    this.options = { ...options, naming: this._naming };
     this._fkStrategy = options.fkStrategy !== undefined ? options.fkStrategy : 'alter';
     this._eager = options.eager !== undefined ? options.eager : false;
     this.schemas = new Map();
@@ -79,15 +87,6 @@ export class BaseAdapter {
   }
 
   /**
-   * Returns the case style for identifiers (table/column names).
-   * Subclasses can override to return 'upper' for databases like Oracle.
-   * @returns {string} 'lower' | 'upper' | undefined
-   */
-  get caseStyle() {
-    return this._caseStyle;
-  }
-
-  /**
    * Returns the FK creation strategy for this adapter.
    * - 'alter': FKs created via ALTER TABLE ADD CONSTRAINT (default for most DBs)
    * - 'inline': FKs included in CREATE TABLE statement (SQLite)
@@ -105,6 +104,14 @@ export class BaseAdapter {
    */
   get eager() {
     return this._eager;
+  }
+
+  /**
+   * Returns the naming policy for physical table and column names.
+   * @returns {object}
+   */
+  get naming() {
+    return this._naming;
   }
 
   /**

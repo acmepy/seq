@@ -59,10 +59,6 @@ const adapter = new SQLiteAdapter({ database: ':memory:' });
 const seq = new Seq({
   adapter,
   models: [User],
-  naming: {
-    tables: 'snake_case',
-    columns: 'snake_case'
-  },
   logging: false
 });
 
@@ -108,7 +104,10 @@ import {
 const seq = new Seq({
   adapter: new SQLiteAdapter({
     database: 'app.sqlite',
-    caseStyle: 'lower',
+    naming: {
+      prefix: 'app',
+      caseStyle: 'lower'
+    },
     fkStrategy: 'inline',
     eager: false
   }),
@@ -119,12 +118,7 @@ const seq = new Seq({
     warn: false,
     error: console.error
   },
-  define: {},
-  naming: {
-    tables: 'snake_case',
-    columns: 'snake_case',
-    prefix: 'app'
-  }
+  define: {}
 });
 ```
 
@@ -136,18 +130,20 @@ Opciones principales:
 | `models` | Clases que extienden `Model`. |
 | `logging` | `false`, `true`, funcion u objeto por niveles. |
 | `define` | Opciones por defecto reservadas para definicion de modelos. |
-| `naming.tables` | Convencion de tablas: `snake_case` o `camelCase`. |
-| `naming.columns` | Convencion de columnas: `snake_case` o `camelCase`. |
-| `naming.prefix` | Prefijo global opcional para tablas. |
 
 ## Configuracion de adapters
 
-Los adapters aceptan opciones comunes para ajustar convenciones y estrategias internas:
+Los adapters aceptan opciones comunes para ajustar nombres fisicos y estrategias internas:
 
 ```js
 const adapter = new SQLiteAdapter({
   database: 'app.sqlite',
-  caseStyle: 'lower',   // 'lower', 'upper' o null
+  naming: {
+    tables: 'snake_case',
+    columns: 'snake_case',
+    prefix: 'app',
+    caseStyle: 'lower'
+  },
   fkStrategy: 'inline', // 'alter', 'inline' o 'none'
   eager: true           // default para includes
 });
@@ -155,17 +151,28 @@ const adapter = new SQLiteAdapter({
 
 | Opcion | Descripcion |
 | --- | --- |
-| `caseStyle` | Fuerza el case fisico de tablas/columnas: `'lower'`, `'upper'` o `null` para no transformar. |
+| `naming.tables` | Convencion de tablas: `snake_case` o `camelCase`. |
+| `naming.columns` | Convencion de columnas: `snake_case` o `camelCase`. |
+| `naming.prefix` | Prefijo global opcional para tablas. |
+| `naming.caseStyle` | Fuerza el case fisico de tablas/columnas: `'lower'`, `'upper'` o `null` para no transformar. |
 | `fkStrategy` | Estrategia de FK: `'alter'`, `'inline'` o `'none'`. SQLite usa `'inline'` por defecto y Map usa `'none'`. |
 | `eager` | Default global del adapter para includes. Si es `true`, `findAll({ include })` usa JOIN salvo override con `eager: false`. |
 
 Defaults:
 
-| Adapter | `caseStyle` | `fkStrategy` | `eager` |
-| --- | --- | --- | --- |
-| `BaseAdapter` | `'lower'` | `'alter'` | `false` |
-| `SQLiteAdapter` | `'lower'` | `'inline'` | `false` |
-| `MapAdapter` | `'lower'` | `'none'` | `false` |
+| Adapter | `fkStrategy` | `eager` |
+| --- | --- | --- |
+| `BaseAdapter` | `'alter'` | `false` |
+| `SQLiteAdapter` | `'inline'` | `false` |
+| `MapAdapter` | `'none'` | `false` |
+
+Defaults de naming:
+
+| Adapter | `tables` | `columns` | `prefix` | `caseStyle` |
+| --- | --- | --- | --- | --- |
+| `BaseAdapter` | Sin convencion | Sin convencion | Sin prefijo | Sin transformar |
+| `SQLiteAdapter` | `snake_case` | `snake_case` | Sin prefijo | `'lower'` |
+| `MapAdapter` | `camelCase` | `camelCase` | Sin prefijo | `'lower'` |
 
 La prioridad de `eager` es: include individual, opcion de query, opcion del adapter, y finalmente `false`.
 
