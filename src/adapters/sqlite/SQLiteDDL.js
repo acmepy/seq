@@ -19,22 +19,13 @@ export class SQLiteDDL extends DDLAbstract {
     const colDefs = [];
     for (const [attrName, colDef] of Object.entries(def.columns)) {
       const colName = colDef.field || attrName;
-      const parts = [colName];
+      const parts = [this._q(colName)];
       parts.push(this._adapter.mapDataType(colDef.type));
       if (colDef.primaryKey && !def.autoIncrement) parts.push('PRIMARY KEY');
       if (colDef.autoIncrement) parts.push('PRIMARY KEY AUTOINCREMENT');
       if (!colDef.allowNull && !colDef.primaryKey) parts.push('NOT NULL');
-      if (colDef.defaultValue !== undefined && colDef.defaultValue !== null) {
-        const dv = typeof colDef.defaultValue === 'function' ? colDef.defaultValue() : colDef.defaultValue;
-        if (dv instanceof Date) {
-          parts.push(`DEFAULT '${dv.toISOString()}'`);
-        } else if (typeof dv === 'string') {
-          parts.push(`DEFAULT '${dv}'`);
-        } else if (Array.isArray(dv) || (typeof dv === 'object')) {
-          parts.push(`DEFAULT '${JSON.stringify(dv)}'`);
-        } else {
-          parts.push(`DEFAULT ${dv}`);
-        }
+      if (colDef.defaultValue !== undefined && colDef.defaultValue !== null && typeof colDef.defaultValue !== 'function') {
+        parts.push(`DEFAULT ${this._literal(colDef.defaultValue)}`);
       }
       colDefs.push(parts.join(' '));
     }
@@ -83,9 +74,37 @@ export class SQLiteDDL extends DDLAbstract {
   }
 
   async describeTable(tableName) {
-    const schema = this._adapter.schemas.get(tableName);
-    if (!schema)  throw new AdapterError(`Table "${tableName}" does not exist`, { code: 'SEQ_ADAPTER_TABLE_NOT_FOUND' });
-    return { ...schema };
+    if (!(await this.hasTable(tableName))) throw new AdapterError(`Table "${tableName}" does not exist`, { code: 'SEQ_ADAPTER_TABLE_NOT_FOUND' });
+    const rows = this._db().prepare(`PRAGMA table_info(${this._q(tableName)})`).all();
+    return { tableName, columns: rows.map(row => ({ name: row.name, type: row.type, allowNull: !row.notnull, primaryKey: !!row.pk, defaultValue: row.dflt_value })) };
+  }
+
+  introspectDefinition(definition) {
+    const def = this.normalizeDefinition(definition);
+    const tableInfo = this._db().prepare(`PRAGMA table_info(${this._q(def.tableName)})`).all();
+    const physicalColumns = new Set(tableInfo.map(row => row.name));
+    const columns = {};
+    const attrToColumn = {};
+    const columnToAttr = {};
+    for (const [attrName, colDef] of Object.entries(def.columns)) {
+      const columnName = colDef.field || def.attrToColumn[attrName] || attrName;
+      if (!physicalColumns.has(columnName)) continue;
+      columns[attrName] = colDef;
+      attrToColumn[attrName] = columnName;
+      columnToAttr[columnName] = attrName;
+    }
+
+    const indexRows = this._db().prepare(`PRAGMA index_list(${this._q(def.tableName)})`).all();
+    const existingIndexNames = new Set(indexRows.map(row => row.name));
+    const uniqueConstraints = def.uniqueConstraints.filter(item => existingIndexNames.has(item.constraintName));
+    const indexes = def.indexes.filter(item => existingIndexNames.has(item.name));
+
+    const physicalFKs = this._db().prepare(`PRAGMA foreign_key_list(${this._q(def.tableName)})`).all();
+    const foreignKeys = def.foreignKeys.filter(fk => physicalFKs.some(row =>
+      row.from === fk.columnName && row.table === fk.references.table && row.to === fk.references.column
+    ));
+
+    return { ...def, columns, attrToColumn, columnToAttr, uniqueConstraints, indexes, foreignKeys };
   }
 
   async listTables() {
@@ -94,6 +113,28 @@ export class SQLiteDDL extends DDLAbstract {
   }
 
   async addForeignKey(tableName, fk) {
-    if (this._adapter.fkStrategy === 'alter') super.addForeignKey(tableName, fk);
+    if (this._adapter.fkStrategy === 'alter') return super.addForeignKey(tableName, fk);
+    const schema = this._adapter.schemas.get(tableName);
+    if (schema?.foreignKeys.some(existing => existing.constraintName === fk.constraintName)) return;
+    throw new AdapterError('SQLite cannot add a foreign key to an existing table without rebuilding it', {
+      code: 'SEQ_DDL_FOREIGN_KEY_ALTER_NOT_SUPPORTED',
+      details: { tableName, constraintName: fk.constraintName }
+    });
+  }
+
+  _literal(value) {
+    if (value === null) return 'NULL';
+    if (value instanceof Date) return `'${value.toISOString().replaceAll("'", "''")}'`;
+    if (typeof value === 'string') return `'${value.replaceAll("'", "''")}'`;
+    if (typeof value === 'boolean') return value ? '1' : '0';
+    if (typeof value === 'number' && Number.isFinite(value)) return String(value);
+    if (Array.isArray(value) || (typeof value === 'object' && value !== null)) {
+      return `'${JSON.stringify(value).replaceAll("'", "''")}'`;
+    }
+    throw new AdapterError('Unsupported SQLite default value', { code: 'SEQ_DDL_INVALID_DEFAULT' });
+  }
+
+  _formatDefaultValue(value) {
+    return this._literal(value);
   }
 }

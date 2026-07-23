@@ -46,7 +46,7 @@ export class TCLAbstract extends BaseAbstract {
    * @throws {AdapterError} If transaction is not active or missing
    */
   _validateTransaction(transaction) {
-    if (!transaction || !transaction.active) {
+    if (!transaction || !transaction.active || transaction.adapter !== this._adapter || this._adapter._activeTransaction !== transaction) {
       throw new AdapterError('Transaction is not active or already finished', {
         code: 'SEQ_ADAPTER_TRANSACTION_INVALID'
       });

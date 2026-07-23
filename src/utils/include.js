@@ -20,6 +20,7 @@ export function normalizeInclude(include) {
       attributes: item.attributes || null,
       where: item.where || null,
       eager: item.eager !== undefined ? item.eager : null,
+      required: item.required === true,
     };
   });
 }
@@ -45,7 +46,7 @@ export function resolveEager(include, globalEager = false) {
  */
 export function resolveIncludeAlias(include, model) {
   if (include.as) return include.as;
-  const assoc = model.associations?.[include.model?.modelName];
+  const assoc = resolveAssociation(model, include);
   if (assoc?.as) return assoc.as;
   if (include.model?.alias) return include.model.modelName.toLowerCase() + 's';
   return include.model.modelName.toLowerCase() + 's';
@@ -60,39 +61,52 @@ export function resolveIncludeAlias(include, model) {
  * @param {import('../adapters/abstract/DMLAbstract.js').DMLAbstract} dml
  * @returns {Promise<void>}
  */
-export async function loadIncludes(instances, includes, model, dml) {
-  for (const inc of includes) {
-    if (!inc.model) continue;
+export async function loadIncludes(instances, includes, model, dml, queryOptions = {}) {
+  await Promise.all(includes.map(async inc => {
+    if (!inc.model) return;
 
-    const assoc = model.associations?.[inc.model.modelName];
+    const assoc = resolveAssociation(model, inc);
     const alias = resolveIncludeAlias(inc, model);
 
     if (!assoc) {
       for (const instance of instances) {
         instance.setDataValue(alias, []);
       }
-      continue;
+      return;
     }
 
     switch (assoc.type) {
       case 'hasMany':
-        await _loadHasMany(instances, inc, assoc, alias, dml);
+        await _loadHasMany(instances, inc, assoc, alias, dml, queryOptions);
         break;
       case 'hasOne':
-        await _loadHasOne(instances, inc, assoc, alias, dml);
+        await _loadHasOne(instances, inc, assoc, alias, dml, queryOptions);
         break;
       case 'belongsTo':
-        await _loadBelongsTo(instances, inc, assoc, alias, dml);
+        await _loadBelongsTo(instances, inc, assoc, alias, dml, queryOptions);
         break;
       case 'belongsToMany':
-        await _loadBelongsToMany(instances, inc, assoc, alias, dml);
+        await _loadBelongsToMany(instances, inc, assoc, alias, dml, queryOptions);
         break;
       default:
         for (const instance of instances) {
           instance.setDataValue(alias, null);
         }
     }
-  }
+  }));
+  return instances.filter(instance => includes.every(inc => {
+    if (!inc.required || !inc.model) return true;
+    const value = instance.getDataValue(resolveIncludeAlias(inc, model));
+    return Array.isArray(value) ? value.length > 0 : value !== null && value !== undefined;
+  }));
+}
+
+export function resolveAssociation(model, include) {
+  if (!model?.associations || !include?.model) return null;
+  if (include.as && model.associations[include.as]) return model.associations[include.as];
+  const candidates = [...new Set(Object.values(model.associations))]
+    .filter(association => association?.target === include.model);
+  return candidates.length === 1 ? candidates[0] : (model.associations[include.model.modelName] || null);
 }
 
 function _definedValues(items, getValue) {
@@ -125,7 +139,7 @@ function _indexBy(items, getKey) {
   return index;
 }
 
-async function _loadHasMany(instances, inc, assoc, alias, dml) {
+async function _loadHasMany(instances, inc, assoc, alias, dml, queryOptions) {
   const target = assoc.target;
   const fkAttr = assoc.foreignKey;
   const parentPK = assoc.source.primaryKeyAttribute || 'id';
@@ -139,17 +153,17 @@ async function _loadHasMany(instances, inc, assoc, alias, dml) {
     return;
   }
 
-  const where = { [fkAttr]: { [Op.in]: parentIds }, ...inc.where };
-  const children = await dml.selectAll(target, { where });
+  const children = await _selectInChunks(dml, target, fkAttr, parentIds, inc, queryOptions, [fkAttr]);
   const childrenByFK = _groupBy(children, child => child.getDataValue(fkAttr));
 
   for (const instance of instances) {
     const pkVal = instance.getDataValue(parentPK);
     instance.setDataValue(alias, childrenByFK.get(pkVal) || []);
   }
+  _trimProjection(children, inc.attributes);
 }
 
-async function _loadHasOne(instances, inc, assoc, alias, dml) {
+async function _loadHasOne(instances, inc, assoc, alias, dml, queryOptions) {
   const target = assoc.target;
   const fkAttr = assoc.foreignKey;
   const parentPK = assoc.source.primaryKeyAttribute || 'id';
@@ -163,17 +177,17 @@ async function _loadHasOne(instances, inc, assoc, alias, dml) {
     return;
   }
 
-  const where = { [fkAttr]: { [Op.in]: parentIds }, ...inc.where };
-  const children = await dml.selectAll(target, { where });
+  const children = await _selectInChunks(dml, target, fkAttr, parentIds, inc, queryOptions, [fkAttr]);
   const childByFK = _indexBy(children, child => child.getDataValue(fkAttr));
 
   for (const instance of instances) {
     const pkVal = instance.getDataValue(parentPK);
     instance.setDataValue(alias, childByFK.get(pkVal) || null);
   }
+  _trimProjection(children, inc.attributes);
 }
 
-async function _loadBelongsTo(instances, inc, assoc, alias, dml) {
+async function _loadBelongsTo(instances, inc, assoc, alias, dml, queryOptions) {
   const target = assoc.target;
   const fkAttr = assoc.foreignKey;
   const targetPK = target.primaryKeyAttribute || 'id';
@@ -187,17 +201,17 @@ async function _loadBelongsTo(instances, inc, assoc, alias, dml) {
     return;
   }
 
-  const where = { [targetPK]: { [Op.in]: fkValues }, ...inc.where };
-  const targets = await dml.selectAll(target, { where });
+  const targets = await _selectInChunks(dml, target, targetPK, fkValues, inc, queryOptions, [targetPK]);
   const targetByPK = _indexBy(targets, target => target.getDataValue(targetPK));
 
   for (const instance of instances) {
     const fkVal = instance.getDataValue(fkAttr);
     instance.setDataValue(alias, targetByPK.get(fkVal) || null);
   }
+  _trimProjection(targets, inc.attributes);
 }
 
-async function _loadBelongsToMany(instances, inc, assoc, alias, dml) {
+async function _loadBelongsToMany(instances, inc, assoc, alias, dml, queryOptions) {
   const target = assoc.target;
   const sourcePK = assoc.source.primaryKeyAttribute || 'id';
   const targetPK = target.primaryKeyAttribute || 'id';
@@ -220,10 +234,11 @@ async function _loadBelongsToMany(instances, inc, assoc, alias, dml) {
   }
 
   const q = (name) => dml._adapter._quoteIdentifier(name);
-  const placeholders = sourceIds.map(() => '?').join(', ');
-  const junctionSQL = `SELECT ${q(fkCol)} AS ${q(fkAttr)}, ${q(otherKeyCol)} AS ${q(otherKeyAttr)} FROM ${q(through)} WHERE ${q(fkCol)} IN (${placeholders})`;
-  const serializedParams = sourceIds.map(id => dml._serializeValue(id));
-  const junctionRows = await dml._executeQueryAll(junctionSQL, serializedParams);
+  const junctionRows = (await Promise.all(_chunks(sourceIds).map(async ids => {
+    const placeholders = ids.map(() => '?').join(', ');
+    const junctionSQL = `SELECT ${q(fkCol)} AS ${q(fkAttr)}, ${q(otherKeyCol)} AS ${q(otherKeyAttr)} FROM ${q(through)} WHERE ${q(fkCol)} IN (${placeholders})`;
+    return dml._executeQueryAll(junctionSQL, ids.map(id => dml._serializeValue(id)));
+  }))).flat();
   const junctionRowsBySource = _groupBy(junctionRows, row => row[fkAttr]);
 
   const targetIds = [...new Set(junctionRows.map(r => r[otherKeyAttr]).filter(id => id !== null && id !== undefined))];
@@ -235,8 +250,7 @@ async function _loadBelongsToMany(instances, inc, assoc, alias, dml) {
     return;
   }
 
-  const targetWhere = { [targetPK]: { [Op.in]: targetIds }, ...inc.where };
-  const targets = await dml.selectAll(target, { where: targetWhere });
+  const targets = await _selectInChunks(dml, target, targetPK, targetIds, inc, queryOptions, [targetPK]);
   const targetByPK = _indexBy(targets, target => target.getDataValue(targetPK));
 
   for (const instance of instances) {
@@ -246,6 +260,41 @@ async function _loadBelongsToMany(instances, inc, assoc, alias, dml) {
       .map(row => targetByPK.get(row[otherKeyAttr]))
       .filter(Boolean);
     instance.setDataValue(alias, matching);
+  }
+  _trimProjection(targets, inc.attributes);
+}
+
+function _withRequiredAttributes(attributes, required) {
+  if (!Array.isArray(attributes) || attributes.length === 0) return undefined;
+  return [...new Set([...attributes, ...required])];
+}
+
+function _chunks(values, size = 500) {
+  const result = [];
+  for (let index = 0; index < values.length; index += size) result.push(values.slice(index, index + size));
+  return result;
+}
+
+async function _selectInChunks(dml, model, field, values, inc, queryOptions, requiredAttributes) {
+  const rows = await Promise.all(_chunks(values).map(ids => {
+    const relationWhere = { [field]: { [Op.in]: ids } };
+    const where = inc.where ? { [Op.and]: [relationWhere, inc.where] } : relationWhere;
+    return dml.selectAll(model, {
+      where,
+      attributes: _withRequiredAttributes(inc.attributes, requiredAttributes),
+      transaction: queryOptions.transaction
+    });
+  }));
+  return rows.flat();
+}
+
+function _trimProjection(instances, attributes) {
+  if (!Array.isArray(attributes) || attributes.length === 0) return;
+  const selected = new Set(attributes);
+  for (const instance of instances) {
+    for (const key of Object.keys(instance.dataValues)) {
+      if (!selected.has(key)) delete instance.dataValues[key];
+    }
   }
 }
 
@@ -264,20 +313,21 @@ export function processJoinedRows(rows, model, includes, dml) {
   const parentAlias = model.alias;
   const { schema: parentSchema } = dml._schema(model);
   const parentPK = model.primaryKeyAttribute || 'id';
-  const parentPKCol = parentSchema.attrToColumn[parentPK] || parentPK;
+  const parentPKCol = parentPK;
 
   const includeLookup = new Map();
   for (const inc of includes) {
     if (!inc.model) continue;
     const propertyAlias = resolveIncludeAlias(inc, model);
     const { schema: incSchema, alias: incSqlAlias } = dml._schema(inc.model);
-    const sqlAlias = incSqlAlias || dml._getTableName(inc.model);
-    const assoc = model.associations?.[inc.model.modelName];
+    const sqlAlias = inc.as || incSqlAlias || dml._getTableName(inc.model);
+    const assoc = resolveAssociation(model, inc);
     includeLookup.set(sqlAlias, {
       propertyAlias,
       model: inc.model,
       schema: incSchema,
       assoc,
+      attributes: inc.attributes,
     });
   }
 
@@ -312,7 +362,7 @@ export function processJoinedRows(rows, model, includes, dml) {
       const childRows = entry.children.get(sqlAlias);
       const incInfo = includeLookup.get(sqlAlias);
       const childPK = incInfo.model.primaryKeyAttribute || 'id';
-      const childPKCol = incInfo.schema.attrToColumn[childPK] || childPK;
+      const childPKCol = childPK;
 
       const allNull = Object.values(rawChild).every(v => v === null);
       if (allNull) continue;
@@ -333,22 +383,22 @@ export function processJoinedRows(rows, model, includes, dml) {
 
       if (incInfo.assoc?.type === 'belongsTo') {
         if (rawRows.length > 0) {
-          const attrRow = dml._toAttrNames(rawRows[0], incInfo.schema);
-          instance.setDataValue(incInfo.propertyAlias, new incInfo.model(attrRow, { _isNew: false }));
+          const attrRow = _pickAttributes(dml._toAttrNames(rawRows[0], incInfo.schema), incInfo.attributes);
+          instance.setDataValue(incInfo.propertyAlias, new incInfo.model(attrRow, { _isNew: false, _partial: !!incInfo.attributes }));
         } else {
           instance.setDataValue(incInfo.propertyAlias, null);
         }
       } else if (incInfo.assoc?.type === 'hasOne') {
         if (rawRows.length > 0) {
-          const attrRow = dml._toAttrNames(rawRows[0], incInfo.schema);
-          instance.setDataValue(incInfo.propertyAlias, new incInfo.model(attrRow, { _isNew: false }));
+          const attrRow = _pickAttributes(dml._toAttrNames(rawRows[0], incInfo.schema), incInfo.attributes);
+          instance.setDataValue(incInfo.propertyAlias, new incInfo.model(attrRow, { _isNew: false, _partial: !!incInfo.attributes }));
         } else {
           instance.setDataValue(incInfo.propertyAlias, null);
         }
       } else {
         const childInstances = rawRows.map(r => {
-          const attrRow = dml._toAttrNames(r, incInfo.schema);
-          return new incInfo.model(attrRow, { _isNew: false });
+          const attrRow = _pickAttributes(dml._toAttrNames(r, incInfo.schema), incInfo.attributes);
+          return new incInfo.model(attrRow, { _isNew: false, _partial: !!incInfo.attributes });
         });
         instance.setDataValue(incInfo.propertyAlias, childInstances);
       }
@@ -358,4 +408,9 @@ export function processJoinedRows(rows, model, includes, dml) {
   }
 
   return instances;
+}
+
+function _pickAttributes(values, attributes) {
+  if (!Array.isArray(attributes) || attributes.length === 0) return values;
+  return Object.fromEntries(attributes.filter(key => key in values).map(key => [key, values[key]]));
 }

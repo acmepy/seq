@@ -52,7 +52,7 @@ for (const u of usersWithTasks) {
 console.log('\n--- Include: users with profile (hasOne) ---');
 const usersWithProfile = await User.findAll({ include: Profile });
 for (const u of usersWithProfile) {
-  const profile = u.getDataValue('profiles');
+  const profile = u.getDataValue('profile');
   console.log(`  ${u.getDataValue('name')}: ${profile ? profile.getDataValue('bio') : 'no profile'}`);
 }
 
@@ -68,7 +68,7 @@ const usersMulti = await User.findAll({ include: [Task, Profile] });
 for (const u of usersMulti) {
   console.log(`  ${u.getDataValue('name')}:`);
   console.log(`    tasks: ${u.getDataValue('tasks').length}`);
-  console.log(`    profile: ${u.getDataValue('profiles') ? 'yes' : 'no'}`);
+  console.log(`    profile: ${u.getDataValue('profile') ? 'yes' : 'no'}`);
 }
 
 console.log('\n--- Include with where: only completed tasks ---');
@@ -93,7 +93,7 @@ const usersMixed = await User.findAll({
   eager: true
 });
 for (const u of usersMixed) {
-  console.log(`  ${u.getDataValue('name')}: tasks=${u.getDataValue('tasks').length}, profile=${u.getDataValue('profiles') ? 'yes' : 'no'}`);
+  console.log(`  ${u.getDataValue('name')}: tasks=${u.getDataValue('tasks').length}, profile=${u.getDataValue('profile') ? 'yes' : 'no'}`);
 }
 
 console.log('\n--- Global lazy, profile eager ---');
@@ -101,7 +101,7 @@ const usersMixed2 = await User.findAll({
   include: [Task, { model: Profile, eager: true }]
 });
 for (const u of usersMixed2) {
-  console.log(`  ${u.getDataValue('name')}: tasks=${u.getDataValue('tasks').length}, profile=${u.getDataValue('profiles') ? 'yes' : 'no'}`);
+  console.log(`  ${u.getDataValue('name')}: tasks=${u.getDataValue('tasks').length}, profile=${u.getDataValue('profile') ? 'yes' : 'no'}`);
 }
 
 await seq.close();

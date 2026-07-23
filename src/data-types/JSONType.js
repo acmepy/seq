@@ -24,7 +24,7 @@ export class JSONType extends ObjectType {
     if (!base.valid) {
       return base;
     }
-    const err = this._checkSerializable(value);
+    const err = this._checkSerializable(value, '', new WeakSet());
     if (err) {
       return { valid: false, message: err };
     }
@@ -38,7 +38,7 @@ export class JSONType extends ObjectType {
    * @returns {string|null} Error message or null if valid
    * @private
    */
-  _checkSerializable(value, path = '') {
+  _checkSerializable(value, path = '', seen = new WeakSet()) {
     if (value === null) return null;
 
     const type = typeof value;
@@ -52,22 +52,34 @@ export class JSONType extends ObjectType {
     if (type === 'symbol') {
       return `Value${path ? ' at ' + path : ''} is a symbol, which is not JSON-serializable`;
     }
+    if (type === 'bigint') {
+      return `Value${path ? ' at ' + path : ''} is a bigint, which is not JSON-serializable`;
+    }
+    if (type === 'number' && !Number.isFinite(value)) {
+      return `Value${path ? ' at ' + path : ''} is not a finite JSON number`;
+    }
     if (value instanceof Date) {
       return `Value${path ? ' at ' + path : ''} is a Date, which is not JSON-serializable`;
     }
 
     if (type === 'object') {
+      if (seen.has(value)) return `Value${path ? ' at ' + path : ''} contains a circular reference`;
+      seen.add(value);
       if (Array.isArray(value)) {
         for (let i = 0; i < value.length; i++) {
-          const err = this._checkSerializable(value[i], `${path}[${i}]`);
+          const err = this._checkSerializable(value[i], `${path}[${i}]`, seen);
           if (err) return err;
         }
       } else {
+        if (Object.getPrototypeOf(value) !== Object.prototype) {
+          return `Value${path ? ' at ' + path : ''} is not a plain JSON object`;
+        }
         for (const key of Object.keys(value)) {
-          const err = this._checkSerializable(value[key], path ? `${path}.${key}` : key);
+          const err = this._checkSerializable(value[key], path ? `${path}.${key}` : key, seen);
           if (err) return err;
         }
       }
+      seen.delete(value);
     }
 
     return null;

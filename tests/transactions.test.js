@@ -46,7 +46,7 @@ describe('Transactions', () => {
 
   it('commit preserves changes', async () => {
     const transaction = await seq.adapter.tcl.begin();
-    await User.create({ name: 'Ana', balance: 100 });
+    await User.create({ name: 'Ana', balance: 100 }, { transaction });
     await seq.adapter.tcl.commit(transaction);
 
     const count = await User.count();
@@ -55,18 +55,21 @@ describe('Transactions', () => {
 
   it('rollback reverts changes', async () => {
     const transaction = await seq.adapter.tcl.begin();
-    await User.create({ name: 'Ana', balance: 100 });
+    await User.create({ name: 'Ana', balance: 100 }, { transaction });
     await seq.adapter.tcl.rollback(transaction);
 
     const count = await User.count();
     assert.equal(count, 0);
   });
 
-  it('operations outside transaction are not affected by rollback', async () => {
+  it('rejects operations without the active transaction token', async () => {
     await User.create({ name: 'Juan', balance: 50 });
 
     const transaction = await seq.adapter.tcl.begin();
-    await User.create({ name: 'Ana', balance: 100 });
+    await assert.rejects(
+      () => User.create({ name: 'Ana', balance: 100 }),
+      error => error.code === 'SEQ_ADAPTER_TRANSACTION_REQUIRED'
+    );
     await seq.adapter.tcl.rollback(transaction);
 
     const count = await User.count();
@@ -98,8 +101,8 @@ describe('Transactions', () => {
   });
 
   it('seq.transaction commits on success', async () => {
-    await seq.transaction(async () => {
-      await User.create({ name: 'Ana', balance: 100 });
+    await seq.transaction(async transaction => {
+      await User.create({ name: 'Ana', balance: 100 }, { transaction });
     });
 
     const count = await User.count();
@@ -108,8 +111,8 @@ describe('Transactions', () => {
 
   it('seq.transaction rolls back on error', async () => {
     try {
-      await seq.transaction(async () => {
-        await User.create({ name: 'Ana', balance: 100 });
+      await seq.transaction(async transaction => {
+        await User.create({ name: 'Ana', balance: 100 }, { transaction });
         throw new Error('Intentional error');
       });
     } catch (e) {

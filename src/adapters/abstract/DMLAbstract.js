@@ -3,7 +3,7 @@ import { AdapterError } from '../../core/errors/AdapterError.js';
 import { ValidationError } from '../../core/errors/ValidationError.js';
 import { Op } from '../../operators.js';
 import { resolveWhereValue } from '../../utils/where.js';
-import { loadIncludes, processJoinedRows, resolveIncludeAlias, resolveEager } from '../../utils/include.js';
+import { loadIncludes, processJoinedRows, resolveIncludeAlias, resolveEager, resolveAssociation } from '../../utils/include.js';
 
 /**
  * Base DML abstract.
@@ -104,11 +104,17 @@ export class DMLAbstract extends BaseAbstract {
   }
 
   _buildCondition(col, rawValue) {
+    if (rawValue !== null && typeof rawValue === 'object' && !Array.isArray(rawValue)
+      && Object.getOwnPropertySymbols(rawValue).length > 1) {
+      throw new ValidationError('A field condition can contain only one operator', { code: 'SEQ_VALIDATION_OPERATOR' });
+    }
     const { op, value } = resolveWhereValue(rawValue);
     switch (op) {
       case Op.eq:
+        if (value === null) return { sql: `${col} IS NULL`, params: [] };
         return { sql: `${col} = ?`, params: [this._serializeValue(value)] };
       case Op.ne:
+        if (value === null) return { sql: `${col} IS NOT NULL`, params: [] };
         return { sql: `${col} != ?`, params: [this._serializeValue(value)] };
       case Op.gt:
         return { sql: `${col} > ?`, params: [this._serializeValue(value)] };
@@ -123,19 +129,25 @@ export class DMLAbstract extends BaseAbstract {
       case Op.notLike:
         return { sql: `${col} NOT LIKE ?`, params: [this._serializeValue(value)] };
       case Op.in: {
+        if (!Array.isArray(value)) throw new ValidationError('Op.in requires an array', { code: 'SEQ_VALIDATION_OPERATOR' });
+        if (value.length === 0) return { sql: '0 = 1', params: [] };
         const inParams = value.map(v => this._serializeValue(v));
         return { sql: `${col} IN (${inParams.map(() => '?').join(', ')})`, params: inParams };
       }
       case Op.notIn: {
+        if (!Array.isArray(value)) throw new ValidationError('Op.notIn requires an array', { code: 'SEQ_VALIDATION_OPERATOR' });
+        if (value.length === 0) return { sql: '1 = 1', params: [] };
         const notInParams = value.map(v => this._serializeValue(v));
         return { sql: `${col} NOT IN (${notInParams.map(() => '?').join(', ')})`, params: notInParams };
       }
       case Op.between:
+        if (!Array.isArray(value) || value.length !== 2) throw new ValidationError('Op.between requires a two-item array', { code: 'SEQ_VALIDATION_OPERATOR' });
         return { sql: `${col} BETWEEN ? AND ?`, params: [this._serializeValue(value[0]), this._serializeValue(value[1])] };
       case Op.notBetween:
+        if (!Array.isArray(value) || value.length !== 2) throw new ValidationError('Op.notBetween requires a two-item array', { code: 'SEQ_VALIDATION_OPERATOR' });
         return { sql: `${col} NOT BETWEEN ? AND ?`, params: [this._serializeValue(value[0]), this._serializeValue(value[1])] };
       default:
-        return { sql: `${col} = ?`, params: [this._serializeValue(value)] };
+        throw new ValidationError('Unknown where operator', { code: 'SEQ_VALIDATION_OPERATOR' });
     }
   }
 
@@ -146,8 +158,8 @@ export class DMLAbstract extends BaseAbstract {
     ];
   }
 
-  _buildConditions(where, schema, alias = null) {
-    const colWhere = this._translateWhere(where, schema);
+  _buildConditions(where, schema, alias = null, translated = false) {
+    const colWhere = translated ? where : this._translateWhere(where, schema);
     const params = [];
     const conditions = [];
 
@@ -156,7 +168,7 @@ export class DMLAbstract extends BaseAbstract {
         const logical = k === Op.and ? 'AND' : 'OR';
         const parts = [];
         for (const item of v) {
-          const child = this._buildConditions(item, schema, alias);
+          const child = this._buildConditions(item, schema, alias, true);
           if (child.conditions.length === 0) continue;
           parts.push(`(${child.conditions.join(' AND ')})`);
           params.push(...child.params);
@@ -200,9 +212,13 @@ export class DMLAbstract extends BaseAbstract {
    */
   _buildOrderBy(order, schema, alias = null) {
     if (!order || order.length === 0) return '';
-    const clauses = order.map(([attr, dir]) => {
+    const clauses = order.map(([attr, dir = 'ASC']) => {
+      if (typeof attr !== 'string' || !Object.prototype.hasOwnProperty.call(schema.attrToColumn, attr)
+        || typeof dir !== 'string' || !['ASC', 'DESC'].includes(dir.toUpperCase())) {
+        throw new ValidationError('Invalid order clause', { code: 'SEQ_VALIDATION_ORDER' });
+      }
       const col = schema.attrToColumn[attr] || attr;
-      return `${this._colRef(col, alias)} ${dir}`;
+      return `${this._colRef(col, alias)} ${dir.toUpperCase()}`;
     });
     return ` ORDER BY ${clauses.join(', ')}`;
   }
@@ -213,6 +229,12 @@ export class DMLAbstract extends BaseAbstract {
    * @returns {string}
    */
   _buildLimitOffset(options) {
+    if (options.limit !== undefined && (!Number.isInteger(options.limit) || options.limit < 1)) {
+      throw new ValidationError('limit must be an integer >= 1', { code: 'SEQ_VALIDATION_LIMIT' });
+    }
+    if (options.offset !== undefined && (!Number.isInteger(options.offset) || options.offset < 0)) {
+      throw new ValidationError('offset must be an integer >= 0', { code: 'SEQ_VALIDATION_OFFSET' });
+    }
     if (options.limit && options.offset) {
       return ` LIMIT ${options.limit} OFFSET ${options.offset}`;
     } else if (options.limit) {
@@ -230,6 +252,22 @@ export class DMLAbstract extends BaseAbstract {
       .filter(attr => !virtualAttributes.has(attr))
       .map(attr => this._colRef(schema.attrToColumn[attr] || attr, alias));
     return columns.length > 0 ? columns.join(', ') : '*';
+  }
+
+  _assertTransaction(options = {}) {
+    const active = this._adapter._activeTransaction || null;
+    const transaction = options.transaction || null;
+    if (transaction) {
+      if (!transaction.active || transaction.adapter !== this._adapter || active !== transaction) {
+        throw new AdapterError('Transaction does not belong to this adapter or is not active', {
+          code: 'SEQ_ADAPTER_TRANSACTION_INVALID'
+        });
+      }
+    } else if (active) {
+      throw new AdapterError('An active transaction must be passed in options.transaction', {
+        code: 'SEQ_ADAPTER_TRANSACTION_REQUIRED'
+      });
+    }
   }
 
   /**
@@ -251,10 +289,14 @@ export class DMLAbstract extends BaseAbstract {
     for (const inc of includes) {
       if (!inc.model) continue;
       const { schema: incSchema, alias: incAlias } = this._schema(inc.model);
-      const incAliasPrefix = incAlias || this._getTableName(inc.model);
+      const incAliasPrefix = inc.as || incAlias || this._getTableName(inc.model);
+      const selected = Array.isArray(inc.attributes) && inc.attributes.length > 0
+        ? new Set([...inc.attributes, inc.model.primaryKeyAttribute || 'id'])
+        : null;
       for (const [attrName, colDef] of Object.entries(incSchema.columns || {})) {
+        if (selected && !selected.has(attrName)) continue;
         const colName = incSchema.attrToColumn[attrName] || attrName;
-        parts.push(`${this._colRef(colName, incAlias)} AS ${this._q(`${incAliasPrefix}.${attrName}`)}`);
+        parts.push(`${this._colRef(colName, incAliasPrefix)} AS ${this._q(`${incAliasPrefix}.${attrName}`)}`);
       }
     }
     return parts.join(', ');
@@ -274,10 +316,11 @@ export class DMLAbstract extends BaseAbstract {
     const { schema: parentSchema } = this._schema(model);
     for (const inc of includes) {
       if (!inc.model) continue;
-      const assoc = model.associations?.[inc.model.modelName];
+      const assoc = resolveAssociation(model, inc);
       if (!assoc) continue;
       const { tableName: targetTable, schema: targetSchema, alias: targetAlias } = this._schema(inc.model);
-      const joinAlias = targetAlias || targetTable;
+      const joinAlias = inc.as || targetAlias || targetTable;
+      const joinType = inc.required ? 'INNER JOIN' : 'LEFT JOIN';
       const fkAttr = assoc.foreignKey;
 
       if (assoc.type === 'belongsToMany') {
@@ -292,7 +335,7 @@ export class DMLAbstract extends BaseAbstract {
         const targetPKAttr = assoc.target.primaryKeyAttribute || 'id';
         const targetPKCol = targetSchema.attrToColumn[targetPKAttr] || targetPKAttr;
 
-        sql += ` LEFT JOIN ${this._q(throughTable)} AS ${this._q(junctionAlias)} ON ${this._colRef(pkCol, parentAlias)} = ${this._colRef(junctionFKCol, junctionAlias)}`;
+        sql += ` ${joinType} ${this._q(throughTable)} AS ${this._q(junctionAlias)} ON ${this._colRef(pkCol, parentAlias)} = ${this._colRef(junctionFKCol, junctionAlias)}`;
 
         let onClause = `${this._colRef(junctionOtherKeyCol, junctionAlias)} = ${this._colRef(targetPKCol, joinAlias)}`;
         if (inc.where) {
@@ -300,7 +343,7 @@ export class DMLAbstract extends BaseAbstract {
           onClause += ` AND ${where.conditions.join(' AND ')}`;
           params.push(...where.params);
         }
-        sql += ` LEFT JOIN ${this._q(targetTable)} AS ${this._q(joinAlias)} ON ${onClause}`;
+        sql += ` ${joinType} ${this._q(targetTable)} AS ${this._q(joinAlias)} ON ${onClause}`;
       } else {
         let onClause;
         if (assoc.type === 'belongsTo') {
@@ -319,7 +362,7 @@ export class DMLAbstract extends BaseAbstract {
           onClause += ` AND ${where.conditions.join(' AND ')}`;
           params.push(...where.params);
         }
-        sql += ` LEFT JOIN ${this._q(targetTable)} AS ${this._q(joinAlias)} ON ${onClause}`;
+        sql += ` ${joinType} ${this._q(targetTable)} AS ${this._q(joinAlias)} ON ${onClause}`;
       }
     }
     return { sql, params };
@@ -381,6 +424,7 @@ export class DMLAbstract extends BaseAbstract {
    * @returns {Promise<import('../../core/Model.js').Model[]>}
    */
   async selectAll(model, options = {}) {
+    this._assertTransaction(options);
     //this._log('DML.selectAll', model.modelName, options);
     const { tableName, schema, alias } = this._schema(model);
     const includes = options.include || [];
@@ -394,6 +438,19 @@ export class DMLAbstract extends BaseAbstract {
         lazyIncludes.push(inc);
       }
     }
+    let queryOptions = options;
+    if (eagerIncludes.length > 0 && (options.limit !== undefined || options.offset !== undefined) && model.primaryKeyAttribute) {
+      const page = await this.selectAll(model, { ...options, include: [], attributes: [model.primaryKeyAttribute] });
+      const ids = page.map(instance => instance.getDataValue(model.primaryKeyAttribute));
+      if (ids.length === 0) return [];
+      const pageWhere = { [model.primaryKeyAttribute]: { [Op.in]: ids } };
+      queryOptions = {
+        ...options,
+        where: options.where ? { [Op.and]: [options.where, pageWhere] } : pageWhere,
+        limit: undefined,
+        offset: undefined
+      };
+    }
     let sql;
     const params = [];
     if (eagerIncludes.length > 0) {
@@ -403,23 +460,23 @@ export class DMLAbstract extends BaseAbstract {
       sql += joins.sql;
       params.push(...joins.params);
     } else {
-      const selectList = this._buildSelectList(options.attributes, schema, alias);
+      const selectList = this._buildSelectList(queryOptions.attributes, schema, alias);
       sql = `SELECT ${selectList} FROM ${this._q(tableName)}` + (alias ? ` AS ${this._q(alias)}` :``)
     }
-    const where = this._buildWhere(options.where, schema, alias);
+    const where = this._buildWhere(queryOptions.where, schema, alias);
     sql += where.sql;
     params.push(...where.params);
-    sql += this._buildOrderBy(options.order, schema, alias);
-    sql += this._buildLimitOffset(options);
+    sql += this._buildOrderBy(queryOptions.order, schema, alias);
+    sql += this._buildLimitOffset(queryOptions);
     const rows = await this._executeQueryAll(sql, params);
     let instances;
     if (eagerIncludes.length > 0) {
       instances = processJoinedRows(rows, model, eagerIncludes, this);
     } else {
-      instances = this._mapRows(rows, model, schema, options);
+      instances = this._mapRows(rows, model, schema, queryOptions);
     }
     if (lazyIncludes.length > 0) {
-      await loadIncludes(instances, lazyIncludes, model, this);
+      instances = await loadIncludes(instances, lazyIncludes, model, this, queryOptions);
     }
     return instances;
   }
@@ -431,6 +488,7 @@ export class DMLAbstract extends BaseAbstract {
    * @returns {Promise<number>}
    */
   async count(model, options = {}) {
+    this._assertTransaction(options);
     //this._log('DML.count', model.modelName, options);
     const { tableName, schema, alias } = this._schema(model);
     let sql = `SELECT COUNT(*) as cnt FROM ${this._q(tableName)}` + (alias ? ` AS ${this._q(alias)}` :``)
@@ -450,16 +508,28 @@ export class DMLAbstract extends BaseAbstract {
    * @returns {Promise<import('../../core/Model.js').Model[]>}
    */
   async update(model, values, options = {}) {
+    this._assertTransaction(options);
     //this._log('DML.update', model.modelName, values, options);
     const { tableName, schema } = this._schema(model);
     const colValues = this._toColumnNames(values, schema);
     this._applyTimestamps(colValues, schema);
+    this._validateMutationValues(colValues, schema, model.modelName);
+    if (Object.keys(colValues).length === 0) return [];
+    let primaryKeys = null;
+    if (schema.primaryKeyAttribute) {
+      const matches = await this.selectAll(model, { where: options.where, attributes: [schema.primaryKeyAttribute], transaction: options.transaction });
+      primaryKeys = matches.map(instance => instance.getDataValue(schema.primaryKeyAttribute));
+      if (primaryKeys.length === 0) return [];
+    }
     const setClauses = Object.keys(colValues).map(k => `${this._q(k)} = ?`);
     const params = [...Object.values(colValues).map(v => this._serializeValue(v))];
     const where = this._buildWhere(options.where, schema);
     const sql = `UPDATE ${this._q(tableName)} SET ${setClauses.join(', ')}${where.sql}`;
     params.push(...where.params);
     await this._execute(sql, params);
+    if (primaryKeys) {
+      return this.selectAll(model, { ...options, where: { [schema.primaryKeyAttribute]: { [Op.in]: primaryKeys } } });
+    }
     if (options.where) return await this.selectAll(model, options);
     return [];
   }
@@ -471,6 +541,7 @@ export class DMLAbstract extends BaseAbstract {
    * @returns {Promise<number>}
    */
   async delete(model, options = {}) {
+    this._assertTransaction(options);
     //this._log('DML.delete', model.modelName, options);
     const { tableName, schema } = this._schema(model);
     const params = [];
@@ -493,6 +564,7 @@ export class DMLAbstract extends BaseAbstract {
    * @returns {Promise<import('../../core/Model.js').Model>}
    */
   async insert(model, values, options = {}) {
+    this._assertTransaction(options);
     //this._log('DML.insert', model.modelName, values);
     const { tableName, schema } = this._schema(model);
     const colRecord = this._toColumnNames(values, schema);
@@ -503,6 +575,11 @@ export class DMLAbstract extends BaseAbstract {
     }
     this._validateRecord(colRecord, schema, model.modelName);
     const cols = Object.keys(colRecord);
+    if (cols.length === 0) {
+      const info = await this._execute(`INSERT INTO ${this._q(tableName)} DEFAULT VALUES`, []);
+      if (schema.primaryKey) colRecord[schema.primaryKey] = Number(info.lastInsertRowid);
+      return new model(this._toAttrNames(colRecord, schema), { _isNew: false });
+    }
     const colNames = cols.map(c => this._q(c)).join(', ');
     const placeholders = cols.map(() => '?').join(', ');
     const sql = `INSERT INTO ${this._q(tableName)} (${colNames}) VALUES (${placeholders})`;
@@ -523,6 +600,7 @@ export class DMLAbstract extends BaseAbstract {
    * @returns {Promise<import('../../core/Model.js').Model[]>}
    */
   async bulkInsert(model, records, options = {}) {
+    this._assertTransaction(options);
     const results = [];
     for (const rec of records) {
       results.push(await this.insert(model, rec, options));
@@ -588,6 +666,12 @@ export class DMLAbstract extends BaseAbstract {
     const virtualAttributes = new Set(schema.virtualAttributes || []);
     for (const [key, value] of Object.entries(record)) {
       if (virtualAttributes.has(key)) continue;
+      if (!Object.prototype.hasOwnProperty.call(map, key)) {
+        throw new ValidationError(`Unknown attribute "${key}"`, {
+          code: 'SEQ_VALIDATION_UNKNOWN_ATTRIBUTE',
+          details: { field: key, model: schema.modelName }
+        });
+      }
       result[map[key] || key] = value;
     }
     return result;
@@ -620,8 +704,15 @@ export class DMLAbstract extends BaseAbstract {
 
     for (const [key, value] of this._whereEntries(where)) {
       if (key === Op.and || key === Op.or) {
+        if (!Array.isArray(value)) throw new ValidationError('Logical operators require an array', { code: 'SEQ_VALIDATION_OPERATOR' });
         result[key] = value.map(item => this._translateWhere(item, schema));
       } else {
+        if (typeof key !== 'string' || !Object.prototype.hasOwnProperty.call(map, key)) {
+          throw new ValidationError(`Unknown where attribute "${String(key)}"`, {
+            code: 'SEQ_VALIDATION_UNKNOWN_ATTRIBUTE',
+            details: { field: String(key), model: schema.modelName }
+          });
+        }
         result[map[key] || key] = value;
       }
     }
@@ -668,12 +759,12 @@ export class DMLAbstract extends BaseAbstract {
           if (!(recordValue <= opValue)) return false;
           break;
         case Op.like: {
-          const regex = new RegExp('^' + opValue.replace(/%/g, '.*').replace(/_/g, '.') + '$', 'i');
+          const regex = this._likeRegex(opValue);
           if (!regex.test(String(recordValue))) return false;
           break;
         }
         case Op.notLike: {
-          const regex = new RegExp('^' + opValue.replace(/%/g, '.*').replace(/_/g, '.') + '$', 'i');
+          const regex = this._likeRegex(opValue);
           if (regex.test(String(recordValue))) return false;
           break;
         }
@@ -694,6 +785,12 @@ export class DMLAbstract extends BaseAbstract {
       }
     }
     return true;
+  }
+
+  _likeRegex(pattern) {
+    if (typeof pattern !== 'string') throw new ValidationError('LIKE operators require a string', { code: 'SEQ_VALIDATION_OPERATOR' });
+    const escaped = pattern.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    return new RegExp(`^${escaped.replaceAll('%', '.*').replaceAll('_', '.')}$`, 'i');
   }
 
   /**
@@ -747,6 +844,29 @@ export class DMLAbstract extends BaseAbstract {
         }
       }
 
+      if (value !== null && value !== undefined && colDef.validate) {
+        this._validateCustomRules(value, colDef.validate, attrName, modelName);
+      }
+    }
+  }
+
+  _validateMutationValues(record, schema, modelName) {
+    for (const [attrName, colDef] of Object.entries(schema.columns)) {
+      const colName = schema.attrToColumn[attrName] || attrName;
+      if (!Object.prototype.hasOwnProperty.call(record, colName)) continue;
+      const value = record[colName];
+      if (!colDef.allowNull && (value === null || value === undefined)) {
+        throw new ValidationError(`Field "${attrName}" does not allow null values in model "${modelName}"`, {
+          code: 'SEQ_VALIDATION_NOT_NULL', details: { model: modelName, field: attrName }
+        });
+      }
+      if (value !== null && value !== undefined && colDef.type?.validate) {
+        const result = colDef.type.validate(value);
+        if (!result.valid) throw new ValidationError(
+          `Validation failed for field "${attrName}" in model "${modelName}": ${result.message}`,
+          { code: 'SEQ_VALIDATION_TYPE', details: { model: modelName, field: attrName, value } }
+        );
+      }
       if (value !== null && value !== undefined && colDef.validate) {
         this._validateCustomRules(value, colDef.validate, attrName, modelName);
       }

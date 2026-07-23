@@ -4,6 +4,14 @@ export type NamingConvention = 'camelCase' | 'snake_case';
 export type CaseStyle = 'lower' | 'upper' | null;
 export type ForeignKeyStrategy = 'alter' | 'inline' | 'none';
 
+export interface Transaction {
+  readonly id: number;
+  active: boolean;
+  readonly adapter: BaseAdapter;
+}
+
+export type WhereOptions = Record<string, unknown> & { [operator: symbol]: WhereOptions[] | unknown };
+
 export interface AttributeReference {
   model: string;
   key?: string;
@@ -63,10 +71,11 @@ export type IncludeOption =
       where?: Record<string, unknown>;
       required?: boolean;
       eager?: boolean;
+      attributes?: string[];
     };
 
 export interface QueryOptions {
-  where?: Record<string, unknown>;
+  where?: WhereOptions;
   order?: Array<[string, SortDirection]>;
   limit?: number;
   offset?: number;
@@ -74,13 +83,13 @@ export interface QueryOptions {
   include?: IncludeOption | IncludeOption[];
   eager?: boolean;
   hooks?: boolean;
-  transaction?: unknown;
+  transaction?: Transaction;
 }
 
 export interface MutationOptions {
-  where?: Record<string, unknown>;
+  where?: WhereOptions;
   hooks?: boolean;
-  transaction?: unknown;
+  transaction?: Transaction;
 }
 
 export interface BuildOptions {
@@ -155,7 +164,7 @@ export class Seq {
   getModel(name: string): ModelStatic | undefined;
   hasModel(name: string): boolean;
   sync(options?: SyncOptions): Promise<SyncResult>;
-  transaction<TResult>(callback: (transaction: unknown) => Promise<TResult> | TResult): Promise<TResult>;
+  transaction<TResult>(callback: (transaction: Transaction) => Promise<TResult> | TResult): Promise<TResult>;
   close(): Promise<void>;
 }
 

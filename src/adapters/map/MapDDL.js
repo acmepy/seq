@@ -55,12 +55,16 @@ export class MapDDL extends DDLAbstract {
     const schema = this._adapter.schemas.get(tableName);
     for (const [name, colDef] of Object.entries(missingColumns)) {
       schema.columns[name] = colDef;
+      const columnName = colDef.field || name;
+      schema.attrToColumn[name] = columnName;
+      schema.columnToAttr[columnName] = name;
     }
     const table = this._adapter.database.get(tableName);
     for (const [name, colDef] of Object.entries(missingColumns)) {
+      const columnName = colDef.field || name;
       for (const [, record] of table) {
-        if (!(name in record)) {
-          record[name] = colDef.defaultValue !== undefined
+        if (!(columnName in record)) {
+          record[columnName] = colDef.defaultValue !== undefined
             ? (typeof colDef.defaultValue === 'function' ? colDef.defaultValue() : colDef.defaultValue)
             : null;
         }

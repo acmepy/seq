@@ -31,12 +31,27 @@ export class DDLAbstract extends BaseAbstract {
    */
   async createTable(definition, options = {}) {
     const def = this.normalizeDefinition(definition);
-    //this._log('DDL.createTable', def.tableName);
+    const previousSchema = this._adapter.schemas.get(def.tableName);
+    let structureCreated = false;
     this._registerSchema(def);
-    await this.createTableStructure(def);
-    for (const uk of def.uniqueConstraints) await this.addUniqueConstraint(def.tableName, uk);
-    for (const idx of def.indexes) await this.addIndex(def.tableName, idx);
-    for (const fk of def.foreignKeys) await this.addForeignKey(def.tableName, fk);
+    try {
+      await this.createTableStructure(def);
+      structureCreated = true;
+      for (const uk of def.uniqueConstraints) await this.addUniqueConstraint(def.tableName, uk);
+      for (const idx of def.indexes) await this.addIndex(def.tableName, idx);
+      for (const fk of def.foreignKeys) await this.addForeignKey(def.tableName, fk);
+    } catch (error) {
+      if (previousSchema) this._adapter.schemas.set(def.tableName, previousSchema);
+      else this._adapter.schemas.delete(def.tableName);
+      if (structureCreated) {
+        try {
+          await this.dropTable(def.tableName, { ifExists: true, ignoreForeignKeys: true });
+        } catch (cleanupError) {
+          error.cleanupError = cleanupError;
+        }
+      }
+      throw error;
+    }
   }
 
   /**
@@ -157,9 +172,35 @@ export class DDLAbstract extends BaseAbstract {
     const schema = this._adapter.schemas.get(tableName);
     for (const [name, colDef] of Object.entries(missingColumns)) {
       const colType = this._adapter.mapDataType(colDef.type);
-      this._adapter._db.prepare(`ALTER TABLE ${this._q(tableName)} ADD COLUMN ${this._q(name)} ${colType}`).run();
+      const columnName = colDef.field || name;
+      const constraints = [];
+      if (!colDef.allowNull && colDef.defaultValue === undefined) {
+        throw new AdapterError(`Cannot add required column "${name}" without a default value`, {
+          code: 'SEQ_DDL_REQUIRED_COLUMN_NEEDS_DEFAULT', details: { tableName, field: name }
+        });
+      }
+      if (!colDef.allowNull) constraints.push('NOT NULL');
+      if (colDef.defaultValue !== undefined && colDef.defaultValue !== null) {
+        const value = typeof colDef.defaultValue === 'function' ? colDef.defaultValue() : colDef.defaultValue;
+        constraints.push(`DEFAULT ${this._formatDefaultValue(value)}`);
+      }
+      this._adapter._db.prepare(`ALTER TABLE ${this._q(tableName)} ADD COLUMN ${this._q(columnName)} ${colType}${constraints.length ? ` ${constraints.join(' ')}` : ''}`).run();
       schema.columns[name] = colDef;
+      schema.attrToColumn[name] = columnName;
+      schema.columnToAttr[columnName] = name;
     }
+  }
+
+  _formatDefaultValue(value) {
+    if (value === null) return 'NULL';
+    if (value instanceof Date) return `'${value.toISOString().replaceAll("'", "''")}'`;
+    if (typeof value === 'string') return `'${value.replaceAll("'", "''")}'`;
+    if (typeof value === 'boolean') return value ? '1' : '0';
+    if (typeof value === 'number' && Number.isFinite(value)) return String(value);
+    if (Array.isArray(value) || (typeof value === 'object' && value !== null)) {
+      return `'${JSON.stringify(value).replaceAll("'", "''")}'`;
+    }
+    throw new AdapterError('Unsupported default value', { code: 'SEQ_DDL_INVALID_DEFAULT' });
   }
 
   /**

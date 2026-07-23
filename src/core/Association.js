@@ -1,3 +1,5 @@
+import { ModelError } from './errors/ModelError.js';
+
 export class Association {
   /**
    * @param {'hasMany'|'hasOne'|'belongsTo'|'belongsToMany'} type
@@ -6,6 +8,12 @@ export class Association {
    * @param {import('../../types/index.d.ts').AssociationOptions} options
    */
   constructor(type, source, target, options = {}) {
+    const validActions = new Set(['RESTRICT', 'CASCADE', 'SET NULL']);
+    for (const [name, value] of [['onDelete', options.onDelete], ['onUpdate', options.onUpdate]]) {
+      if (value !== undefined && !validActions.has(value)) {
+        throw new ModelError(`${name} must be RESTRICT, CASCADE or SET NULL`, { code: 'SEQ_ASSOCIATION_INVALID_ACTION' });
+      }
+    }
     this.type = type;
     this.source = source;
     this.target = target;

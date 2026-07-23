@@ -65,6 +65,11 @@ export class Model {
 
     for (const [name, def] of Object.entries(attributes)) {
       if (!def.type) throw new Error(`Attribute "${name}" must have a type`);
+      for (const action of [def.onDelete, def.onUpdate]) {
+        if (action !== undefined && !['RESTRICT', 'CASCADE', 'SET NULL'].includes(action)) {
+          throw new ModelError(`Attribute "${name}" has an invalid foreign-key action`, { code: 'SEQ_ASSOCIATION_INVALID_ACTION' });
+        }
+      }
       this.rawAttributes[name] = { ...def, type: this._normalizeDataType(def.type) };
       if (def.primaryKey) {
         if (this.primaryKeyAttribute) throw new Error('Model must not have more than one primaryKey attribute');
@@ -151,7 +156,7 @@ export class Model {
     if (!this.associations) this.associations = {};
     if (!options.as) options.as = (target.modelName || target.name || 'unknown').toLowerCase() + 's';
     const assoc = new Association('hasMany', this, target, { ...options, foreignKey: fkAttr });
-    this.associations[target.modelName || target.name || 'unknown'] = assoc;
+    this._storeAssociation(assoc, target);
     return this;
   }
 
@@ -162,7 +167,7 @@ export class Model {
     if (!this.associations) this.associations = {};
     if (!options.as) options.as = (target.modelName || target.name || 'unknown').toLowerCase();
     const assoc = new Association('hasOne', this, target, { ...options, foreignKey: fkAttr });
-    this.associations[target.modelName || target.name || 'unknown'] = assoc;
+    this._storeAssociation(assoc, target);
     return this;
   }
 
@@ -173,7 +178,7 @@ export class Model {
     if (!this.associations) this.associations = {};
     if (!options.as) options.as = (target.modelName || target.name || 'unknown').toLowerCase();
     const assoc = new Association('belongsTo', this, target, { ...options, foreignKey: fkAttr });
-    this.associations[target.modelName || target.name || 'unknown'] = assoc;
+    this._storeAssociation(assoc, target);
     return this;
   }
 
@@ -187,8 +192,17 @@ export class Model {
     if (!this.associations) this.associations = {};
     if (!options.as) options.as = (target.modelName || target.name || 'unknown').toLowerCase() + 's';
     const assoc = new Association('belongsToMany', this, target, { ...options, ...throughInfo, foreignKey: fkAttr, otherKey });
-    this.associations[target.modelName || target.name || 'unknown'] = assoc;
+    this._storeAssociation(assoc, target);
     return this;
+  }
+
+  static _storeAssociation(association, target) {
+    const alias = association.as || target.modelName || target.name;
+    this.associations[alias] = association;
+    const legacyKey = target.modelName || target.name;
+    if (legacyKey && !Object.prototype.hasOwnProperty.call(this.associations, legacyKey)) {
+      Object.defineProperty(this.associations, legacyKey, { value: association, configurable: true, writable: true });
+    }
   }
 
   /**
@@ -315,14 +329,41 @@ export class Model {
   static async findAll(options = {}) {
     if (options.hooks !== false) await this._runHooks('beforeFind', options);
     if (options.where !== undefined && (typeof options.where !== 'object' || Array.isArray(options.where))) throw new ValidationWhereError();
-    if (options.order !== undefined && !Array.isArray(options.order)) throw new ValidationOrderError();
+    if (options.order !== undefined) this._validateOrder(options.order);
     if (options.limit !== undefined && (!Number.isInteger(options.limit) || options.limit < 1))  throw new ValidationLimitError();
     if (options.offset !== undefined && (!Number.isInteger(options.offset) || options.offset < 0)) throw new ValidationOffsetError();
+    if (options.attributes !== undefined) this._validateAttributes(options.attributes);
     if (options.include) options.include = normalizeInclude(options.include);
+    for (const include of options.include || []) {
+      if (!include.model) throw new ModelError('include requires a model', { code: 'SEQ_INCLUDE_INVALID_MODEL' });
+      if (include.attributes !== null) include.model._validateAttributes(include.attributes);
+    }
     this._log('trace', `${this.modelName}.findAll`, options);
     const result = await this._adapter.dml.selectAll(this, options);
     if (options.hooks !== false) await this._runHooks('afterFind', result, options);
     return result;
+  }
+
+  static _validateOrder(order) {
+    if (!Array.isArray(order) || order.some(item => !Array.isArray(item) || item.length < 1 || item.length > 2)) {
+      throw new ValidationOrderError();
+    }
+    for (const [attribute, direction = 'ASC'] of order) {
+      if (typeof attribute !== 'string' || !Object.prototype.hasOwnProperty.call(this.rawAttributes || {}, attribute)) {
+        throw new ValidationOrderError('order contains an unknown attribute');
+      }
+      if (typeof direction !== 'string' || !['ASC', 'DESC'].includes(direction.toUpperCase())) {
+        throw new ValidationOrderError('order direction must be ASC or DESC');
+      }
+    }
+  }
+
+  static _validateAttributes(attributes) {
+    if (!Array.isArray(attributes) || attributes.length === 0 || attributes.some(attribute =>
+      typeof attribute !== 'string' || !Object.prototype.hasOwnProperty.call(this.rawAttributes || {}, attribute)
+    )) {
+      throw new ValidationError('attributes must contain known model attributes', { code: 'SEQ_VALIDATION_ATTRIBUTES' });
+    }
   }
 
   /**

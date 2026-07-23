@@ -1,5 +1,6 @@
 import { TCLAbstract } from '../abstract/TCLAbstract.js';
 import { clone } from '../../utils/clone.js';
+import { AdapterError } from '../../core/errors/AdapterError.js';
 
 /**
  * Transaction ID counter.
@@ -34,25 +35,19 @@ export class MapTCL extends TCLAbstract {
    * @returns {Promise<object>} Transaction object
    */
   async begin(options = {}) {
+    if (this._adapter._activeTransaction) {
+      throw new AdapterError('Nested or concurrent Map transactions are not supported', { code: 'SEQ_ADAPTER_TRANSACTION_CONCURRENT' });
+    }
     const transaction = {
       id: ++transactionIdCounter,
       active: true,
-      snapshots: new Map(),
-      sequences: new Map()
+      adapter: this._adapter,
+      baseDatabase: this._adapter.database,
+      baseSequences: this._adapter.sequences
     };
-
-    for (const [tableName, table] of this._adapter.database) {
-      const snapshot = new Map();
-      for (const [key, record] of table) {
-        snapshot.set(key, clone(record));
-      }
-      transaction.snapshots.set(tableName, snapshot);
-    }
-
-    for (const [tableName, seq] of this._adapter.sequences) {
-      transaction.sequences.set(tableName, seq);
-    }
-
+    this._adapter.database = this._cloneDatabase(this._adapter.database);
+    this._adapter.sequences = new Map(this._adapter.sequences);
+    this._adapter._activeTransaction = transaction;
     return transaction;
   }
 
@@ -64,8 +59,9 @@ export class MapTCL extends TCLAbstract {
   async commit(transaction) {
     this._validateTransaction(transaction);
     transaction.active = false;
-    transaction.snapshots.clear();
-    transaction.sequences.clear();
+    transaction.baseDatabase = null;
+    transaction.baseSequences = null;
+    this._adapter._activeTransaction = null;
   }
 
   /**
@@ -76,16 +72,19 @@ export class MapTCL extends TCLAbstract {
   async rollback(transaction) {
     this._validateTransaction(transaction);
 
-    for (const [tableName, snapshot] of transaction.snapshots) {
-      this._adapter.database.set(tableName, snapshot);
-    }
-
-    for (const [tableName, seq] of transaction.sequences) {
-      this._adapter.sequences.set(tableName, seq);
-    }
-
+    this._adapter.database = transaction.baseDatabase;
+    this._adapter.sequences = transaction.baseSequences;
     transaction.active = false;
-    transaction.snapshots.clear();
-    transaction.sequences.clear();
+    transaction.baseDatabase = null;
+    transaction.baseSequences = null;
+    this._adapter._activeTransaction = null;
+  }
+
+  _cloneDatabase(database) {
+    const result = new Map();
+    for (const [tableName, table] of database) {
+      result.set(tableName, new Map([...table].map(([key, record]) => [key, clone(record)])));
+    }
+    return result;
   }
 }

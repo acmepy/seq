@@ -1,10 +1,15 @@
 {
   "name": "seq",
-  "version": "0.5.92",
+  "version": "0.7.01",
   "description": "seq es un micro orm, modular, flexible y de facil integracion",
   "type": "module",
   "main": "src/index.js",
   "types": "./types/index.d.ts",
+  "files": [
+    "src",
+    "types",
+    "README.md"
+  ],
   "exports": {
     ".": {
       "types": "./types/index.d.ts",
@@ -14,34 +19,40 @@
   },
   "scripts": {
     "test": "node --test tests/*.test.js",
+    "test:coverage": "node --test --experimental-test-coverage tests/*.test.js",
     "test:watch": "node --test --watch tests/*.test.js",
-    "basic": "node examples/basic.js",
-    "associations": "node examples/associations.js",
-    "find": "node examples/find.js",
-    "include": "node examples/include.js",
-    "belongs-to-many": "node examples/belongs-to-many.js",
-    "hooks": "node examples/hooks.js",
-    "virtual": "node examples/virtual.js",
-    "examples": "npm run basic && npm run associations && npm run find && npm run include && npm run belongs-to-many && npm run hooks && npm run virtual"
+
+    "lint": "eslint src tests examples",
+    "format": "prettier --write src tests examples types README.md package.json",
+
+    "example:basic": "node examples/basic.js",
+    "example:associations": "node examples/associations.js",
+    "example:find": "node examples/find.js",
+    "example:include": "node examples/include.js",
+    "example:belongs-to-many": "node examples/belongs-to-many.js",
+    "example:hooks": "node examples/hooks.js",
+    "example:virtual": "node examples/virtual.js",
+    "examples": "npm run example:basic && npm run example:associations && npm run example:find && npm run example:include && npm run example:belongs-to-many && npm run example:hooks && npm run example:virtual"
   },
   "keywords": [
     "orm",
     "model",
     "database",
-    "sqlite", 
+    "sqlite",
     "oracle"
   ],
-  "dependencies": {
-    "yep": "github:acmepy/yep"
-  },
   "peerDependencies": {
     "better-sqlite3": "^12.11.1"
   },
   "peerDependenciesMeta": {
-    "better-sqlite3": { "optional": true }
+    "better-sqlite3": {
+      "optional": true
+    }
   },
   "devDependencies": {
-    "better-sqlite3": "^12.11.1"
+    "better-sqlite3": "^12.11.1",
+    "eslint": "^10.7.0",
+    "prettier": "^3.9.6"
   },
   "author": "Hugo",
   "license": "MIT",

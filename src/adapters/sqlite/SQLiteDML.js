@@ -1,4 +1,5 @@
 import { DMLAbstract } from "../abstract/DMLAbstract.js";
+import { AdapterError } from '../../core/errors/AdapterError.js';
 
 export class SQLiteDML extends DMLAbstract {
   constructor(adapter) {
@@ -66,7 +67,13 @@ export class SQLiteDML extends DMLAbstract {
         else result[attrName] = value === 1 || value === '1';
       } else if (typeName === 'DateType') {
         if (value instanceof Date) result[attrName] = value;
-        else if (typeof value === 'string') result[attrName] = new Date(value);
+        else if (typeof value === 'string') {
+          const date = new Date(value);
+          if (Number.isNaN(date.getTime())) throw new AdapterError(`Invalid date stored in column "${key}"`, {
+            code: 'SEQ_ADAPTER_INVALID_STORED_VALUE', details: { column: key, value }
+          });
+          result[attrName] = date;
+        }
         else result[attrName] = value;
       } else {
         result[attrName] = value;
@@ -80,6 +87,7 @@ export class SQLiteDML extends DMLAbstract {
   // ---------------------------------------------------------------------------
 
   async bulkInsert(model, records, options = {}) {
+    this._assertTransaction(options);
     if (records.length === 0) return [];
 
     const { tableName, schema } = this._schema(model);
@@ -107,6 +115,7 @@ export class SQLiteDML extends DMLAbstract {
   }
 
   async truncate(model, options = {}) {
+    this._assertTransaction(options);
     const { tableName } = this._schema(model);
     await this._execute(`DELETE FROM ${this._q(tableName)}`, []);
     await this._execute('DELETE FROM sqlite_sequence WHERE name = ?', [tableName]);

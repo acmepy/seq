@@ -503,10 +503,17 @@ Tambien se puede pasar un objeto de include:
 
 ```js
 await Role.findAll({
-  include: [{ model: Permission, where: { name: 'read' } }],
+  include: [{
+    model: Permission,
+    where: { name: 'read' },
+    attributes: ['id', 'name'],
+    required: true
+  }],
   eager: true
 });
 ```
+
+`attributes` limita los campos del modelo incluido y `required: true` elimina los registros padre sin coincidencias. `limit` y `offset` siempre se aplican a los registros padre, incluso cuando el include eager usa joins. Para asociar dos veces el mismo modelo, cada asociacion y cada include deben usar un `as` distinto.
 
 ## Hooks
 
@@ -568,7 +575,7 @@ await seq.transaction(async transaction => {
 });
 ```
 
-`seq.transaction()` hace commit si el callback termina correctamente y rollback si lanza un error.
+`seq.transaction()` hace commit si el callback termina correctamente y rollback si lanza un error. Mientras exista una transaccion activa, todas las lecturas y mutaciones deben recibir exactamente su token mediante `{ transaction }`; las operaciones sin token, con un token finalizado o perteneciente a otro adapter son rechazadas. Los adapters SQLite y Map no admiten transacciones anidadas ni concurrentes sobre la misma instancia.
 
 ## Sincronizacion
 
@@ -578,6 +585,8 @@ await seq.sync();
 await seq.sync({ alter: true });
 await seq.sync({ force: true });
 ```
+
+`alter: true` es aditivo: agrega columnas, indices y restricciones soportadas, pero no elimina columnas ni datos. SQLite no puede agregar una FK a una tabla existente sin reconstruirla, por lo que esa operacion devuelve un error explicito en lugar de informar una alteracion que no ocurrio.
 
 `authenticate()` valida que el adapter pueda conectarse a la fuente de datos. En SQLite abre la conexion si hace falta y ejecuta una consulta liviana (`SELECT 1`).
 

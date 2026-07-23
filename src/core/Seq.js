@@ -172,7 +172,9 @@ export class Seq {
 
     for (const definition of definitions) {
       if (!existing.has(definition.tableName) || this._adapter.schemas.has(definition.tableName)) continue;
-      const def = this._adapter.ddl.normalizeDefinition(definition);
+      const def = typeof this._adapter.ddl.introspectDefinition === 'function'
+        ? this._adapter.ddl.introspectDefinition(definition)
+        : this._adapter.ddl.normalizeDefinition(definition);
       this._adapter.ddl._registerSchema(def, { preserveConstraints: true });
     }
   }
@@ -205,19 +207,33 @@ export class Seq {
   async sync(options = {}) {
     const { force = false, alter = false } = options;
     const result = { created: [], existing: [], altered: [], dropped: [] };
-    const existingTables = await this._adapter.ddl.listTables();
+    const existingTables = new Set(await this._adapter.ddl.listTables());
+    const definitions = [
+      ...this._registry.all().map(modelClass => this._buildTableDefinition(modelClass)),
+      ...this._buildJunctionTables().map(assoc => this._buildJunctionTableDefinition(assoc))
+    ];
+    const uniqueDefinitions = [...new Map(definitions.map(definition => [definition.tableName, definition])).values()];
+    const orderedDefinitions = this._orderTableDefinitions(uniqueDefinitions);
 
-    for (const modelClass of this._registry.all()) {
-      const definition = this._buildTableDefinition(modelClass);
+    if (force) {
+      for (const definition of [...orderedDefinitions].reverse()) {
+        if (!existingTables.has(definition.tableName)) continue;
+        await this._adapter.ddl.dropTable(definition.tableName);
+        result.dropped.push(definition.tableName);
+      }
+      for (const definition of orderedDefinitions) {
+        await this._adapter.ddl.createTable(definition);
+        result.created.push(definition.tableName);
+      }
+      this._log('info', 'Sync complete');
+      return result;
+    }
+
+    for (const definition of orderedDefinitions) {
       const tableName = definition.tableName;
 
-      if (existingTables.includes(tableName)) {
-        if (force) {
-          await this._adapter.ddl.dropTable(tableName);
-          await this._adapter.ddl.createTable(definition);
-          result.dropped.push(tableName);
-          result.created.push(tableName);
-        } else if (alter) {
+      if (existingTables.has(tableName)) {
+        if (alter) {
           const altered = await this._adapter.ddl.alterTable(tableName, definition);
           if (altered) {
             result.altered.push(tableName);
@@ -233,26 +249,29 @@ export class Seq {
       }
     }
 
-    const junctions = this._buildJunctionTables();
-    for (const assoc of junctions) {
-      const through = this._getAssociationThroughTable(assoc);
-      if (existingTables.includes(through)) {
-        if (force) {
-          await this._adapter.ddl.dropTable(through);
-          await this._adapter.ddl.createTable(this._buildJunctionTableDefinition(assoc));
-          result.dropped.push(through);
-          result.created.push(through);
-        } else {
-          result.existing.push(through);
-        }
-      } else {
-        await this._adapter.ddl.createTable(this._buildJunctionTableDefinition(assoc));
-        result.created.push(through);
-      }
-    }
-
     this._log('info', 'Sync complete');
     return result;
+  }
+
+  _orderTableDefinitions(definitions) {
+    const byName = new Map(definitions.map(definition => [definition.tableName, definition]));
+    const visited = new Set();
+    const visiting = new Set();
+    const ordered = [];
+    const visit = definition => {
+      if (visited.has(definition.tableName)) return;
+      if (visiting.has(definition.tableName)) return;
+      visiting.add(definition.tableName);
+      for (const fk of definition.foreignKeys || []) {
+        const dependency = byName.get(fk.references.table);
+        if (dependency) visit(dependency);
+      }
+      visiting.delete(definition.tableName);
+      visited.add(definition.tableName);
+      ordered.push(definition);
+    };
+    for (const definition of definitions) visit(definition);
+    return ordered;
   }
 
   /**
@@ -268,7 +287,11 @@ export class Seq {
       await this._adapter.tcl.commit(transaction);
       return result;
     } catch (error) {
-      await this._adapter.tcl.rollback(transaction);
+      try {
+        await this._adapter.tcl.rollback(transaction);
+      } catch (rollbackError) {
+        error.rollbackError = rollbackError;
+      }
       throw error;
     }
   }
@@ -584,7 +607,9 @@ export class Seq {
     if (value === null || typeof value !== 'object') return value;
     let output;
     try {
-      output = JSON.stringify(value);
+      output = JSON.stringify(value, (key, nestedValue) =>
+        /password|passwd|token|secret|api[_-]?key/i.test(key) ? '[REDACTED]' : nestedValue
+      );
     } catch {
       output = String(value);
     }

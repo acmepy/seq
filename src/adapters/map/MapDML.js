@@ -2,6 +2,7 @@ import { AdapterError } from '../../core/errors/AdapterError.js';
 import { ValidationError } from '../../core/errors/ValidationError.js';
 import { clone } from '../../utils/clone.js';
 import { DMLAbstract } from '../abstract/DMLAbstract.js';
+import { loadIncludes } from '../../utils/include.js';
 
 /**
  * DML operations for the MapAdapter.
@@ -39,6 +40,7 @@ export class MapDML extends DMLAbstract {
    * @returns {Promise<import('../../core/Model.js').Model>}
    */
   async insert(model, values, options = {}) {
+    this._assertTransaction(options);
     const tableName = this._getTableName(model);
     const table = this._adapter.database.get(tableName);
     const schema = this._adapter.schemas.get(tableName);
@@ -50,29 +52,16 @@ export class MapDML extends DMLAbstract {
     if (schema.autoIncrement) {
       const seq = this._adapter.sequences.get(tableName) || 1;
       colRecord[schema.autoIncrement] = seq;
-      this._adapter.sequences.set(tableName, seq + 1);
     }
 
-    for (const [attrName, colDef] of Object.entries(schema.columns)) {
+    this._applyDefaults(colRecord, schema);
+    for (const [attrName] of Object.entries(schema.columns)) {
       const colName = schema.attrToColumn[attrName] || attrName;
       if (!(colName in colRecord) || colRecord[colName] === undefined) {
-        if (colDef.defaultValue !== undefined) {
-          colRecord[colName] = typeof colDef.defaultValue === 'function'
-            ? colDef.defaultValue()
-            : colDef.defaultValue;
-        } else {
-          colRecord[colName] = null;
-        }
+        colRecord[colName] = null;
       }
     }
-
-    if (schema.timestamps) {
-      const now = new Date();
-      const createdCol = schema.attrToColumn[schema.createdAt] || schema.createdAt;
-      const updatedCol = schema.attrToColumn[schema.updatedAt] || schema.updatedAt;
-      if (!colRecord[createdCol]) colRecord[createdCol] = now;
-      if (!colRecord[updatedCol])  colRecord[updatedCol] = now;
-    }
+    this._applyTimestamps(colRecord, schema);
 
     this._validateRecord(colRecord, schema, model.modelName);
 
@@ -95,6 +84,7 @@ export class MapDML extends DMLAbstract {
     } else {
       table.set(table.size, storedRecord);
     }
+    if (schema.autoIncrement) this._adapter.sequences.set(tableName, colRecord[schema.autoIncrement] + 1);
 
     const attrRecord = this._toAttrNames(colRecord, schema);
     return new model(attrRecord, { _isNew: false });
@@ -108,9 +98,16 @@ export class MapDML extends DMLAbstract {
    * @returns {Promise<import('../../core/Model.js').Model[]>}
    */
   async bulkInsert(model, records, options = {}) {
+    this._assertTransaction(options);
+    const snapshot = this._snapshotState();
     const results = [];
-    for (const record of records) results.push(await this.insert(model, record, options));
-    return results;
+    try {
+      for (const record of records) results.push(await this.insert(model, record, options));
+      return results;
+    } catch (error) {
+      this._restoreState(snapshot);
+      throw error;
+    }
   }
 
   /**
@@ -121,7 +118,10 @@ export class MapDML extends DMLAbstract {
    * @returns {Promise<import('../../core/Model.js').Model|null>}
    */
   async selectAll(model, options = {}) {
-    return this._select(model, options);
+    this._assertTransaction(options);
+    let instances = await this._select(model, options);
+    if (options.include?.length) instances = await loadIncludes(instances, options.include, model, this, options);
+    return instances;
   }
 
   /**
@@ -199,6 +199,7 @@ export class MapDML extends DMLAbstract {
    * @returns {Promise<number>}
    */
   async count(model, options = {}) {
+    this._assertTransaction(options);
     const tableName = this._getTableName(model);
     const table = this._adapter.database.get(tableName);
     const schema = this._adapter.schemas.get(tableName);
@@ -227,6 +228,8 @@ export class MapDML extends DMLAbstract {
    * @returns {Promise<import('../../core/Model.js').Model[]>}
    */
   async update(model, values, options = {}) {
+    this._assertTransaction(options);
+    const snapshot = this._snapshotState();
     const tableName = this._getTableName(model);
     const table = this._adapter.database.get(tableName);
     const schema = this._adapter.schemas.get(tableName);
@@ -247,7 +250,8 @@ export class MapDML extends DMLAbstract {
       }
     }
 
-    for (const { key, record } of toUpdate) {
+    try {
+      for (const { key, record } of toUpdate) {
       for (const [colName, value] of Object.entries(colValues)) {
         record[colName] = value;
       }
@@ -257,6 +261,12 @@ export class MapDML extends DMLAbstract {
         record[updatedCol] = now;
       }
 
+      const newKey = schema.primaryKey ? record[schema.primaryKey] : key;
+      if (newKey !== key && table.has(newKey)) {
+        throw new ValidationError(`Duplicate primary key value "${newKey}" for model "${model.modelName}"`, {
+          code: 'SEQ_VALIDATION_DUPLICATE_PK'
+        });
+      }
       this._checkUniqueConstraint(tableName, schema, record, key);
       this._checkForeignKeyConstraint(schema, record);
       this._handleCascadeOnUpdate(model, schema, record, key);
@@ -267,9 +277,16 @@ export class MapDML extends DMLAbstract {
 
       const attrRecord = schema ? this._toAttrNames(clone(record), schema) : clone(record);
       updatedInstances.push(new model(attrRecord, { _isNew: false }));
+      if (newKey !== key) {
+        table.delete(key);
+        table.set(newKey, record);
+      }
+      }
+      return updatedInstances;
+    } catch (error) {
+      this._restoreState(snapshot);
+      throw error;
     }
-
-    return updatedInstances;
   }
 
   /**
@@ -279,6 +296,8 @@ export class MapDML extends DMLAbstract {
    * @returns {Promise<number>}
    */
   async delete(model, options = {}) {
+    this._assertTransaction(options);
+    const snapshot = this._snapshotState();
     const tableName = this._getTableName(model);
     const table = this._adapter.database.get(tableName);
     const schema = this._adapter.schemas.get(tableName);
@@ -297,13 +316,19 @@ export class MapDML extends DMLAbstract {
       }
     }
 
-    for (const key of keysToDelete) {
-      this._handleCascadeOnDelete(model, schema, key);
-      table.delete(key);
-      count++;
+    try {
+      for (const key of keysToDelete) {
+        const record = table.get(key);
+        const deletedPkValue = schema.primaryKey ? record[schema.primaryKey] : key;
+        this._handleCascadeOnDelete(model, schema, deletedPkValue);
+        table.delete(key);
+        count++;
+      }
+      return count;
+    } catch (error) {
+      this._restoreState(snapshot);
+      throw error;
     }
-
-    return count;
   }
 
   /**
@@ -313,6 +338,7 @@ export class MapDML extends DMLAbstract {
    * @returns {Promise<void>}
    */
   async truncate(model, options = {}) {
+    this._assertTransaction(options);
     const tableName = this._getTableName(model);
     const table = this._adapter.database.get(tableName);
     table.clear();
@@ -439,5 +465,18 @@ export class MapDML extends DMLAbstract {
         }
       }
     }
+  }
+
+  _snapshotState() {
+    const database = new Map();
+    for (const [tableName, table] of this._adapter.database) {
+      database.set(tableName, new Map([...table].map(([key, record]) => [key, clone(record)])));
+    }
+    return { database, sequences: new Map(this._adapter.sequences) };
+  }
+
+  _restoreState(snapshot) {
+    this._adapter.database = snapshot.database;
+    this._adapter.sequences = snapshot.sequences;
   }
 }

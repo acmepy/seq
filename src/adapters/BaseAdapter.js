@@ -19,6 +19,7 @@ export class BaseAdapter {
     this.dml = null;
     this.dcl = null;
     this.tcl = null;
+    this._activeTransaction = null;
   }
 
   /**
@@ -71,7 +72,10 @@ export class BaseAdapter {
    * @returns {string}
    */
   _quoteIdentifier(name) {
-    return `"${name}"`;
+    if (typeof name !== 'string' || name.length === 0 || name.includes('\0')) {
+      throw new TypeError('SQL identifiers must be non-empty strings without null bytes');
+    }
+    return `"${name.replaceAll('"', '""')}"`;
   }
 
   /**
