@@ -13,6 +13,8 @@ coverage/
 .nyc_output/
 dist/
 build/
+examples/*.sqlite
+examples/*.sqlite-*
 
 # Environment files
 .env

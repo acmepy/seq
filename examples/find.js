@@ -1,18 +1,30 @@
 import { Seq, SQLiteAdapter, Op } from '../src/index.js';
 import { User } from './models/User.js';
 import { Task } from './models/Task.js';
+import { fileURLToPath } from 'node:url';
 
-const adapter = new SQLiteAdapter({ database: ':memory:' });
+const databasePath = fileURLToPath(new URL('./find.sqlite', import.meta.url));
+const adapter = new SQLiteAdapter({ database: databasePath });
 await adapter.connect();
 
 const seq = new Seq({
   adapter,
   models: [User, Task],
-  logging: console.log
+  naming: {
+    tables: "snake_case",
+    columns: "snake_case",
+  },
+  logging: {
+    info: console.log,
+    trace: console.log,
+    warn: console.log,
+    error: console.log,
+  },
 });
 
 await seq.authenticate();
-await seq.sync();
+//await seq.sync({ force: true });
+console.log(`Using SQLite database: ${databasePath}`);
 
 // --- Seed data ---
 const ana = await User.create({ name: 'Ana', email: 'ana@example.com' });
