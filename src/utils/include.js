@@ -52,6 +52,22 @@ export function resolveIncludeAlias(include, model) {
   return include.model.modelName.toLowerCase() + 's';
 }
 
+export function buildIncludeSqlAliasMap(includes, model, dml) {
+  const used = new Set();
+  const parentAlias = model.alias || dml._getTableName(model);
+  if (parentAlias) used.add(parentAlias);
+
+  const aliases = new Map();
+  for (const inc of includes) {
+    if (!inc.model) continue;
+    const { tableName, alias: targetAlias } = dml._schema(inc.model);
+    const preferredAlias = targetAlias || inc.model.alias || tableName;
+    const sqlAlias = _uniqueAlias(preferredAlias, used, inc.as || tableName);
+    aliases.set(inc, sqlAlias);
+  }
+  return aliases;
+}
+
 /**
  * Loads eager-loading includes onto an array of model instances.
  * Uses separate queries with WHERE IN for efficiency.
@@ -107,6 +123,26 @@ export function resolveAssociation(model, include) {
   const candidates = [...new Set(Object.values(model.associations))]
     .filter(association => association?.target === include.model);
   return candidates.length === 1 ? candidates[0] : (model.associations[include.model.modelName] || null);
+}
+
+function _uniqueAlias(preferred, used, fallback) {
+  const base = preferred || fallback;
+  if (!used.has(base)) {
+    used.add(base);
+    return base;
+  }
+  if (fallback && fallback !== base && !used.has(fallback)) {
+    used.add(fallback);
+    return fallback;
+  }
+  let index = 2;
+  let alias = `${base}_${index}`;
+  while (used.has(alias)) {
+    index += 1;
+    alias = `${base}_${index}`;
+  }
+  used.add(alias);
+  return alias;
 }
 
 function _definedValues(items, getValue) {
@@ -307,7 +343,7 @@ function _trimProjection(instances, attributes) {
  * @param {import('../adapters/abstract/DMLAbstract.js').DMLAbstract} dml
  * @returns {import('../core/Model.js').Model[]}
  */
-export function processJoinedRows(rows, model, includes, dml) {
+export function processJoinedRows(rows, model, includes, dml, includeSqlAliases = buildIncludeSqlAliasMap(includes, model, dml)) {
   if (rows.length === 0) return [];
 
   const parentAlias = model.alias;
@@ -320,7 +356,7 @@ export function processJoinedRows(rows, model, includes, dml) {
     if (!inc.model) continue;
     const propertyAlias = resolveIncludeAlias(inc, model);
     const { schema: incSchema, alias: incSqlAlias } = dml._schema(inc.model);
-    const sqlAlias = inc.as || incSqlAlias || dml._getTableName(inc.model);
+    const sqlAlias = includeSqlAliases.get(inc) || incSqlAlias || dml._getTableName(inc.model);
     const assoc = resolveAssociation(model, inc);
     includeLookup.set(sqlAlias, {
       propertyAlias,

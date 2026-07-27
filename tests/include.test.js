@@ -2,7 +2,7 @@ import { describe, it, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { Seq, Model, DataTypes } from '../src/index.js';
 import { SQLiteAdapter } from '../src/adapters/sqlite/SQLiteAdapter.js';
-import { normalizeInclude, resolveIncludeAlias, resolveEager } from '../src/utils/include.js';
+import { buildIncludeSqlAliasMap, normalizeInclude, resolveIncludeAlias, resolveEager } from '../src/utils/include.js';
 
 describe('Aliases & Include', () => {
   let seq, adapter, User, Task, Profile, Role, Permission;
@@ -179,6 +179,52 @@ describe('Aliases & Include', () => {
       const { schema, alias } = seq.adapter.dml._schema(User);
       const order = seq.adapter.dml._buildOrderBy([['name', 'ASC']], schema, alias);
       assert.ok(order.includes('"u"."name" ASC'));
+    });
+
+    it('uses model aliases for eager SQL separately from include property aliases', async () => {
+      class _RolePermission extends Model {}
+      _RolePermission.init(
+        {
+          id: { type: DataTypes.INTEGER, primaryKey: true, autoIncrement: true },
+          permissionId: { type: DataTypes.INTEGER, allowNull: false, field: 'permission_id' },
+          active: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: true },
+        },
+        { modelName: 'RolePermission', tableName: 'role_permission', timestamps: false }
+      );
+
+      class _Permission extends Model {}
+      _Permission.init(
+        {
+          id: { type: DataTypes.INTEGER, primaryKey: true, autoIncrement: true },
+          permission: { type: DataTypes.STRING(100), allowNull: false },
+          active: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: true },
+        },
+        { modelName: 'Permission', tableName: 'permission', timestamps: false }
+      );
+
+      _RolePermission.belongsTo(_Permission, { foreignKey: 'permissionId', as: 'permission' });
+
+      const localSeq = new Seq({
+        adapter: new SQLiteAdapter({ database: ':memory:' }),
+        models: [_RolePermission, _Permission],
+        logging: false,
+      });
+      await localSeq.init();
+      await localSeq.sync();
+
+      try {
+        const include = normalizeInclude({ model: _Permission, as: 'permission', where: { active: true } });
+        const { schema, alias } = localSeq.adapter.dml._schema(_RolePermission);
+        const sqlAliases = buildIncludeSqlAliasMap(include, _RolePermission, localSeq.adapter.dml);
+        const select = localSeq.adapter.dml._buildQualifiedSelect(_RolePermission, schema, alias, include, sqlAliases);
+        const join = localSeq.adapter.dml._buildJoinClause(include, _RolePermission, alias, resolveIncludeAlias, sqlAliases);
+
+        assert.ok(select.includes('"p"."permission" AS "p.permission"'));
+        assert.ok(join.sql.includes('JOIN "permission" AS "p"'));
+        assert.equal(join.sql.includes('AS "permission"'), false);
+      } finally {
+        await localSeq.close();
+      }
     });
   });
 

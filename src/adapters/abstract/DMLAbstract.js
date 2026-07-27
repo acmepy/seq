@@ -3,7 +3,7 @@ import { AdapterError } from '../../core/errors/AdapterError.js';
 import { ValidationError } from '../../core/errors/ValidationError.js';
 import { Op } from '../../operators.js';
 import { resolveWhereValue } from '../../utils/where.js';
-import { loadIncludes, processJoinedRows, resolveIncludeAlias, resolveEager, resolveAssociation } from '../../utils/include.js';
+import { buildIncludeSqlAliasMap, loadIncludes, processJoinedRows, resolveIncludeAlias, resolveEager, resolveAssociation } from '../../utils/include.js';
 
 /**
  * Base DML abstract.
@@ -279,7 +279,7 @@ export class DMLAbstract extends BaseAbstract {
    * @param {object[]} includes - Normalized include descriptors
    * @returns {string}
    */
-  _buildQualifiedSelect(model, schema, alias, includes) {
+  _buildQualifiedSelect(model, schema, alias, includes, includeSqlAliases = buildIncludeSqlAliasMap(includes, model, this)) {
     const parts = [];
     const aliasPrefix = alias || this._getTableName(model);
     for (const [attrName, colDef] of Object.entries(schema.columns || {})) {
@@ -288,8 +288,8 @@ export class DMLAbstract extends BaseAbstract {
     }
     for (const inc of includes) {
       if (!inc.model) continue;
-      const { schema: incSchema, alias: incAlias } = this._schema(inc.model);
-      const incAliasPrefix = inc.as || incAlias || this._getTableName(inc.model);
+      const { schema: incSchema } = this._schema(inc.model);
+      const incAliasPrefix = includeSqlAliases.get(inc) || this._getTableName(inc.model);
       const selected = Array.isArray(inc.attributes) && inc.attributes.length > 0
         ? new Set([...inc.attributes, inc.model.primaryKeyAttribute || 'id'])
         : null;
@@ -310,7 +310,7 @@ export class DMLAbstract extends BaseAbstract {
    * @param {function} resolveIncludeAliasFn - resolveIncludeAlias function
    * @returns {{ sql: string, params: *[] }}
    */
-  _buildJoinClause(includes, model, parentAlias, resolveIncludeAliasFn) {
+  _buildJoinClause(includes, model, parentAlias, resolveIncludeAliasFn, includeSqlAliases = buildIncludeSqlAliasMap(includes, model, this)) {
     let sql = '';
     const params = [];
     const { schema: parentSchema } = this._schema(model);
@@ -318,8 +318,8 @@ export class DMLAbstract extends BaseAbstract {
       if (!inc.model) continue;
       const assoc = resolveAssociation(model, inc);
       if (!assoc) continue;
-      const { tableName: targetTable, schema: targetSchema, alias: targetAlias } = this._schema(inc.model);
-      const joinAlias = inc.as || targetAlias || targetTable;
+      const { tableName: targetTable, schema: targetSchema } = this._schema(inc.model);
+      const joinAlias = includeSqlAliases.get(inc) || targetTable;
       const joinType = inc.required ? 'INNER JOIN' : 'LEFT JOIN';
       const fkAttr = assoc.foreignKey;
 
@@ -453,10 +453,12 @@ export class DMLAbstract extends BaseAbstract {
     }
     let sql;
     const params = [];
+    let eagerIncludeSqlAliases = null;
     if (eagerIncludes.length > 0) {
-      const qualifiedSelect = this._buildQualifiedSelect(model, schema, alias, eagerIncludes);
+      eagerIncludeSqlAliases = buildIncludeSqlAliasMap(eagerIncludes, model, this);
+      const qualifiedSelect = this._buildQualifiedSelect(model, schema, alias, eagerIncludes, eagerIncludeSqlAliases);
       sql = `SELECT ${qualifiedSelect} FROM ${this._q(tableName)}` + (alias ? ` AS ${this._q(alias)}` :``)
-      const joins = this._buildJoinClause(eagerIncludes, model, alias, resolveIncludeAlias);
+      const joins = this._buildJoinClause(eagerIncludes, model, alias, resolveIncludeAlias, eagerIncludeSqlAliases);
       sql += joins.sql;
       params.push(...joins.params);
     } else {
@@ -471,7 +473,7 @@ export class DMLAbstract extends BaseAbstract {
     const rows = await this._executeQueryAll(sql, params);
     let instances;
     if (eagerIncludes.length > 0) {
-      instances = processJoinedRows(rows, model, eagerIncludes, this);
+      instances = processJoinedRows(rows, model, eagerIncludes, this, eagerIncludeSqlAliases);
     } else {
       instances = this._mapRows(rows, model, schema, queryOptions);
     }
