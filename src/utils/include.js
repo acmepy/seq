@@ -9,10 +9,10 @@ export function normalizeInclude(include) {
   const arr = Array.isArray(include) ? include : [include];
   return arr.map(item => {
     if (typeof item === 'function') {
-      return { model: item, as: null, attributes: null, where: null, eager: null };
+      return { model: item, as: null, attributes: null, where: null, eager: null, include: [] };
     }
     if (typeof item === 'string') {
-      return { model: null, as: item, attributes: null, where: null, eager: null };
+      return { model: null, as: item, attributes: null, where: null, eager: null, include: [] };
     }
     return {
       model: item.model || null,
@@ -21,6 +21,7 @@ export function normalizeInclude(include) {
       where: item.where || null,
       eager: item.eager !== undefined ? item.eager : null,
       required: item.required === true,
+      include: item.include ? normalizeInclude(item.include) : [],
     };
   });
 }
@@ -52,20 +53,25 @@ export function resolveIncludeAlias(include, model) {
   return include.model.modelName.toLowerCase() + 's';
 }
 
-export function buildIncludeSqlAliasMap(includes, model, dml) {
+export function buildIncludeSqlAliasMap(includes, model, dml, globalEager = false) {
   const used = new Set();
   const parentAlias = model.alias || dml._getTableName(model);
   if (parentAlias) used.add(parentAlias);
 
   const aliases = new Map();
-  for (const inc of includes) {
+  _addIncludeSqlAliases(includes, aliases, used, dml, globalEager);
+  return aliases;
+}
+
+function _addIncludeSqlAliases(includes, aliases, used, dml, globalEager) {
+  for (const inc of includes || []) {
     if (!inc.model) continue;
     const { tableName, alias: targetAlias } = dml._schema(inc.model);
     const preferredAlias = targetAlias || inc.model.alias || tableName;
     const sqlAlias = _uniqueAlias(preferredAlias, used, inc.as || tableName);
     aliases.set(inc, sqlAlias);
+    _addIncludeSqlAliases(eagerNestedIncludes(inc, globalEager), aliases, used, dml, globalEager);
   }
-  return aliases;
 }
 
 /**
@@ -115,6 +121,36 @@ export async function loadIncludes(instances, includes, model, dml, queryOptions
     const value = instance.getDataValue(resolveIncludeAlias(inc, model));
     return Array.isArray(value) ? value.length > 0 : value !== null && value !== undefined;
   }));
+}
+
+export async function loadNestedLazyIncludes(instances, includes, model, dml, queryOptions = {}) {
+  const globalEager = queryOptions.eager ?? dml._adapter.eager ?? false;
+  for (const inc of includes || []) {
+    if (!inc.model || !inc.include?.length) continue;
+    let children = _attachedInstances(instances, inc, model);
+    if (children.length === 0) continue;
+
+    const lazyIncludes = lazyNestedIncludes(inc, globalEager);
+    if (lazyIncludes.length > 0) {
+      children = await loadIncludes(children, lazyIncludes, inc.model, dml, queryOptions);
+      _retainAttachedInstances(instances, inc, model, children);
+    }
+
+    const eagerIncludes = eagerNestedIncludes(inc, globalEager);
+    if (eagerIncludes.length > 0) {
+      children = await loadNestedLazyIncludes(children, eagerIncludes, inc.model, dml, queryOptions);
+      _retainAttachedInstances(instances, inc, model, children);
+    }
+  }
+  return instances;
+}
+
+export function eagerNestedIncludes(include, globalEager = false) {
+  return (include.include || []).filter(inc => resolveEager(inc, globalEager));
+}
+
+export function lazyNestedIncludes(include, globalEager = false) {
+  return (include.include || []).filter(inc => !resolveEager(inc, globalEager));
 }
 
 export function resolveAssociation(model, include) {
@@ -189,14 +225,14 @@ async function _loadHasMany(instances, inc, assoc, alias, dml, queryOptions) {
     return;
   }
 
-  const children = await _selectInChunks(dml, target, fkAttr, parentIds, inc, queryOptions, [fkAttr]);
+  const children = await _selectInChunks(dml, target, fkAttr, parentIds, inc, queryOptions, _requiredAttributes(inc, target, [fkAttr]));
   const childrenByFK = _groupBy(children, child => child.getDataValue(fkAttr));
 
   for (const instance of instances) {
     const pkVal = instance.getDataValue(parentPK);
     instance.setDataValue(alias, childrenByFK.get(pkVal) || []);
   }
-  _trimProjection(children, inc.attributes);
+  _trimProjection(children, inc.attributes, inc.include, target);
 }
 
 async function _loadHasOne(instances, inc, assoc, alias, dml, queryOptions) {
@@ -213,14 +249,14 @@ async function _loadHasOne(instances, inc, assoc, alias, dml, queryOptions) {
     return;
   }
 
-  const children = await _selectInChunks(dml, target, fkAttr, parentIds, inc, queryOptions, [fkAttr]);
+  const children = await _selectInChunks(dml, target, fkAttr, parentIds, inc, queryOptions, _requiredAttributes(inc, target, [fkAttr]));
   const childByFK = _indexBy(children, child => child.getDataValue(fkAttr));
 
   for (const instance of instances) {
     const pkVal = instance.getDataValue(parentPK);
     instance.setDataValue(alias, childByFK.get(pkVal) || null);
   }
-  _trimProjection(children, inc.attributes);
+  _trimProjection(children, inc.attributes, inc.include, target);
 }
 
 async function _loadBelongsTo(instances, inc, assoc, alias, dml, queryOptions) {
@@ -237,14 +273,14 @@ async function _loadBelongsTo(instances, inc, assoc, alias, dml, queryOptions) {
     return;
   }
 
-  const targets = await _selectInChunks(dml, target, targetPK, fkValues, inc, queryOptions, [targetPK]);
+  const targets = await _selectInChunks(dml, target, targetPK, fkValues, inc, queryOptions, _requiredAttributes(inc, target, [targetPK]));
   const targetByPK = _indexBy(targets, target => target.getDataValue(targetPK));
 
   for (const instance of instances) {
     const fkVal = instance.getDataValue(fkAttr);
     instance.setDataValue(alias, targetByPK.get(fkVal) || null);
   }
-  _trimProjection(targets, inc.attributes);
+  _trimProjection(targets, inc.attributes, inc.include, target);
 }
 
 async function _loadBelongsToMany(instances, inc, assoc, alias, dml, queryOptions) {
@@ -286,7 +322,7 @@ async function _loadBelongsToMany(instances, inc, assoc, alias, dml, queryOption
     return;
   }
 
-  const targets = await _selectInChunks(dml, target, targetPK, targetIds, inc, queryOptions, [targetPK]);
+  const targets = await _selectInChunks(dml, target, targetPK, targetIds, inc, queryOptions, _requiredAttributes(inc, target, [targetPK]));
   const targetByPK = _indexBy(targets, target => target.getDataValue(targetPK));
 
   for (const instance of instances) {
@@ -297,12 +333,17 @@ async function _loadBelongsToMany(instances, inc, assoc, alias, dml, queryOption
       .filter(Boolean);
     instance.setDataValue(alias, matching);
   }
-  _trimProjection(targets, inc.attributes);
+  _trimProjection(targets, inc.attributes, inc.include, target);
 }
 
 function _withRequiredAttributes(attributes, required) {
   if (!Array.isArray(attributes) || attributes.length === 0) return undefined;
   return [...new Set([...attributes, ...required])];
+}
+
+function _requiredAttributes(include, model, attributes) {
+  if (!include.include?.length) return attributes;
+  return [...new Set([...attributes, model.primaryKeyAttribute || 'id'])];
 }
 
 function _chunks(values, size = 500) {
@@ -318,18 +359,47 @@ async function _selectInChunks(dml, model, field, values, inc, queryOptions, req
     return dml.selectAll(model, {
       where,
       attributes: _withRequiredAttributes(inc.attributes, requiredAttributes),
+      include: inc.include || [],
+      eager: queryOptions.eager,
       transaction: queryOptions.transaction
     });
   }));
   return rows.flat();
 }
 
-function _trimProjection(instances, attributes) {
+function _trimProjection(instances, attributes, includes = [], model = null) {
   if (!Array.isArray(attributes) || attributes.length === 0) return;
   const selected = new Set(attributes);
+  for (const include of includes || []) {
+    if (include.model && model) selected.add(resolveIncludeAlias(include, model));
+  }
   for (const instance of instances) {
     for (const key of Object.keys(instance.dataValues)) {
       if (!selected.has(key)) delete instance.dataValues[key];
+    }
+  }
+}
+
+function _attachedInstances(instances, inc, model) {
+  const alias = resolveIncludeAlias(inc, model);
+  const attached = [];
+  for (const instance of instances) {
+    const value = instance.getDataValue(alias);
+    if (Array.isArray(value)) attached.push(...value);
+    else if (value) attached.push(value);
+  }
+  return attached;
+}
+
+function _retainAttachedInstances(instances, inc, model, retained) {
+  const retainedSet = new Set(retained);
+  const alias = resolveIncludeAlias(inc, model);
+  for (const instance of instances) {
+    const value = instance.getDataValue(alias);
+    if (Array.isArray(value)) {
+      instance.setDataValue(alias, value.filter(child => retainedSet.has(child)));
+    } else if (value && !retainedSet.has(value)) {
+      instance.setDataValue(alias, null);
     }
   }
 }
@@ -343,35 +413,21 @@ function _trimProjection(instances, attributes) {
  * @param {import('../adapters/abstract/DMLAbstract.js').DMLAbstract} dml
  * @returns {import('../core/Model.js').Model[]}
  */
-export function processJoinedRows(rows, model, includes, dml, includeSqlAliases = buildIncludeSqlAliasMap(includes, model, dml)) {
+export function processJoinedRows(rows, model, includes, dml, includeSqlAliases = buildIncludeSqlAliasMap(includes, model, dml), globalEager = false) {
   if (rows.length === 0) return [];
 
   const parentAlias = model.alias;
   const { schema: parentSchema } = dml._schema(model);
   const parentPK = model.primaryKeyAttribute || 'id';
   const parentPKCol = parentPK;
-
-  const includeLookup = new Map();
-  for (const inc of includes) {
-    if (!inc.model) continue;
-    const propertyAlias = resolveIncludeAlias(inc, model);
-    const { schema: incSchema, alias: incSqlAlias } = dml._schema(inc.model);
-    const sqlAlias = includeSqlAliases.get(inc) || incSqlAlias || dml._getTableName(inc.model);
-    const assoc = resolveAssociation(model, inc);
-    includeLookup.set(sqlAlias, {
-      propertyAlias,
-      model: inc.model,
-      schema: incSchema,
-      assoc,
-      attributes: inc.attributes,
-    });
-  }
+  const includeNodes = _buildIncludeNodes(includes, model, dml, includeSqlAliases, globalEager);
+  const nodesByAlias = _indexNodesBySqlAlias(includeNodes);
 
   const parentMap = new Map();
 
   for (const row of rows) {
     const parentData = {};
-    const childData = new Map();
+    const aliasData = new Map();
 
     for (const [key, value] of Object.entries(row)) {
       const sepIdx = key.indexOf('.');
@@ -381,69 +437,86 @@ export function processJoinedRows(rows, model, includes, dml, includeSqlAliases 
 
       if (tblAlias === parentAlias) {
         parentData[colName] = value;
-      } else if (includeLookup.has(tblAlias)) {
-        if (!childData.has(tblAlias)) childData.set(tblAlias, {});
-        childData.get(tblAlias)[colName] = value;
+      } else if (nodesByAlias.has(tblAlias)) {
+        if (!aliasData.has(tblAlias)) aliasData.set(tblAlias, {});
+        aliasData.get(tblAlias)[colName] = value;
       }
     }
 
     const pkVal = parentData[parentPKCol];
     if (!parentMap.has(pkVal)) {
-      parentMap.set(pkVal, { parent: parentData, children: new Map() });
+      parentMap.set(pkVal, { raw: parentData, children: new Map() });
     }
     const entry = parentMap.get(pkVal);
-
-    for (const [sqlAlias, rawChild] of childData) {
-      if (!entry.children.has(sqlAlias)) entry.children.set(sqlAlias, []);
-      const childRows = entry.children.get(sqlAlias);
-      const incInfo = includeLookup.get(sqlAlias);
-      const childPK = incInfo.model.primaryKeyAttribute || 'id';
-      const childPKCol = childPK;
-
-      const allNull = Object.values(rawChild).every(v => v === null);
-      if (allNull) continue;
-
-      const childPKVal = rawChild[childPKCol];
-      const exists = childRows.some(r => r[childPKCol] === childPKVal);
-      if (!exists) childRows.push(rawChild);
-    }
+    for (const node of includeNodes) _addJoinedNode(entry, node, aliasData);
   }
 
   const instances = [];
   for (const [, entry] of parentMap) {
-    const attrParent = dml._toAttrNames(entry.parent, parentSchema);
+    const attrParent = dml._toAttrNames(entry.raw, parentSchema);
     const instance = new model(attrParent, { _isNew: false });
-
-    for (const [sqlAlias, incInfo] of includeLookup) {
-      const rawRows = entry.children.get(sqlAlias) || [];
-
-      if (incInfo.assoc?.type === 'belongsTo') {
-        if (rawRows.length > 0) {
-          const attrRow = _pickAttributes(dml._toAttrNames(rawRows[0], incInfo.schema), incInfo.attributes);
-          instance.setDataValue(incInfo.propertyAlias, new incInfo.model(attrRow, { _isNew: false, _partial: !!incInfo.attributes }));
-        } else {
-          instance.setDataValue(incInfo.propertyAlias, null);
-        }
-      } else if (incInfo.assoc?.type === 'hasOne') {
-        if (rawRows.length > 0) {
-          const attrRow = _pickAttributes(dml._toAttrNames(rawRows[0], incInfo.schema), incInfo.attributes);
-          instance.setDataValue(incInfo.propertyAlias, new incInfo.model(attrRow, { _isNew: false, _partial: !!incInfo.attributes }));
-        } else {
-          instance.setDataValue(incInfo.propertyAlias, null);
-        }
-      } else {
-        const childInstances = rawRows.map(r => {
-          const attrRow = _pickAttributes(dml._toAttrNames(r, incInfo.schema), incInfo.attributes);
-          return new incInfo.model(attrRow, { _isNew: false, _partial: !!incInfo.attributes });
-        });
-        instance.setDataValue(incInfo.propertyAlias, childInstances);
-      }
-    }
-
+    _attachJoinedIncludes(instance, entry, includeNodes, dml);
     instances.push(instance);
   }
 
   return instances;
+}
+
+function _buildIncludeNodes(includes, parentModel, dml, includeSqlAliases, globalEager) {
+  return (includes || []).filter(inc => inc.model).map(inc => {
+    const { schema, alias: sqlAlias } = dml._schema(inc.model);
+    return {
+      inc,
+      model: inc.model,
+      schema,
+      sqlAlias: includeSqlAliases.get(inc) || sqlAlias || dml._getTableName(inc.model),
+      propertyAlias: resolveIncludeAlias(inc, parentModel),
+      assoc: resolveAssociation(parentModel, inc),
+      attributes: inc.attributes,
+      children: _buildIncludeNodes(eagerNestedIncludes(inc, globalEager), inc.model, dml, includeSqlAliases, globalEager),
+    };
+  });
+}
+
+function _indexNodesBySqlAlias(nodes, index = new Map()) {
+  for (const node of nodes) {
+    index.set(node.sqlAlias, node);
+    _indexNodesBySqlAlias(node.children, index);
+  }
+  return index;
+}
+
+function _addJoinedNode(parentEntry, node, aliasData) {
+  const raw = aliasData.get(node.sqlAlias);
+  if (!raw || Object.values(raw).every(value => value === null)) return;
+
+  const pkAttr = node.model.primaryKeyAttribute || 'id';
+  const pkValue = raw[pkAttr];
+  if (!parentEntry.children.has(node)) parentEntry.children.set(node, new Map());
+  const childMap = parentEntry.children.get(node);
+  if (!childMap.has(pkValue)) childMap.set(pkValue, { raw, children: new Map() });
+  const childEntry = childMap.get(pkValue);
+
+  for (const childNode of node.children) _addJoinedNode(childEntry, childNode, aliasData);
+}
+
+function _attachJoinedIncludes(instance, entry, nodes, dml) {
+  for (const node of nodes) {
+    const childEntries = [...(entry.children.get(node)?.values() || [])];
+    if (node.assoc?.type === 'belongsTo' || node.assoc?.type === 'hasOne') {
+      const childInstance = childEntries.length > 0 ? _joinedInstance(childEntries[0], node, dml) : null;
+      instance.setDataValue(node.propertyAlias, childInstance);
+    } else {
+      instance.setDataValue(node.propertyAlias, childEntries.map(childEntry => _joinedInstance(childEntry, node, dml)));
+    }
+  }
+}
+
+function _joinedInstance(entry, node, dml) {
+  const attrRow = _pickAttributes(dml._toAttrNames(entry.raw, node.schema), node.attributes);
+  const instance = new node.model(attrRow, { _isNew: false, _partial: !!node.attributes });
+  _attachJoinedIncludes(instance, entry, node.children, dml);
+  return instance;
 }
 
 function _pickAttributes(values, attributes) {

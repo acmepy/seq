@@ -114,8 +114,8 @@ const seq = new Seq({
   models: [User, Task],
   logging: {
     info: console.log,
-    trace: false,
-    warn: false,
+    trace: console.log,
+    warn: console.log,
     error: console.error
   },
   define: {}
@@ -178,7 +178,7 @@ La prioridad de `eager` es: include individual, opcion de query, opcion del adap
 
 ## Logging
 
-Por defecto, `seq` registra mensajes `info` con `console.log` y mensajes `error` con `console.error`. Los niveles `trace` y `warn` vienen desactivados.
+Por defecto, `seq` registra mensajes `info`, `trace` y `warn` con `console.log`, y mensajes `error` con `console.error`. Los logs SQL del adapter SQLite se emiten en `trace`.
 
 ```js
 const seq = new Seq({
@@ -203,7 +203,7 @@ const seq = new Seq({
 });
 ```
 
-Para mantener compatibilidad, `logging: true` activa los defaults y `logging: fn` usa esa funcion como logger de `info`. Los logs SQL del adapter SQLite se emiten en `trace`.
+`logging: true` activa los defaults. Para personalizar handlers se debe pasar un objeto por niveles (`info`, `trace`, `warn`, `error`); cada nivel acepta una funcion o `false`.
 
 La clave `warn` usa la misma convencion que `console.warn` y loggers como `com.acmepy.logger-js`, cuyos metodos reciben primero el origen del mensaje y luego los datos:
 
@@ -515,6 +515,35 @@ await Role.findAll({
     where: { name: 'read' },
     attributes: ['id', 'name'],
     required: true
+  }],
+  eager: true
+});
+```
+
+Los includes pueden anidarse. Por defecto usan la misma estrategia lazy/eager efectiva de la query o del adapter, pero cada nivel puede sobrescribirla con `eager`:
+
+```js
+await User.findAll({
+  include: [{
+    model: Role,
+    include: [{ model: Permission, where: { name: 'read' } }]
+  }],
+  eager: true
+});
+```
+
+Tambien se puede mezclar estrategias por nivel. En este ejemplo `Role` se carga con JOIN y `Permission` con una consulta lazy separada:
+
+```js
+await User.findAll({
+  include: [{
+    model: Role,
+    eager: true,
+    include: [{
+      model: Permission,
+      eager: false,
+      attributes: ['id', 'name']
+    }]
   }],
   eager: true
 });

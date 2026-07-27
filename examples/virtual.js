@@ -7,7 +7,7 @@ await adapter.connect();
 const seq = new Seq({
   adapter,
   models: [User],
-  logging: console.log
+  logging: true
 });
 
 await seq.authenticate();

@@ -1,10 +1,23 @@
-import { Seq, SQLiteAdapter } from '../src/index.js';
+import { Seq, SQLiteAdapter, Model, DataTypes } from '../src/index.js';
 import { User } from './models/User.js';
 import { Task } from './models/Task.js';
 import { Profile } from './models/Profile.js';
 
+class Comment extends Model {}
+Comment.init(
+  {
+    id: { type: DataTypes.INTEGER, primaryKey: true, autoIncrement: true },
+    body: { type: DataTypes.STRING(255), allowNull: false },
+    public: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: true },
+    taskId: { type: DataTypes.INTEGER, allowNull: false },
+  },
+  { modelName: 'Comment', tableName: 'comments', timestamps: false }
+);
+
 User.hasMany(Task, { foreignKey: 'userId', onDelete: 'CASCADE' });
 Task.belongsTo(User, { foreignKey: 'userId' });
+Task.hasMany(Comment, { foreignKey: 'taskId', onDelete: 'CASCADE' });
+Comment.belongsTo(Task, { foreignKey: 'taskId' });
 User.hasOne(Profile, { foreignKey: 'userId', onDelete: 'CASCADE' });
 Profile.belongsTo(User, { foreignKey: 'userId' });
 
@@ -13,8 +26,8 @@ await adapter.connect();
 
 const seq = new Seq({
   adapter,
-  models: [User, Task, Profile],
-  logging: console.log
+  models: [User, Task, Profile, Comment],
+  logging: true
 });
 
 await seq.authenticate();
@@ -29,12 +42,20 @@ await Task.bulkCreate([
   { title: 'Update docs', userId: juan.getDataValue('id'), completed: true }
 ]);
 
+await Comment.bulkCreate([
+  { body: 'FKs should cascade', taskId: 1, public: true },
+  { body: 'Add nested include coverage', taskId: 2, public: true },
+  { body: 'Internal implementation note', taskId: 2, public: false },
+  { body: 'Docs need an eager example', taskId: 3, public: true }
+]);
+
 await Profile.create({ bio: 'Full-stack developer', userId: ana.getDataValue('id') });
 
 console.log('\n--- SQL aliases ---');
 console.log(`  User.alias = "${User.alias}"`);
 console.log(`  Task.alias = "${Task.alias}"`);
 console.log(`  Profile.alias = "${Profile.alias}"`);
+console.log(`  Comment.alias = "${Comment.alias}"`);
 console.log(`  User.hasMany(Task).as = "${User.associations['Task'].as}"`);
 console.log(`  Task.belongsTo(User).as = "${Task.associations['User'].as}"`);
 
@@ -79,11 +100,54 @@ for (const u of usersCompleted) {
   console.log(`  ${u.getDataValue('name')}: ${tasks.length} completed tasks`);
 }
 
+console.log('\n--- Nested include: users with tasks and comments (lazy) ---');
+const usersNestedLazy = await User.findAll({
+  include: [{
+    model: Task,
+    include: Comment
+  }]
+});
+for (const u of usersNestedLazy) {
+  console.log(`  ${u.getDataValue('name')}:`);
+  for (const t of u.getDataValue('tasks')) {
+    console.log(`    - "${t.getDataValue('title')}": ${t.getDataValue('comments').length} comments`);
+  }
+}
+
 console.log('\n--- Eager include (LEFT JOIN, 1 query) ---');
 const usersEager = await User.findAll({ include: Task, eager: true });
 for (const u of usersEager) {
   const tasks = u.getDataValue('tasks');
   console.log(`  ${u.getDataValue('name')}: ${tasks.length} tasks (JOIN)`);
+}
+
+console.log('\n--- Nested eager include: users with tasks and comments (JOINs) ---');
+const usersNestedEager = await User.findAll({
+  include: [{
+    model: Task,
+    include: [{ model: Comment, where: { public: true } }]
+  }],
+  eager: true
+});
+for (const u of usersNestedEager) {
+  const publicComments = u.getDataValue('tasks')
+    .flatMap(t => t.getDataValue('comments'))
+    .map(c => c.getDataValue('body'));
+  console.log(`  ${u.getDataValue('name')}: ${publicComments.length} public comments (JOINs)`);
+}
+
+console.log('\n--- Nested mixed: tasks eager, comments lazy ---');
+const usersNestedMixed = await User.findAll({
+  include: [{
+    model: Task,
+    eager: true,
+    include: [{ model: Comment, eager: false, attributes: ['body'] }]
+  }],
+  eager: true
+});
+for (const u of usersNestedMixed) {
+  const comments = u.getDataValue('tasks').flatMap(t => t.getDataValue('comments'));
+  console.log(`  ${u.getDataValue('name')}: ${comments.length} comments, first=${comments[0]?.getDataValue('body') || 'none'}`);
 }
 
 console.log('\n--- Mixed: global eager, profile lazy ---');

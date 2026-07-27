@@ -23,7 +23,11 @@ describe('Logging levels', () => {
       console.error = originalError;
     }
 
-    assert.deepEqual(logCalls, [['[Seq]', 'ready']]);
+    assert.deepEqual(logCalls, [
+      ['[Seq]', 'ready'],
+      ['[Seq]', 'hidden'],
+      ['[Seq]', 'hidden']
+    ]);
     assert.deepEqual(errorCalls, [['[Seq]', 'failed']]);
   });
 
@@ -37,17 +41,25 @@ describe('Logging levels', () => {
     assert.deepEqual(calls, []);
   });
 
-  it('keeps function logging as an info logger', () => {
-    const calls = [];
-    const seq = new Seq({
-      adapter: new MapAdapter(),
-      logging: (...args) => calls.push(args)
-    });
+  it('does not support function logging', () => {
+    const originalLog = console.log;
+    const logCalls = [];
 
-    seq._log('old style message');
-    seq._log('trace', 'hidden');
+    console.log = (...args) => logCalls.push(args);
 
-    assert.deepEqual(calls, [['[Seq]', 'old style message']]);
+    try {
+      const seq = new Seq({
+        adapter: new MapAdapter(),
+        logging: () => logCalls.push(['custom'])
+      });
+
+      seq._log('old style message');
+      seq._log('trace', 'visible');
+    } finally {
+      console.log = originalLog;
+    }
+
+    assert.deepEqual(logCalls, []);
   });
 
   it('supports per-level logger objects', () => {
@@ -78,7 +90,7 @@ describe('Logging levels', () => {
     const calls = [];
     const seq = new Seq({
       adapter: new MapAdapter(),
-      logging: (...args) => calls.push(args)
+      logging: { info: (...args) => calls.push(args), trace: false, warn: false, error: false }
     });
 
     seq._log('info', 'payload', { name: 'Ana', meta: { role: 'admin' } }, ['one', 'two']);

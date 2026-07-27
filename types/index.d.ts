@@ -79,6 +79,7 @@ export type IncludeOption =
       required?: boolean;
       eager?: boolean;
       attributes?: string[];
+      include?: IncludeOption | IncludeOption[];
     };
 
 export interface QueryOptions {
@@ -107,7 +108,7 @@ export interface BuildOptions {
 export interface SeqOptions {
   adapter: BaseAdapter;
   models?: ModelStatic[];
-  logging?: boolean | Function | Record<string, Function | false>;
+  logging?: boolean | Record<string, Function | false>;
   define?: ModelOptions;
 }
 

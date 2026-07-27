@@ -5,7 +5,7 @@ import { SQLiteAdapter } from '../src/adapters/sqlite/SQLiteAdapter.js';
 import { buildIncludeSqlAliasMap, normalizeInclude, resolveIncludeAlias, resolveEager } from '../src/utils/include.js';
 
 describe('Aliases & Include', () => {
-  let seq, adapter, User, Task, Profile, Role, Permission;
+  let seq, adapter, User, Task, Profile, Comment, Role, Permission;
 
   beforeEach(async () => {
     class _User extends Model {}
@@ -29,6 +29,18 @@ describe('Aliases & Include', () => {
       { modelName: 'Task', tableName: 'tasks', timestamps: false }
     );
     Task = _Task;
+
+    class _Comment extends Model {}
+    _Comment.init(
+      {
+        id: { type: DataTypes.INTEGER, primaryKey: true, autoIncrement: true },
+        body: { type: DataTypes.STRING(255), allowNull: false },
+        public: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: true },
+        taskId: { type: DataTypes.INTEGER, allowNull: false },
+      },
+      { modelName: 'Comment', tableName: 'comments', timestamps: false }
+    );
+    Comment = _Comment;
 
     class _Profile extends Model {}
     _Profile.init(
@@ -64,6 +76,8 @@ describe('Aliases & Include', () => {
     User.hasMany(Task);
     User.hasOne(Profile);
     Task.belongsTo(User);
+    Task.hasMany(Comment);
+    Comment.belongsTo(Task);
     Profile.belongsTo(User);
 
     User.belongsToMany(Role, { through: 'user_roles', foreignKey: 'userId', otherKey: 'roleId' });
@@ -73,7 +87,7 @@ describe('Aliases & Include', () => {
 
     adapter = new SQLiteAdapter({ database: ':memory:' });
     await adapter.connect();
-    seq = new Seq({ adapter, models: [User, Task, Profile, Role, Permission], logging: false });
+    seq = new Seq({ adapter, models: [User, Task, Profile, Comment, Role, Permission], logging: false });
     await seq.init();
     await seq.sync();
 
@@ -82,6 +96,9 @@ describe('Aliases & Include', () => {
     await Task.create({ title: 'Buy milk', userId: 1, completed: false });
     await Task.create({ title: 'Walk dog', userId: 1, completed: true });
     await Task.create({ title: 'Read book', userId: 2, completed: false });
+    await Comment.create({ body: 'remember oat milk', taskId: 1, public: true });
+    await Comment.create({ body: 'private note', taskId: 1, public: false });
+    await Comment.create({ body: 'take the leash', taskId: 2, public: true });
     await Profile.create({ bio: 'Developer', userId: 1 });
   });
 
@@ -255,6 +272,13 @@ describe('Aliases & Include', () => {
       assert.equal(result[0].as, 'todos');
       assert.deepEqual(result[0].where, { completed: true });
     });
+
+    it('normalizes nested includes', () => {
+      const result = normalizeInclude({ model: Task, include: { model: Comment, where: { public: true } } });
+      assert.equal(result[0].include.length, 1);
+      assert.equal(result[0].include[0].model, Comment);
+      assert.deepEqual(result[0].include[0].where, { public: true });
+    });
   });
 
   // ---------------------------------------------------------------------------
@@ -389,6 +413,65 @@ describe('Aliases & Include', () => {
       const ana = users.find(u => u.getDataValue('name') === 'Ana');
       assert.ok(Array.isArray(ana.getDataValue('tasks')));
       assert.ok(ana.getDataValue('profile'));
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // Nested include
+  // ---------------------------------------------------------------------------
+
+  describe('nested include', () => {
+    it('lazy loads nested hasMany associations', async () => {
+      const users = await User.findAll({
+        include: [{ model: Task, include: Comment }],
+      });
+      const ana = users.find(u => u.getDataValue('name') === 'Ana');
+      const tasks = ana.getDataValue('tasks');
+      const buyMilk = tasks.find(task => task.getDataValue('title') === 'Buy milk');
+      const walkDog = tasks.find(task => task.getDataValue('title') === 'Walk dog');
+
+      assert.equal(buyMilk.getDataValue('comments').length, 2);
+      assert.equal(walkDog.getDataValue('comments').length, 1);
+    });
+
+    it('eager loads nested hasMany associations via joins', async () => {
+      const users = await User.findAll({
+        include: [{ model: Task, include: Comment }],
+        eager: true,
+      });
+      const ana = users.find(u => u.getDataValue('name') === 'Ana');
+      const tasks = ana.getDataValue('tasks');
+      const comments = tasks.flatMap(task => task.getDataValue('comments').map(comment => comment.getDataValue('body'))).sort();
+
+      assert.deepEqual(comments, ['private note', 'remember oat milk', 'take the leash']);
+    });
+
+    it('supports eager parent includes with lazy nested includes', async () => {
+      const users = await User.findAll({
+        include: [{ model: Task, eager: true, include: [{ model: Comment, eager: false, where: { public: true } }] }],
+        eager: true,
+      });
+      const ana = users.find(u => u.getDataValue('name') === 'Ana');
+      const comments = ana.getDataValue('tasks')
+        .flatMap(task => task.getDataValue('comments').map(comment => comment.getDataValue('body')))
+        .sort();
+
+      assert.deepEqual(comments, ['remember oat milk', 'take the leash']);
+    });
+
+    it('preserves nested include data when parent include uses attributes', async () => {
+      const users = await User.findAll({
+        include: [{
+          model: Task,
+          attributes: ['title'],
+          include: [{ model: Comment, attributes: ['body'] }],
+        }],
+      });
+      const ana = users.find(u => u.getDataValue('name') === 'Ana');
+      const buyMilk = ana.getDataValue('tasks').find(task => task.getDataValue('title') === 'Buy milk');
+
+      assert.deepEqual(Object.keys(buyMilk.toJSON()).sort(), ['comments', 'title']);
+      assert.deepEqual(buyMilk.getDataValue('comments')[0].toJSON(), { body: 'remember oat milk' });
     });
   });
 
@@ -726,6 +809,15 @@ describe('Aliases & Include', () => {
       assert.equal(ana.getDataValue('tasks').length, 2);
     });
 
+    it('lazy loads nested belongsToMany includes', async () => {
+      const users = await User.findAll({ include: [{ model: Role, include: Permission }] });
+      const ana = users.find(u => u.getDataValue('name') === 'Ana');
+      const adminRole = ana.getDataValue('roles').find(role => role.getDataValue('name') === 'admin');
+      const permissions = adminRole.getDataValue('permissions').map(permission => permission.getDataValue('name')).sort();
+
+      assert.deepEqual(permissions, ['delete', 'read', 'write']);
+    });
+
     it('backward compatibility: findAll without include works', async () => {
       const users = await User.findAll();
       assert.equal(users.length, 2);
@@ -822,6 +914,18 @@ describe('Aliases & Include', () => {
       assert.equal(ana.getDataValue('roles').length, 2);
       assert.ok(Array.isArray(ana.getDataValue('tasks')));
       assert.equal(ana.getDataValue('tasks').length, 2);
+    });
+
+    it('eager loads nested belongsToMany includes', async () => {
+      const users = await User.findAll({
+        include: [{ model: Role, include: Permission }],
+        eager: true,
+      });
+      const ana = users.find(u => u.getDataValue('name') === 'Ana');
+      const adminRole = ana.getDataValue('roles').find(role => role.getDataValue('name') === 'admin');
+      const permissions = adminRole.getDataValue('permissions').map(permission => permission.getDataValue('name')).sort();
+
+      assert.deepEqual(permissions, ['delete', 'read', 'write']);
     });
   });
 });

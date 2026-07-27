@@ -18,7 +18,7 @@ await adapter.connect();
 const seq = new Seq({
   adapter,
   models: [User, Task, Profile, Role, UserRole],
-  logging: console.log
+  logging: true
 });
 
 await seq.authenticate();

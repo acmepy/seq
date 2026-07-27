@@ -593,10 +593,14 @@ export class Seq {
    */
   _normalizeLogging(logging) {
     const disabled = { info: false, trace: false, warn: false, error: false };
-    const defaults = {info: console.log.bind(console), trace: false, warn: false, error: console.error.bind(console)};
+    const defaults = {
+      info: console.log.bind(console),
+      trace: console.log.bind(console),
+      warn: console.log.bind(console),
+      error: console.error.bind(console)
+    };
     if (logging === undefined || logging === true) return { ...defaults };
     if (logging === false || logging === null) return disabled;
-    if (typeof logging === 'function') return { ...defaults, info: logging };
     if (typeof logging === 'object') {
       return {...defaults, ...logging, warn: logging.warn ?? defaults.warn, trace: logging.trace ?? defaults.trace};
     }

@@ -3,7 +3,7 @@ import { AdapterError } from '../../core/errors/AdapterError.js';
 import { ValidationError } from '../../core/errors/ValidationError.js';
 import { Op } from '../../operators.js';
 import { resolveWhereValue } from '../../utils/where.js';
-import { buildIncludeSqlAliasMap, loadIncludes, processJoinedRows, resolveIncludeAlias, resolveEager, resolveAssociation } from '../../utils/include.js';
+import { buildIncludeSqlAliasMap, eagerNestedIncludes, loadIncludes, loadNestedLazyIncludes, processJoinedRows, resolveIncludeAlias, resolveEager, resolveAssociation } from '../../utils/include.js';
 
 /**
  * Base DML abstract.
@@ -279,13 +279,18 @@ export class DMLAbstract extends BaseAbstract {
    * @param {object[]} includes - Normalized include descriptors
    * @returns {string}
    */
-  _buildQualifiedSelect(model, schema, alias, includes, includeSqlAliases = buildIncludeSqlAliasMap(includes, model, this)) {
+  _buildQualifiedSelect(model, schema, alias, includes, includeSqlAliases = buildIncludeSqlAliasMap(includes, model, this), globalEager = false) {
     const parts = [];
     const aliasPrefix = alias || this._getTableName(model);
     for (const [attrName, colDef] of Object.entries(schema.columns || {})) {
       const colName = schema.attrToColumn[attrName] || attrName;
       parts.push(`${this._colRef(colName, alias)} AS ${this._q(`${aliasPrefix}.${attrName}`)}`);
     }
+    this._addQualifiedIncludeSelects(parts, includes, includeSqlAliases, globalEager);
+    return parts.join(', ');
+  }
+
+  _addQualifiedIncludeSelects(parts, includes, includeSqlAliases, globalEager) {
     for (const inc of includes) {
       if (!inc.model) continue;
       const { schema: incSchema } = this._schema(inc.model);
@@ -298,8 +303,8 @@ export class DMLAbstract extends BaseAbstract {
         const colName = incSchema.attrToColumn[attrName] || attrName;
         parts.push(`${this._colRef(colName, incAliasPrefix)} AS ${this._q(`${incAliasPrefix}.${attrName}`)}`);
       }
+      this._addQualifiedIncludeSelects(parts, eagerNestedIncludes(inc, globalEager), includeSqlAliases, globalEager);
     }
-    return parts.join(', ');
   }
 
   /**
@@ -310,7 +315,7 @@ export class DMLAbstract extends BaseAbstract {
    * @param {function} resolveIncludeAliasFn - resolveIncludeAlias function
    * @returns {{ sql: string, params: *[] }}
    */
-  _buildJoinClause(includes, model, parentAlias, resolveIncludeAliasFn, includeSqlAliases = buildIncludeSqlAliasMap(includes, model, this)) {
+  _buildJoinClause(includes, model, parentAlias, resolveIncludeAliasFn, includeSqlAliases = buildIncludeSqlAliasMap(includes, model, this), globalEager = false) {
     let sql = '';
     const params = [];
     const { schema: parentSchema } = this._schema(model);
@@ -364,6 +369,9 @@ export class DMLAbstract extends BaseAbstract {
         }
         sql += ` ${joinType} ${this._q(targetTable)} AS ${this._q(joinAlias)} ON ${onClause}`;
       }
+      const nested = this._buildJoinClause(eagerNestedIncludes(inc, globalEager), inc.model, joinAlias, resolveIncludeAliasFn, includeSqlAliases, globalEager);
+      sql += nested.sql;
+      params.push(...nested.params);
     }
     return { sql, params };
   }
@@ -455,10 +463,10 @@ export class DMLAbstract extends BaseAbstract {
     const params = [];
     let eagerIncludeSqlAliases = null;
     if (eagerIncludes.length > 0) {
-      eagerIncludeSqlAliases = buildIncludeSqlAliasMap(eagerIncludes, model, this);
-      const qualifiedSelect = this._buildQualifiedSelect(model, schema, alias, eagerIncludes, eagerIncludeSqlAliases);
+      eagerIncludeSqlAliases = buildIncludeSqlAliasMap(eagerIncludes, model, this, globalEager);
+      const qualifiedSelect = this._buildQualifiedSelect(model, schema, alias, eagerIncludes, eagerIncludeSqlAliases, globalEager);
       sql = `SELECT ${qualifiedSelect} FROM ${this._q(tableName)}` + (alias ? ` AS ${this._q(alias)}` :``)
-      const joins = this._buildJoinClause(eagerIncludes, model, alias, resolveIncludeAlias, eagerIncludeSqlAliases);
+      const joins = this._buildJoinClause(eagerIncludes, model, alias, resolveIncludeAlias, eagerIncludeSqlAliases, globalEager);
       sql += joins.sql;
       params.push(...joins.params);
     } else {
@@ -473,7 +481,8 @@ export class DMLAbstract extends BaseAbstract {
     const rows = await this._executeQueryAll(sql, params);
     let instances;
     if (eagerIncludes.length > 0) {
-      instances = processJoinedRows(rows, model, eagerIncludes, this, eagerIncludeSqlAliases);
+      instances = processJoinedRows(rows, model, eagerIncludes, this, eagerIncludeSqlAliases, globalEager);
+      instances = await loadNestedLazyIncludes(instances, eagerIncludes, model, this, queryOptions);
     } else {
       instances = this._mapRows(rows, model, schema, queryOptions);
     }

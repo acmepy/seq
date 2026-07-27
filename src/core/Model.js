@@ -334,14 +334,19 @@ export class Model {
     if (options.offset !== undefined && (!Number.isInteger(options.offset) || options.offset < 0)) throw new ValidationOffsetError();
     if (options.attributes !== undefined) this._validateAttributes(options.attributes);
     if (options.include) options.include = normalizeInclude(options.include);
-    for (const include of options.include || []) {
-      if (!include.model) throw new ModelError('include requires a model', { code: 'SEQ_INCLUDE_INVALID_MODEL' });
-      if (include.attributes !== null) include.model._validateAttributes(include.attributes);
-    }
+    this._validateIncludes(options.include || []);
     this._log('trace', `${this.modelName}.findAll`, options);
     const result = await this._adapter.dml.selectAll(this, options);
     if (options.hooks !== false) await this._runHooks('afterFind', result, options);
     return result;
+  }
+
+  static _validateIncludes(includes) {
+    for (const include of includes || []) {
+      if (!include.model) throw new ModelError('include requires a model', { code: 'SEQ_INCLUDE_INVALID_MODEL' });
+      if (include.attributes !== null) include.model._validateAttributes(include.attributes);
+      include.model._validateIncludes(include.include || []);
+    }
   }
 
   static _validateOrder(order) {
