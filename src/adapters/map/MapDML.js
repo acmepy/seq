@@ -3,6 +3,7 @@ import { ValidationError } from '../../core/errors/ValidationError.js';
 import { clone } from '../../utils/clone.js';
 import { DMLAbstract } from '../abstract/DMLAbstract.js';
 import { loadIncludes } from '../../utils/include.js';
+import { Op } from '../../operators.js';
 
 /**
  * DML operations for the MapAdapter.
@@ -190,6 +191,48 @@ export class MapDML extends DMLAbstract {
         _partial: Array.isArray(options.attributes) && options.attributes.length > 0
       });
     });
+  }
+
+  async selectAssociationJunctionRows(assoc, sourceIds, options = {}) {
+    this._assertTransaction(options);
+    if (!Array.isArray(sourceIds) || sourceIds.length === 0) return [];
+
+    const fkAttr = assoc.foreignKey;
+    const otherKeyAttr = assoc.otherKey;
+
+    if (assoc.throughModel) {
+      const rows = await this.selectAll(assoc.throughModel, {
+        where: { [fkAttr]: { [Op.in]: sourceIds } },
+        attributes: [fkAttr, otherKeyAttr],
+        transaction: options.transaction
+      });
+      return rows.map(row => ({
+        [fkAttr]: row.getDataValue(fkAttr),
+        [otherKeyAttr]: row.getDataValue(otherKeyAttr)
+      }));
+    }
+
+    const throughTable = this._associationThroughTable(assoc);
+    const table = this._adapter.database.get(throughTable);
+    const schema = this._adapter.schemas.get(throughTable);
+    if (!table || !schema) {
+      throw new AdapterError(`Table "${throughTable}" does not exist`, { code: 'SEQ_ADAPTER_TABLE_NOT_FOUND' });
+    }
+
+    const fkCol = schema.attrToColumn[fkAttr] || fkAttr;
+    const otherKeyCol = schema.attrToColumn[otherKeyAttr] || otherKeyAttr;
+    const sourceSet = new Set(sourceIds);
+    const rows = [];
+
+    for (const [, record] of table) {
+      if (!sourceSet.has(record[fkCol])) continue;
+      rows.push({
+        [fkAttr]: record[fkCol],
+        [otherKeyAttr]: record[otherKeyCol]
+      });
+    }
+
+    return rows;
   }
 
   /**

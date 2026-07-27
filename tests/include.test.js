@@ -1012,3 +1012,121 @@ describe('belongsToMany with through model', () => {
     assert.deepEqual(roles, ['admin']);
   });
 });
+
+describe('IAM-style lazy include projection', () => {
+  it('loads required belongsTo includes when root attributes omit a foreign key', async () => {
+    class _IamUser extends Model {}
+    _IamUser.init(
+      {
+        id: { type: DataTypes.INTEGER, primaryKey: true, autoIncrement: true },
+        username: { type: DataTypes.STRING(100), allowNull: false },
+        active: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: true },
+      },
+      { modelName: 'IamUser', tableName: 'iam_user', timestamps: false }
+    );
+
+    class _IamRole extends Model {}
+    _IamRole.init(
+      {
+        id: { type: DataTypes.INTEGER, primaryKey: true, autoIncrement: true },
+        role: { type: DataTypes.STRING(100), allowNull: false },
+        active: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: true },
+      },
+      { modelName: 'IamRole', tableName: 'iam_role', timestamps: false }
+    );
+
+    class _IamPermission extends Model {}
+    _IamPermission.init(
+      {
+        id: { type: DataTypes.INTEGER, primaryKey: true, autoIncrement: true },
+        permission: { type: DataTypes.STRING(100), allowNull: false },
+        active: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: true },
+      },
+      { modelName: 'IamPermission', tableName: 'iam_permission', timestamps: false }
+    );
+
+    class _IamUserRole extends Model {}
+    _IamUserRole.init(
+      {
+        id: { type: DataTypes.INTEGER, primaryKey: true, autoIncrement: true },
+        userId: { type: DataTypes.INTEGER, allowNull: false, field: 'user_id' },
+        roleId: { type: DataTypes.INTEGER, allowNull: false, field: 'role_id' },
+        active: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: true },
+      },
+      { modelName: 'IamUserRole', tableName: 'iam_user_role', timestamps: false }
+    );
+
+    class _IamRolePermission extends Model {}
+    _IamRolePermission.init(
+      {
+        id: { type: DataTypes.INTEGER, primaryKey: true, autoIncrement: true },
+        roleId: { type: DataTypes.INTEGER, allowNull: false, field: 'role_id' },
+        permissionId: { type: DataTypes.INTEGER, allowNull: false, field: 'permission_id' },
+        active: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: true },
+      },
+      { modelName: 'IamRolePermission', tableName: 'iam_role_permission', timestamps: false }
+    );
+
+    _IamRole.hasMany(_IamUserRole, { foreignKey: 'roleId', as: 'userRoles' });
+    _IamUserRole.belongsTo(_IamRole, { foreignKey: 'roleId', as: 'role' });
+    _IamRolePermission.belongsTo(_IamRole, { foreignKey: 'roleId', as: 'role' });
+    _IamRolePermission.belongsTo(_IamPermission, { foreignKey: 'permissionId', as: 'permission' });
+
+    const localSeq = new Seq({
+      adapter: new SQLiteAdapter({ database: ':memory:' }),
+      models: [_IamUser, _IamRole, _IamPermission, _IamUserRole, _IamRolePermission],
+      logging: false,
+    });
+
+    await localSeq.init();
+    await localSeq.sync();
+
+    try {
+      const ana = await _IamUser.create({ username: 'ana' });
+      const juan = await _IamUser.create({ username: 'juan' });
+      const portalRole = await _IamRole.create({ role: 'portal' });
+      const otherRole = await _IamRole.create({ role: 'other' });
+      const permission = await _IamPermission.create({ permission: 'portal.fes.list' });
+
+      await _IamUserRole.create({ userId: ana.getDataValue('id'), roleId: portalRole.getDataValue('id') });
+      await _IamUserRole.create({ userId: juan.getDataValue('id'), roleId: otherRole.getDataValue('id') });
+      await _IamRolePermission.create({ roleId: portalRole.getDataValue('id'), permissionId: permission.getDataValue('id') });
+      await _IamRolePermission.create({ roleId: otherRole.getDataValue('id'), permissionId: permission.getDataValue('id') });
+
+      const rolePermissions = await _IamRolePermission.findAll({
+        where: { active: true },
+        attributes: ['permissionId'],
+        eager: false,
+        include: [
+          {
+            model: _IamPermission,
+            as: 'permission',
+            where: { active: true, permission: 'portal.fes.list' },
+            required: true,
+          },
+          {
+            model: _IamRole,
+            as: 'role',
+            where: { active: true },
+            attributes: ['id'],
+            required: true,
+            include: {
+              model: _IamUserRole,
+              as: 'userRoles',
+              where: { userId: ana.getDataValue('id'), active: true },
+              attributes: ['id'],
+              required: true,
+            },
+          },
+        ],
+      });
+
+      assert.equal(rolePermissions.length, 1);
+      assert.deepEqual(Object.keys(rolePermissions[0].toJSON()).sort(), ['permission', 'permissionId', 'role']);
+      assert.equal(rolePermissions[0].getDataValue('permission').getDataValue('permission'), 'portal.fes.list');
+      assert.equal(rolePermissions[0].getDataValue('role').getDataValue('userRoles').length, 1);
+    } finally {
+      await localSeq.close();
+    }
+  });
+});

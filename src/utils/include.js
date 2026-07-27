@@ -182,11 +182,7 @@ function _uniqueAlias(preferred, used, fallback) {
 }
 
 function _definedValues(items, getValue) {
-  return [...new Set(
-    items
-      .map(getValue)
-      .filter(value => value !== null && value !== undefined)
-  )];
+  return [...new Set(items.map(getValue).filter(value => value !== null && value !== undefined))];
 }
 
 function _groupBy(items, getKey) {
@@ -204,9 +200,7 @@ function _indexBy(items, getKey) {
   const index = new Map();
   for (const item of items) {
     const key = getKey(item);
-    if (key !== null && key !== undefined && !index.has(key)) {
-      index.set(key, item);
-    }
+    if (key !== null && key !== undefined && !index.has(key)) index.set(key, item);
   }
   return index;
 }
@@ -287,14 +281,7 @@ async function _loadBelongsToMany(instances, inc, assoc, alias, dml, queryOption
   const target = assoc.target;
   const sourcePK = assoc.source.primaryKeyAttribute || 'id';
   const targetPK = target.primaryKeyAttribute || 'id';
-  const fkAttr = assoc.foreignKey;
   const otherKeyAttr = assoc.otherKey;
-  const through = dml._associationThroughTable
-    ? dml._associationThroughTable(assoc)
-    : (assoc.throughTable || assoc.through);
-  const throughSchema = dml._adapter.schemas.get(through);
-  const fkCol = throughSchema?.attrToColumn?.[fkAttr] || fkAttr;
-  const otherKeyCol = throughSchema?.attrToColumn?.[otherKeyAttr] || otherKeyAttr;
 
   const sourceIds = _definedValues(instances, i => i.getDataValue(sourcePK));
 
@@ -305,13 +292,8 @@ async function _loadBelongsToMany(instances, inc, assoc, alias, dml, queryOption
     return;
   }
 
-  const q = (name) => dml._adapter._quoteIdentifier(name);
-  const junctionRows = (await Promise.all(_chunks(sourceIds).map(async ids => {
-    const placeholders = ids.map(() => '?').join(', ');
-    const junctionSQL = `SELECT ${q(fkCol)} AS ${q(fkAttr)}, ${q(otherKeyCol)} AS ${q(otherKeyAttr)} FROM ${q(through)} WHERE ${q(fkCol)} IN (${placeholders})`;
-    return dml._executeQueryAll(junctionSQL, ids.map(id => dml._serializeValue(id)));
-  }))).flat();
-  const junctionRowsBySource = _groupBy(junctionRows, row => row[fkAttr]);
+  const junctionRows = await dml.selectAssociationJunctionRows(assoc, sourceIds, queryOptions);
+  const junctionRowsBySource = _groupBy(junctionRows, row => row[assoc.foreignKey]);
 
   const targetIds = [...new Set(junctionRows.map(r => r[otherKeyAttr]).filter(id => id !== null && id !== undefined))];
 

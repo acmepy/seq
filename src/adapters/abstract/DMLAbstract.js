@@ -46,6 +46,12 @@ export class DMLAbstract extends BaseAbstract {
       || assoc.through;
   }
 
+  _chunks(values, size = 500) {
+    const result = [];
+    for (let index = 0; index < values.length; index += size) result.push(values.slice(index, index + size));
+    return result;
+  }
+
   /**
    * Generates a column reference, optionally prefixed with a table alias.
    * @param {string} colName
@@ -254,6 +260,40 @@ export class DMLAbstract extends BaseAbstract {
     return columns.length > 0 ? columns.join(', ') : '*';
   }
 
+  _attributesWithRequired(attributes, required) {
+    if (!Array.isArray(attributes) || attributes.length === 0 || required.length === 0) return attributes;
+    return [...new Set([...attributes, ...required])];
+  }
+
+  _requiredSourceAttributesForLazyIncludes(model, includes) {
+    const required = [];
+    const pkAttr = model.primaryKeyAttribute || 'id';
+    for (const inc of includes || []) {
+      if (!inc.model) continue;
+      const assoc = resolveAssociation(model, inc);
+      if (!assoc) continue;
+      if (assoc.type === 'belongsTo') {
+        required.push(assoc.foreignKey);
+      } else if (pkAttr) {
+        required.push(pkAttr);
+      }
+    }
+    return [...new Set(required)];
+  }
+
+  _trimProjection(instances, attributes, includes = [], model = null) {
+    if (!Array.isArray(attributes) || attributes.length === 0) return;
+    const selected = new Set(attributes);
+    for (const include of includes || []) {
+      if (include.model && model) selected.add(resolveIncludeAlias(include, model));
+    }
+    for (const instance of instances) {
+      for (const key of Object.keys(instance.dataValues)) {
+        if (!selected.has(key)) delete instance.dataValues[key];
+      }
+    }
+  }
+
   _assertTransaction(options = {}) {
     const active = this._adapter._activeTransaction || null;
     const transaction = options.transaction || null;
@@ -410,6 +450,43 @@ export class DMLAbstract extends BaseAbstract {
     throw new AdapterError('DML _execute is not implemented by this adapter', { code: 'SEQ_DML_NOT_IMPLEMENTED' });
   }
 
+  async selectAssociationJunctionRows(assoc, sourceIds, options = {}) {
+    this._assertTransaction(options);
+    if (!Array.isArray(sourceIds) || sourceIds.length === 0) return [];
+
+    const fkAttr = assoc.foreignKey;
+    const otherKeyAttr = assoc.otherKey;
+
+    if (assoc.throughModel) {
+      const rows = await Promise.all(this._chunks(sourceIds).map(ids => {
+        return this.selectAll(assoc.throughModel, {
+          where: { [fkAttr]: { [Op.in]: ids } },
+          attributes: [fkAttr, otherKeyAttr],
+          transaction: options.transaction
+        });
+      }));
+      return rows.flat().map(row => ({
+        [fkAttr]: row.getDataValue(fkAttr),
+        [otherKeyAttr]: row.getDataValue(otherKeyAttr)
+      }));
+    }
+
+    const throughTable = this._associationThroughTable(assoc);
+    const junctionSchema = this._adapter.schemas.get(throughTable);
+    if (!junctionSchema) {
+      throw new AdapterError(`Table "${throughTable}" does not exist`, { code: 'SEQ_ADAPTER_TABLE_NOT_FOUND' });
+    }
+
+    const fkCol = junctionSchema.attrToColumn[fkAttr] || fkAttr;
+    const otherKeyCol = junctionSchema.attrToColumn[otherKeyAttr] || otherKeyAttr;
+    const rows = await Promise.all(this._chunks(sourceIds).map(ids => {
+      const placeholders = ids.map(() => '?').join(', ');
+      const sql = `SELECT ${this._q(fkCol)} AS ${this._q(fkAttr)}, ${this._q(otherKeyCol)} AS ${this._q(otherKeyAttr)} FROM ${this._q(throughTable)} WHERE ${this._q(fkCol)} IN (${placeholders})`;
+      return this._executeQueryAll(sql, ids.map(id => this._serializeValue(id)));
+    }));
+    return rows.flat();
+  }
+
   /**
    * Maps raw rows to Model instances.
    * @param {object[]} rows
@@ -459,6 +536,18 @@ export class DMLAbstract extends BaseAbstract {
         offset: undefined
       };
     }
+    const requestedAttributes = Array.isArray(queryOptions.attributes) && queryOptions.attributes.length > 0
+      ? queryOptions.attributes
+      : null;
+    const requiredLazyAttributes = requestedAttributes
+      ? this._requiredSourceAttributesForLazyIncludes(model, lazyIncludes)
+      : [];
+    if (requestedAttributes && requiredLazyAttributes.length > 0) {
+      queryOptions = {
+        ...queryOptions,
+        attributes: this._attributesWithRequired(requestedAttributes, requiredLazyAttributes)
+      };
+    }
     let sql;
     const params = [];
     let eagerIncludeSqlAliases = null;
@@ -488,6 +577,9 @@ export class DMLAbstract extends BaseAbstract {
     }
     if (lazyIncludes.length > 0) {
       instances = await loadIncludes(instances, lazyIncludes, model, this, queryOptions);
+    }
+    if (requestedAttributes && requiredLazyAttributes.length > 0) {
+      this._trimProjection(instances, requestedAttributes, includes, model);
     }
     return instances;
   }
