@@ -617,7 +617,7 @@ export class Seq {
     } catch {
       output = String(value);
     }
-    return output.replace(/["']/g, '');
+    return output.replace(/[\\"']/g, '');
   }
 
   /**
