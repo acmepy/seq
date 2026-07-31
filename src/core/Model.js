@@ -290,6 +290,23 @@ export class Model {
   }
 
   /**
+   * Creates a record or updates the existing one matched by the adapter.
+   * @template {typeof Model} T
+   * @this {T}
+   * @param {object} values
+   * @param {import('../../types/index.d.ts').UpsertOptions} [options]
+   * @returns {Promise<[InstanceType<T>, boolean]>}
+   */
+  static async upsert(values = {}, options = {}) {
+    if (options.where !== undefined && (typeof options.where !== 'object' || Array.isArray(options.where))) throw new ValidationWhereError();
+    this._log('trace', `${this.modelName}.upsert`, values, options);
+    if (options.hooks !== false) await this._runHooks('beforeUpsert', values, options);
+    const result = await this._adapter.dml.upsert(this, values, options);
+    if (options.hooks !== false) await this._runHooks('afterUpsert', result, options);
+    return result;
+  }
+
+  /**
    * Finds a record by primary key.
    * @template {typeof Model} T
    * @this {T}

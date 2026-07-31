@@ -712,6 +712,30 @@ export class DMLAbstract extends BaseAbstract {
   }
 
   /**
+   * Creates a record or updates the one matched by where, conflictFields, or primary key.
+   * @param {typeof import('../../core/Model.js').Model} model
+   * @param {object} values - Values using attribute names
+   * @param {object} [options]
+   * @returns {Promise<[import('../../core/Model.js').Model, boolean]>}
+   */
+  async upsert(model, values, options = {}) {
+    this._assertTransaction(options);
+    const { schema } = this._schema(model);
+    const where = this._resolveUpsertWhere(model, values, options, schema);
+    const existing = await this.selectOne(model, { where, transaction: options.transaction });
+
+    if (existing) {
+      const pkAttr = schema.primaryKeyAttribute;
+      const updateWhere = pkAttr ? { [pkAttr]: existing.getDataValue(pkAttr) } : where;
+      const updated = await this.update(model, values, { ...options, where: updateWhere });
+      return [updated[0] || existing, false];
+    }
+
+    const created = await this.insert(model, values, options);
+    return [created, true];
+  }
+
+  /**
    * Truncates all records in a table.
    * @param {typeof import('../../core/Model.js').Model} model
    * @param {object} [options]
@@ -751,6 +775,53 @@ export class DMLAbstract extends BaseAbstract {
   async selectOne(model, options = {}) {
     const results = await this.selectAll(model, { ...options, limit: 1, offset: 0 });
     return results.length > 0 ? results[0] : null;
+  }
+
+  _resolveUpsertWhere(model, values, options = {}, schema = null) {
+    if (options.where) return options.where;
+    const upsertSchema = schema || this._schema(model).schema;
+    const fields = this._resolveUpsertConflictFields(model, values, options, upsertSchema);
+    if (fields.length === 0) {
+      throw new ValidationError(`Model "${model.modelName}" upsert requires options.where, options.conflictFields, or a primary key value`, {
+        code: 'SEQ_VALIDATION_UPSERT_TARGET',
+        details: { model: model.modelName }
+      });
+    }
+    return Object.fromEntries(fields.map(field => [field, values[field]]));
+  }
+
+  _resolveUpsertConflictFields(model, values, options = {}, schema = null) {
+    const upsertSchema = schema || this._schema(model).schema;
+    if (options.conflictFields !== undefined) {
+      if (!Array.isArray(options.conflictFields) || options.conflictFields.length === 0) {
+        throw new ValidationError('conflictFields must be a non-empty array', { code: 'SEQ_VALIDATION_UPSERT_TARGET' });
+      }
+      for (const field of options.conflictFields) {
+        if (typeof field !== 'string' || !Object.prototype.hasOwnProperty.call(upsertSchema.attrToColumn, field)) {
+          throw new ValidationError(`Unknown conflict field "${field}"`, {
+            code: 'SEQ_VALIDATION_UNKNOWN_ATTRIBUTE',
+            details: { field, model: model.modelName }
+          });
+        }
+        if (values[field] === undefined || values[field] === null) {
+          throw new ValidationError(`Upsert conflict field "${field}" must have a value`, {
+            code: 'SEQ_VALIDATION_UPSERT_TARGET',
+            details: { field, model: model.modelName }
+          });
+        }
+      }
+      return [...options.conflictFields];
+    }
+
+    const pkAttr = upsertSchema.primaryKeyAttribute;
+    if (pkAttr && values[pkAttr] !== undefined && values[pkAttr] !== null) return [pkAttr];
+
+    for (const unique of upsertSchema.uniqueConstraints || []) {
+      const fields = unique.columns.map(column => upsertSchema.columnToAttr[column] || column);
+      if (fields.every(field => values[field] !== undefined && values[field] !== null)) return fields;
+    }
+
+    return [];
   }
 
   // ---------------------------------------------------------------------------

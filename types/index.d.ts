@@ -100,6 +100,10 @@ export interface MutationOptions {
   transaction?: Transaction;
 }
 
+export interface UpsertOptions extends MutationOptions {
+  conflictFields?: string[];
+}
+
 export interface BuildOptions {
   _isNew?: boolean;
   _partial?: boolean;
@@ -134,6 +138,7 @@ export class Model<TValues = Record<string, unknown>> {
   static addHook(name: string, handler: Function): typeof Model;
   static create<T extends ModelStatic>(this: T, values?: object, options?: MutationOptions): Promise<InstanceType<T>>;
   static bulkCreate<T extends ModelStatic>(this: T, records?: object[], options?: MutationOptions): Promise<Array<InstanceType<T>>>;
+  static upsert<T extends ModelStatic>(this: T, values?: object, options?: UpsertOptions): Promise<[InstanceType<T>, boolean]>;
   static findByPk<T extends ModelStatic>(this: T, id: unknown, options?: QueryOptions): Promise<InstanceType<T> | null>;
   static findOne<T extends ModelStatic>(this: T, options?: QueryOptions): Promise<InstanceType<T> | null>;
   static findAll<T extends ModelStatic>(this: T, options?: QueryOptions): Promise<Array<InstanceType<T>>>;
