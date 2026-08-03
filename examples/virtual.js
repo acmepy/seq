@@ -19,17 +19,17 @@ const ana = await User.create({
 });
 
 console.log('\n--- Virtual getter ---');
-console.log('  label:', ana.getDataValue('label'));
+console.log('  label:', ana.get('label'));
 console.log('  toJSON:', ana.toJSON());
 
 console.log('\n--- Virtual setter ---');
 ana.setDataValue('label', 'Ana Demo <demo@example.com>');
 await ana.save();
 
-const updated = await User.findByPk(ana.getDataValue('id'));
-console.log('  name:', updated.getDataValue('name'));
-console.log('  email:', updated.getDataValue('email'));
-console.log('  label:', updated.getDataValue('label'));
+const updated = await User.findByPk(ana.get('id'));
+console.log('  name:', updated.get('name'));
+console.log('  email:', updated.get('email'));
+console.log('  label:', updated.get('label'));
 
 console.log('\n--- Schema columns ---');
 const schema = seq.adapter.schemas.get('users');

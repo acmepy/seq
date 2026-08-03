@@ -151,6 +151,8 @@ export class Model<TValues = Record<string, unknown>> {
 
   getDataValue(key: string): unknown;
   setDataValue(key: string, value: unknown): void;
+  get<K extends keyof TValues & string>(key: K): TValues[K];
+  get(key: string): unknown;
   get(): Partial<TValues> & Record<string, unknown>;
   toJSON(): Partial<TValues> & Record<string, unknown>;
   save(options?: MutationOptions): Promise<this>;

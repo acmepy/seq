@@ -411,10 +411,12 @@ await user.save();
 await user.update({ active: false });
 await user.destroy();
 
-console.log(user.getDataValue('name'));
+console.log(user.get('name'));
 console.log(user.get());
 console.log(user.toJSON());
 ```
+
+`user.get('name')` y `user.getDataValue('name')` retornan el mismo valor de campo. Se prefiere `get('name')` para codigo de aplicacion; `getDataValue('name')` queda disponible para compatibilidad o para logica interna de getters/setters.
 
 `Model.create()` inserta directamente y ejecuta hooks de create. `instance.save()` ejecuta hooks de save y luego los hooks de create/update segun corresponda.
 

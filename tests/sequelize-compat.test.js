@@ -73,7 +73,18 @@ describe('Sequelize-style compatibility', () => {
       rolId: 1
     });
 
-    assert.equal(user.getDataValue('activo'), true);
+    assert.equal(user.get('activo'), true);
+    assert.equal(user.get('activo'), user.getDataValue('activo'));
+    assert.equal(user.get('id'), 'u1');
+    assert.deepEqual(user.get(), {
+      id: 'u1',
+      usuario: 'ana',
+      clave: 'secret1',
+      nombre: 'Ana Demo',
+      correo: 'ana@example.com',
+      rolId: 1,
+      activo: true
+    });
     const list = await usuarios.list();
     assert.equal(list.length, 1);
     assert.deepEqual(list[0].toJSON(), { id: 'u1', nombre: 'Ana Demo' });

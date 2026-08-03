@@ -509,10 +509,13 @@ export class Model {
   }
 
   /**
-   * Returns a plain object with all data values.
+   * Returns a data field value or a plain object with all data values.
+   * @param {string} [key]
    * @returns {TValues & Record<string, *>}
    */
-  get() {
+  get(key) {
+    if (typeof key === 'string') return this.getDataValue(key);
+
     const values = clone(this.dataValues);
     const attrs = this.constructor.rawAttributes || {};
     for (const [key, attr] of Object.entries(attrs)) {
