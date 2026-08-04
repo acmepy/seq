@@ -391,12 +391,19 @@ const page = await User.findAndCountAll({
   offset: 0
 });
 
+const [savedUser, created] = await User.upsert(
+  { email: 'ana@example.com', name: 'Ana Maria' },
+  { conflictFields: ['email'] }
+);
+
 await User.update({ active: false }, { where: { name: 'Luis' } });
 await User.destroy({ where: { name: 'Luis' } });
 await User.truncate();
 ```
 
 `findAndCountAll()` retorna `{ count, rows }`. `rows` respeta `limit`, `offset` y `order`; `count` devuelve el total de registros que coinciden con el `where` sin paginacion.
+
+`upsert()` retorna `[instance, created]`. Para encontrar el registro a actualizar se puede usar `options.where`, `options.conflictFields` o un valor de llave primaria.
 
 Instancias:
 
@@ -438,6 +445,14 @@ await Task.findAll({
 await Task.findAll({ where: { title: { [Op.like]: '%docs%' } } });
 await Task.findAll({ where: { id: { [Op.in]: [1, 3, 5] } } });
 await Task.findAll({ where: { priority: { [Op.between]: [1, 3] } } });
+await Task.findAll({
+  where: {
+    [Op.or]: [
+      { completed: false },
+      { priority: { [Op.gte]: 3 } }
+    ]
+  }
+});
 ```
 
 Operadores disponibles:
@@ -451,6 +466,7 @@ Operadores disponibles:
 | `Op.like`, `Op.notLike` | Patron SQL-like |
 | `Op.in`, `Op.notIn` | Incluido/no incluido en una lista |
 | `Op.between`, `Op.notBetween` | Dentro/fuera de un rango |
+| `Op.and`, `Op.or` | Composicion logica de condiciones |
 
 ## Asociaciones e include
 
@@ -714,12 +730,16 @@ Codigos comunes:
 ```bash
 npm test
 npm run test:watch
-npm run basic
-npm run associations
-npm run find
-npm run include
-npm run belongs-to-many
-npm run hooks
+npm run test:coverage
+npm run lint
+npm run format
+npm run example:basic
+npm run example:associations
+npm run example:find
+npm run example:include
+npm run example:belongs-to-many
+npm run example:hooks
+npm run example:virtual
 npm run examples
 ```
 
@@ -745,14 +765,18 @@ tests/              Suite node:test
 
 Implementado:
 
-- SQLite y almacenamiento en memoria
+- SQLite en memoria o archivo en disco, y almacenamiento en memoria con `MapAdapter`
 - CRUD estatico e instancias
+- `upsert()`
 - `bulkCreate()` con ruta `bulkInsert()`
-- `where`, `order`, `limit`, `offset`
-- Operadores `Op`
+- `findAndCountAll()`
+- `where`, `order`, `limit`, `offset` y `attributes`
+- Operadores `Op`, incluidos `Op.and` y `Op.or`
 - Asociaciones e `include`
 - Hooks por modelo
 - Timestamps
+- Atributos virtuales
+- Definicion de modelos con `seq.define()`
 - Convenciones de nombres
 - Transacciones
 - Errores tipados
@@ -763,6 +787,5 @@ Limitaciones conocidas:
 - Sin migraciones versionadas
 - Sin scopes
 - Sin pool de conexiones
-- Los operadores logicos `Op.and` y `Op.or` existen en la API, pero su comportamiento aun no esta estable en todos los adapters
 - DCL (`grant`/`revoke`) no esta implementado
 - `belongsToMany` crea tablas intermedias, pero la insercion en esas tablas se hace con SQL/adaptador directo en los ejemplos actuales
