@@ -607,6 +607,7 @@ Hooks disponibles:
 | --- | --- |
 | `create()` | `beforeCreate`, `afterCreate` |
 | `bulkCreate()` | `beforeBulkCreate`, `afterBulkCreate` |
+| `upsert()` | `beforeUpsert`, `afterUpsert` |
 | `findOne()`, `findAll()`, `findAndCountAll()` | `beforeFind`, `afterFind` |
 | `count()` | `beforeCount`, `afterCount` |
 | `update()` | `beforeUpdate`, `afterUpdate` |

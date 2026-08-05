@@ -85,6 +85,29 @@ describe('Model upsert', () => {
       assert.equal(updatedUser.getDataValue('id'), user.getDataValue('id'));
       assert.equal(updatedUser.getDataValue('name'), 'Ana Fallback');
     });
+
+    it('runs upsert hooks and allows beforeUpsert to change values', async () => {
+      const calls = [];
+
+      User.addHook('beforeUpsert', (values, options) => {
+        calls.push(`beforeUpsert:${options.conflictFields.join(',')}`);
+        values.email = values.email.trim().toLowerCase();
+        values.name = values.name.toUpperCase();
+      });
+      User.addHook('afterUpsert', ([user, created], options) => {
+        calls.push(`afterUpsert:${created}:${options.conflictFields.join(',')}:${user.getDataValue('name')}`);
+      });
+
+      const [user, created] = await User.upsert(
+        { email: ' ANA@TEST.COM ', name: 'Ana' },
+        { conflictFields: ['email'] }
+      );
+
+      assert.equal(created, true);
+      assert.equal(user.getDataValue('email'), 'ana@test.com');
+      assert.equal(user.getDataValue('name'), 'ANA');
+      assert.deepEqual(calls, ['beforeUpsert:email', 'afterUpsert:true:email:ANA']);
+    });
   });
 
   describe('MapAdapter fallback', () => {
