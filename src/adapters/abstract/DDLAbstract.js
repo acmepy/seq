@@ -121,7 +121,7 @@ export class DDLAbstract extends BaseAbstract {
    * @param {object} [options]
    */
   async dropTable(tableName, options = {}) {
-    this._log('trace', 'DDL.dropTable', tableName);
+    //this._log('trace', 'DDL.dropTable', tableName);
     this._adapter.schemas.delete(tableName);
   }
 

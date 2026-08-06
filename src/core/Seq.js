@@ -2,6 +2,7 @@ import { ModelRegistry } from './ModelRegistry.js';
 import { Model } from './Model.js';
 import { ConfigurationError } from './errors/ConfigurationError.js';
 import { applyConvention, applyCase } from '../utils/naming.js';
+import { Cache } from '../cache/Cache.js';
 
 /**
  * Main Seq ORM class. Entry point for creating an ORM instance.
@@ -19,6 +20,8 @@ export class Seq {
     this._registry = new ModelRegistry();
     this._initialized = false;
     this._modelClasses = options.models || [];
+    this.cache = options.cache ? new Cache(options.cache) : null;
+    if (this.cache) this.cache.seq = this;
   }
 
   /**
@@ -281,9 +284,16 @@ export class Seq {
    */
   async transaction(callback) {
     const transaction = await this._adapter.tcl.begin();
+    if (!transaction.afterCommitCallbacks) {
+      transaction.afterCommitCallbacks = [];
+      transaction.afterCommit = (cb) => transaction.afterCommitCallbacks.push(cb);
+    }
     try {
       const result = await callback(transaction);
       await this._adapter.tcl.commit(transaction);
+      for (const cb of transaction.afterCommitCallbacks) {
+        await cb();
+      }
       return result;
     } catch (error) {
       try {

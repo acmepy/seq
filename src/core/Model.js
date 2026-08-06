@@ -257,6 +257,15 @@ export class Model {
     }
   }
 
+  static async _invalidateCache(options = {}) {
+    if (!this.seq || !this.seq.cache) return;
+    if (options.transaction && typeof options.transaction.afterCommit === 'function') {
+      options.transaction.afterCommit(() => this.seq.cache.invalidate(this.modelName));
+    } else {
+      await this.seq.cache.invalidate(this.modelName);
+    }
+  }
+
   /**
    * Creates a new record.
    * @template {typeof Model} T
@@ -266,10 +275,11 @@ export class Model {
    * @returns {Promise<InstanceType<T>>}
    */
   static async create(values = {}, options = {}) {
-    this._log('trace', `${this.modelName}.create`, values);
+    //this._log('trace', `${this.modelName}.create`, values);
     if (options.hooks !== false) await this._runHooks('beforeCreate', values, options);
     const result = await this._adapter.dml.insert(this, values, options);
     if (options.hooks !== false) await this._runHooks('afterCreate', result, options);
+    await this._invalidateCache(options);
     return result;
   }
 
@@ -282,10 +292,11 @@ export class Model {
    * @returns {Promise<Array<InstanceType<T>>>}
    */
   static async bulkCreate(records = [], options = {}) {
-    this._log('trace', `${this.modelName}.bulkCreate`, records);
+    //this._log('trace', `${this.modelName}.bulkCreate`, records);
     if (options.hooks !== false) await this._runHooks('beforeBulkCreate', records, options);
     const result = await this._adapter.dml.bulkInsert(this, records, options);
     if (options.hooks !== false) await this._runHooks('afterBulkCreate', result, options);
+    await this._invalidateCache(options);
     return result;
   }
 
@@ -299,10 +310,11 @@ export class Model {
    */
   static async upsert(values = {}, options = {}) {
     if (options.where !== undefined && (typeof options.where !== 'object' || Array.isArray(options.where))) throw new ValidationWhereError();
-    this._log('trace', `${this.modelName}.upsert`, values, options);
+    //this._log('trace', `${this.modelName}.upsert`, values, options);
     if (options.hooks !== false) await this._runHooks('beforeUpsert', values, options);
     const result = await this._adapter.dml.upsert(this, values, options);
     if (options.hooks !== false) await this._runHooks('afterUpsert', result, options);
+    await this._invalidateCache(options);
     return result;
   }
 
@@ -315,7 +327,7 @@ export class Model {
    * @returns {Promise<InstanceType<T>|null>}
    */
   static async findByPk(id, options = {}) {
-    this._log('trace', `${this.modelName}.findByPk`, id);
+    //this._log('trace', `${this.modelName}.findByPk`, id);
     if (!this.primaryKeyAttribute) throw new Error(`Model "${this.modelName}" has no primary key`);
     const where = { [this.primaryKeyAttribute]: id };
     return this.findOne({ ...options, where });
@@ -329,10 +341,22 @@ export class Model {
    * @returns {Promise<InstanceType<T>|null>}
    */
   static async findOne(options = {}) {
-    this._log('trace', `${this.modelName}.findOne`, options);
+    //this._log('trace', `${this.modelName}.findOne`, options);
     if (options.hooks !== false) await this._runHooks('beforeFind', options);
+    
+    const useCache = options.cache !== false && !options.transaction && this.seq?.cache;
+    if (useCache) {
+      const cacheResult = await this.seq.cache.get(this.modelName, 'findOne', options);
+      if (cacheResult.hit) return cacheResult.value;
+    }
+
     const result = await this._adapter.dml.selectOne(this, options);
     if (options.hooks !== false) await this._runHooks('afterFind', result, options);
+    
+    if (useCache) {
+      await this.seq.cache.set(this.modelName, 'findOne', options, result);
+    }
+    
     return result;
   }
 
@@ -352,9 +376,16 @@ export class Model {
     if (options.attributes !== undefined) this._validateAttributes(options.attributes);
     if (options.include) options.include = normalizeInclude(options.include);
     this._validateIncludes(options.include || []);
-    this._log('trace', `${this.modelName}.findAll`, options);
+    //this._log('trace', `${this.modelName}.findAll`, options);
+    
+    const useCache = options.cache !== false && !options.transaction && this.seq?.cache;
+    if (useCache) {
+      const cacheResult = await this.seq.cache.get(this.modelName, 'findAll', options);
+      if (cacheResult.hit) return cacheResult.value;
+    }
     const result = await this._adapter.dml.selectAll(this, options);
     if (options.hooks !== false) await this._runHooks('afterFind', result, options);
+    if (useCache) await this.seq.cache.set(this.modelName, 'findAll', options, result);
     return result;
   }
 
@@ -396,9 +427,15 @@ export class Model {
   static async count(options = {}) {
     if (options.hooks !== false) await this._runHooks('beforeCount', options);
     if (options.where !== undefined && (typeof options.where !== 'object' || Array.isArray(options.where))) throw new ValidationWhereError();
-    this._log('trace', `${this.modelName}.count`, options);
+    //this._log('trace', `${this.modelName}.count`, options);
+    const useCache = options.cache !== false && !options.transaction && this.seq?.cache;
+    if (useCache) {
+      const cacheResult = await this.seq.cache.get(this.modelName, 'count', options);
+      if (cacheResult.hit) return cacheResult.value;
+    }
     const result = await this._adapter.dml.count(this, options);
     if (options.hooks !== false) await this._runHooks('afterCount', result, options);
+    if (useCache) await this.seq.cache.set(this.modelName, 'count', options, result);
     return result;
   }
 
@@ -411,18 +448,14 @@ export class Model {
    * @returns {Promise<{ count: number, rows: Array<InstanceType<T>> }>}
    */
   static async findAndCountAll(options = {}) {
-    this._log('trace', `${this.modelName}.findAndCountAll`, options);
+    //this._log('trace', `${this.modelName}.findAndCountAll`, options);
     const findOptions = { ...options };
     const countOptions = { ...options };
     delete countOptions.attributes;
     delete countOptions.order;
     delete countOptions.limit;
     delete countOptions.offset;
-
-    const [count, rows] = await Promise.all([
-      this.count(countOptions),
-      this.findAll(findOptions)
-    ]);
+    const [count, rows] = await Promise.all([this.count(countOptions), this.findAll(findOptions)]);
 
     return { count, rows };
   }
@@ -435,10 +468,11 @@ export class Model {
    */
   static async update(values, options = {}) {
     if (options.where !== undefined && (typeof options.where !== 'object' || Array.isArray(options.where)))throw new ValidationWhereError();
-    this._log('trace', `${this.modelName}.update`, values, options);
+    //this._log('trace', `${this.modelName}.update`, values, options);
     if (options.hooks !== false) await this._runHooks('beforeUpdate', values, options);
     const result = await this._adapter.dml.update(this, values, options);
     if (options.hooks !== false) await this._runHooks('afterUpdate', result, options);
+    await this._invalidateCache(options);
     return result;
   }
 
@@ -449,10 +483,11 @@ export class Model {
    */
   static async destroy(options = {}) {
     if (options.where !== undefined && (typeof options.where !== 'object' || Array.isArray(options.where)))throw new ValidationWhereError();
-    this._log('trace', `${this.modelName}.destroy`, options);
+    //this._log('trace', `${this.modelName}.destroy`, options);
     if (options.hooks !== false) await this._runHooks('beforeDestroy', options);
     const result = await this._adapter.dml.delete(this, options);
     if (options.hooks !== false) await this._runHooks('afterDestroy', result, options);
+    await this._invalidateCache(options);
     return result;
   }
 
@@ -462,10 +497,11 @@ export class Model {
    * @returns {Promise<void>}
    */
   static async truncate(options = {}) {
-    this._log('trace', `${this.modelName}.truncate`);
+    //this._log('trace', `${this.modelName}.truncate`);
     if (options.hooks !== false) await this._runHooks('beforeTruncate', options);
     const result = await this._adapter.dml.truncate(this, options);
     if (options.hooks !== false) await this._runHooks('afterTruncate', options);
+    await this._invalidateCache(options);
     return result;
   }
 
@@ -554,6 +590,7 @@ export class Model {
         await Ctor._runHooks('afterCreate', this, options);
         await Ctor._runHooks('afterSave', this, options);
       }
+      await Ctor._invalidateCache(options);
       return this;
     }
     const pk = Ctor.primaryKeyAttribute;
@@ -565,6 +602,7 @@ export class Model {
       await Ctor._runHooks('afterUpdate', this, options);
       await Ctor._runHooks('afterSave', this, options);
     }
+    await Ctor._invalidateCache(options);
     return this;
   }
 
