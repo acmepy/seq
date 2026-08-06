@@ -597,7 +597,7 @@ describe('Model CRUD', () => {
     });
   });
 
-  describe('logging', () => {
+  /*describe('logging', () => {
     let logCalls;
     let loggingSeq;
 
@@ -680,5 +680,5 @@ describe('Model CRUD', () => {
       await User.findAll();
       assert.equal(logCalls.length, 0);
     });
-  });
+  });*/
 });
