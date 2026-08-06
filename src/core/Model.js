@@ -333,11 +333,22 @@ export class Model {
     return this.findOne({ ...options, where });
   }
 
+  static _toPlainValue(value) {
+    if (value === null || value === undefined) return value;
+    if (Array.isArray(value)) return value.map(item => this._toPlainValue(item));
+    if (value instanceof Model) return value.get({ plain: true });
+    if (value instanceof Date) return value;
+    if (typeof value === 'object') {
+      const plain = {};
+      for (const [key, child] of Object.entries(value)) plain[key] = this._toPlainValue(child);
+      return plain;
+    }
+    return value;
+  }
+
   static _normalizeFindResult(result, plain = false) {
     if (!plain || result === null || result === undefined) return result;
-    if (Array.isArray(result)) return result.map(item => item?.toJSON ? item.toJSON() : item);
-    if (typeof result?.toJSON === 'function') return result.toJSON();
-    return result;
+    return this._toPlainValue(result);
   }
 
   /**
@@ -562,20 +573,13 @@ export class Model {
     const options = key && typeof key === 'object' ? key : {};
     const plain = options.plain === true;
 
-    if (plain) {
-      const values = clone(this.dataValues);
-      const attrs = this.constructor.rawAttributes || {};
-      for (const [attrKey, attr] of Object.entries(attrs)) {
-        if (this.constructor._isVirtualAttribute(attr) && typeof attr.get === 'function') values[attrKey] = attr.get.call(this);
-      }
-      return values;
-    }
-
     const values = clone(this.dataValues);
     const attrs = this.constructor.rawAttributes || {};
     for (const [attrKey, attr] of Object.entries(attrs)) {
       if (this.constructor._isVirtualAttribute(attr) && typeof attr.get === 'function') values[attrKey] = attr.get.call(this);
     }
+
+    if (plain) return this.constructor._toPlainValue(values);
     return values;
   }
 
@@ -584,7 +588,7 @@ export class Model {
    * @returns {TValues & Record<string, *>}
    */
   toJSON() {
-    return this.get();
+    return this.get({ plain: true });
   }
 
   /**

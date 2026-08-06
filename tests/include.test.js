@@ -414,6 +414,18 @@ describe('Aliases & Include', () => {
       assert.ok(Array.isArray(ana.getDataValue('tasks')));
       assert.ok(ana.getDataValue('profile'));
     });
+
+    it('returns plain objects for include results when plain is true', async () => {
+      const users = await User.findAll({ include: [Task, Profile], plain: true });
+      assert.equal(users.length, 2);
+
+      const ana = users.find(user => user.name === 'Ana');
+      assert.ok(Array.isArray(ana.tasks));
+      assert.ok(ana.profile);
+      assert.equal(ana.tasks[0].title, 'Buy milk');
+      assert.equal(ana.profile.bio, 'Developer');
+      assert.equal(ana instanceof Model, false);
+    });
   });
 
   // ---------------------------------------------------------------------------

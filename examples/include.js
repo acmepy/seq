@@ -76,6 +76,18 @@ for (const u of usersWithProfile) {
   console.log(`  ${u.getDataValue('name')}: ${profile ? profile.getDataValue('bio') : 'no profile'}`);
 }
 
+console.log('\n--- Include lazy: users with tasks and profile ---');
+const usersWithProfileLazy = await User.findAll({ include: [{ model: Task }, { model: Profile }] });
+for (const u of usersWithProfileLazy) {
+  console.log(`  ${u.getDataValue('name')}: tasks=${u.getDataValue('tasks').length}, profile=${u.getDataValue('profile')?.getDataValue('bio') || 'none'}`);
+}
+
+console.log('\n--- Include eager: users with tasks and profile ---');
+const usersWithProfileEager = await User.findAll({ include: [{ model: Task }, { model: Profile }], eager: true });
+for (const u of usersWithProfileEager) {
+  console.log(`  ${u.getDataValue('name')}: tasks=${u.getDataValue('tasks').length}, profile=${u.getDataValue('profile')?.getDataValue('bio') || 'none'}`);
+}
+
 console.log('\n--- Include: tasks with user (belongsTo) ---');
 const tasksWithUser = await Task.findAll({ include: User });
 for (const t of tasksWithUser) {
