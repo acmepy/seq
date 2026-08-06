@@ -92,6 +92,7 @@ export interface QueryOptions {
   eager?: boolean;
   hooks?: boolean;
   transaction?: Transaction;
+  plain?: boolean;
 }
 
 export interface MutationOptions {

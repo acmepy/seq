@@ -111,6 +111,17 @@ describe('Model CRUD', () => {
       assert.equal(found.getDataValue('email'), 'a@test.com');
     });
 
+    it('returns a plain object when plain is true', async () => {
+      await User.create({ name: 'Ana', email: 'a@test.com' });
+
+      const found = await User.findOne({ where: { name: 'Ana' }, plain: true });
+      assert.ok(found);
+      assert.equal(typeof found, 'object');
+      assert.equal(found.name, 'Ana');
+      assert.equal(found.email, 'a@test.com');
+      assert.equal(found instanceof Model, false);
+    });
+
     it('returns null when no match', async () => {
       const found = await User.findOne({ where: { name: 'NonExistent' } });
       assert.equal(found, null);
@@ -167,6 +178,16 @@ describe('Model CRUD', () => {
       const users = await User.findAll();
       assert.ok(users[0] instanceof Model);
     });
+
+    it('returns plain objects when plain is true', async () => {
+      await User.create({ name: 'Ana', email: 'a@test.com' });
+
+      const users = await User.findAll({ plain: true });
+      assert.equal(users.length, 1);
+      assert.equal(users[0].name, 'Ana');
+      assert.equal(users[0].email, 'a@test.com');
+      assert.equal(users[0] instanceof Model, false);
+    });
   });
 
   describe('count', () => {
@@ -221,6 +242,16 @@ describe('Model CRUD', () => {
       assert.equal(result.count, 2);
       assert.equal(result.rows.length, 1);
       assert.equal(result.rows[0].getDataValue('name'), 'Ana');
+    });
+
+    it('returns plain rows when plain is true', async () => {
+      await User.create({ name: 'Ana', email: 'a@test.com' });
+      await User.create({ name: 'Juan', email: 'j@test.com' });
+
+      const result = await User.findAndCountAll({ plain: true });
+      assert.equal(result.count, 2);
+      assert.equal(result.rows[0].name, 'Ana');
+      assert.equal(result.rows[0] instanceof Model, false);
     });
 
     it('rejects invalid find options', async () => {
@@ -301,6 +332,14 @@ describe('Model CRUD', () => {
       const json = user.toJSON();
       json.name = 'Modified';
       assert.equal(user.getDataValue('name'), 'Ana');
+    });
+
+    it('supports get with plain option', async () => {
+      const user = await User.create({ name: 'Ana', email: 'a@test.com' });
+      const plain = user.get({ plain: true });
+      assert.equal(typeof plain, 'object');
+      assert.equal(plain.name, 'Ana');
+      assert.equal(plain.email, 'a@test.com');
     });
   });
 

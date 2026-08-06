@@ -333,6 +333,13 @@ export class Model {
     return this.findOne({ ...options, where });
   }
 
+  static _normalizeFindResult(result, plain = false) {
+    if (!plain || result === null || result === undefined) return result;
+    if (Array.isArray(result)) return result.map(item => item?.toJSON ? item.toJSON() : item);
+    if (typeof result?.toJSON === 'function') return result.toJSON();
+    return result;
+  }
+
   /**
    * Finds one record matching the options.
    * @template {typeof Model} T
@@ -347,7 +354,7 @@ export class Model {
     const useCache = options.cache !== false && !options.transaction && this.seq?.cache;
     if (useCache) {
       const cacheResult = await this.seq.cache.get(this.modelName, 'findOne', options);
-      if (cacheResult.hit) return cacheResult.value;
+      if (cacheResult.hit) return this._normalizeFindResult(cacheResult.value, options.plain);
     }
 
     const result = await this._adapter.dml.selectOne(this, options);
@@ -357,7 +364,7 @@ export class Model {
       await this.seq.cache.set(this.modelName, 'findOne', options, result);
     }
     
-    return result;
+    return this._normalizeFindResult(result, options.plain);
   }
 
   /**
@@ -381,12 +388,12 @@ export class Model {
     const useCache = options.cache !== false && !options.transaction && this.seq?.cache;
     if (useCache) {
       const cacheResult = await this.seq.cache.get(this.modelName, 'findAll', options);
-      if (cacheResult.hit) return cacheResult.value;
+      if (cacheResult.hit) return this._normalizeFindResult(cacheResult.value, options.plain);
     }
     const result = await this._adapter.dml.selectAll(this, options);
     if (options.hooks !== false) await this._runHooks('afterFind', result, options);
     if (useCache) await this.seq.cache.set(this.modelName, 'findAll', options, result);
-    return result;
+    return this._normalizeFindResult(result, options.plain);
   }
 
   static _validateIncludes(includes) {
@@ -457,7 +464,7 @@ export class Model {
     delete countOptions.offset;
     const [count, rows] = await Promise.all([this.count(countOptions), this.findAll(findOptions)]);
 
-    return { count, rows };
+    return { count, rows: this._normalizeFindResult(rows, options.plain) };
   }
 
   /**
@@ -546,16 +553,28 @@ export class Model {
 
   /**
    * Returns a data field value or a plain object with all data values.
-   * @param {string} [key]
+   * @param {string | { plain?: boolean }} [key]
    * @returns {TValues & Record<string, *>}
    */
   get(key) {
     if (typeof key === 'string') return this.getDataValue(key);
 
+    const options = key && typeof key === 'object' ? key : {};
+    const plain = options.plain === true;
+
+    if (plain) {
+      const values = clone(this.dataValues);
+      const attrs = this.constructor.rawAttributes || {};
+      for (const [attrKey, attr] of Object.entries(attrs)) {
+        if (this.constructor._isVirtualAttribute(attr) && typeof attr.get === 'function') values[attrKey] = attr.get.call(this);
+      }
+      return values;
+    }
+
     const values = clone(this.dataValues);
     const attrs = this.constructor.rawAttributes || {};
-    for (const [key, attr] of Object.entries(attrs)) {
-      if (this.constructor._isVirtualAttribute(attr) && typeof attr.get === 'function') values[key] = attr.get.call(this);
+    for (const [attrKey, attr] of Object.entries(attrs)) {
+      if (this.constructor._isVirtualAttribute(attr) && typeof attr.get === 'function') values[attrKey] = attr.get.call(this);
     }
     return values;
   }

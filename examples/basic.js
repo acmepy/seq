@@ -44,6 +44,12 @@ console.log('Laptop foreignKeys:', schema.foreignKeys);
 const found = await Product.findOne({ where: { productName: 'Laptop' } });
 console.log('findOne by productName:', found.getDataValue('productName'), found.getDataValue('unitPrice'));
 
+const plainProduct = await Product.findOne({ where: { productName: 'Laptop' }, plain: true });
+console.log('findOne plain:', plainProduct);
+
+const plainFromInstance = laptop.get({ plain: true });
+console.log('instance get plain:', plainFromInstance);
+
 await laptop.update({ unitPrice: 899.99 });
 console.log('Laptop updated:', laptop.toJSON());
 
