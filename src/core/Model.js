@@ -383,13 +383,74 @@ export class Model {
    * @returns {Promise<[InstanceType<T>, boolean]>}
    */
   static async upsert(values = {}, options = {}) {
-    if (options.where !== undefined && (typeof options.where !== 'object' || Array.isArray(options.where))) throw new ValidationWhereError();
     //this._log('trace', `${this.modelName}.upsert`, values, options);
+    if (options.where !== undefined && (typeof options.where !== 'object' || Array.isArray(options.where))) throw new ValidationWhereError();
+    if (options.include) {
+      const includes = normalizeInclude(options.include);
+      this._validateIncludes(includes);
+      const run = transaction => this._upsertWithIncludes(values, { ...options, include: includes, transaction });
+      if (options.transaction || !this.seq) return run(options.transaction);
+      return this.seq.transaction(run);
+    }
+
     if (options.hooks !== false) await this._runHooks('beforeUpsert', values, options);
     const result = await this._adapter.dml.upsert(this, values, options);
     if (options.hooks !== false) await this._runHooks('afterUpsert', result, options);
     await this._invalidateCache(options);
     return result;
+  }
+
+  static async _upsertWithIncludes(values = {}, options = {}) {
+    const includes = options.include || [];
+    this._validateNestedCreateIncludes(includes);
+    const parentValues = this._stripNestedCreateValues(values, includes);
+    const mutationOptions = { ...options };
+    delete mutationOptions.include;
+
+    if (options.hooks !== false) await this._runHooks('beforeUpsert', parentValues, mutationOptions);
+    const result = await this._adapter.dml.upsert(this, parentValues, mutationOptions);
+    const [parent] = result;
+
+    for (const include of includes) await this._upsertIncludedAssociation(parent, values, include, mutationOptions);
+
+    if (options.hooks !== false) await this._runHooks('afterUpsert', result, mutationOptions);
+    await this._invalidateCache(mutationOptions);
+    return result;
+  }
+
+  static async _upsertIncludedAssociation(parent, sourceValues, include, options) {
+    const assoc = resolveAssociation(this, include);
+    const alias = resolveIncludeAlias(include, this);
+    const nestedValue = sourceValues[alias];
+    if (nestedValue === undefined) return;
+
+    const parentPK = assoc.source.primaryKeyAttribute || 'id';
+    const parentPKValue = parent.getDataValue(parentPK);
+    const childOptions = { ...options, include: include.include || [] };
+
+    if (assoc.type === 'hasMany') {
+      if (!Array.isArray(nestedValue)) throw new ModelError(`Nested upsert include "${alias}" must be an array for hasMany association`, { code: 'SEQ_NESTED_UPSERT_INVALID_VALUE', details: { model: this.modelName, include: alias, associationType: assoc.type } });
+      const children = [];
+      for (const childValue of nestedValue) {
+        const [child] = await assoc.target.upsert({ ...childValue, [assoc.foreignKey]: parentPKValue }, childOptions);
+        children.push(child);
+      }
+      parent.setDataValue(alias, children);
+      return;
+    }
+
+    if (nestedValue === null) {
+      parent.setDataValue(alias, null);
+      return;
+    }
+    if (typeof nestedValue !== 'object' || Array.isArray(nestedValue)) {
+      throw new ModelError(`Nested upsert include "${alias}" must be an object or null for hasOne association`, {
+        code: 'SEQ_NESTED_UPSERT_INVALID_VALUE',
+        details: { model: this.modelName, include: alias, associationType: assoc.type }
+      });
+    }
+    const [child] = await assoc.target.upsert({ ...nestedValue, [assoc.foreignKey]: parentPKValue }, childOptions);
+    parent.setDataValue(alias, child);
   }
 
   /**
