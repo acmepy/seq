@@ -560,12 +560,78 @@ export class Model {
    */
   static async update(values, options = {}) {
     if (options.where !== undefined && (typeof options.where !== 'object' || Array.isArray(options.where)))throw new ValidationWhereError();
+    if (options.include) {
+      const includes = normalizeInclude(options.include);
+      this._validateIncludes(includes);
+      const run = transaction => this._updateWithIncludes(values, { ...options, include: includes, transaction });
+      if (options.transaction || !this.seq) return run(options.transaction);
+      return this.seq.transaction(run);
+    }
+
     //this._log('trace', `${this.modelName}.update`, values, options);
     if (options.hooks !== false) await this._runHooks('beforeUpdate', values, options);
     const result = await this._adapter.dml.update(this, values, options);
     if (options.hooks !== false) await this._runHooks('afterUpdate', result, options);
     await this._invalidateCache(options);
     return result;
+  }
+
+  static async _updateWithIncludes(values = {}, options = {}) {
+    const includes = options.include || [];
+    this._validateNestedCreateIncludes(includes);
+
+    const where = this._resolveNestedUpdateWhere(values, options);
+    const parentValues = this._stripNestedCreateValues(values, includes);
+    const mutationOptions = { ...options, where };
+    delete mutationOptions.include;
+    if (options.hooks !== false) await this._runHooks('beforeUpdate', parentValues, mutationOptions);
+    const result = await this._adapter.dml.update(this, parentValues, mutationOptions);
+    for (const parent of result) for (const include of includes) await this._replaceIncludedAssociation(parent, values, include, mutationOptions);
+    if (options.hooks !== false) await this._runHooks('afterUpdate', result, mutationOptions);
+    await this._invalidateCache(mutationOptions);
+    return result;
+  }
+
+  static _resolveNestedUpdateWhere(values, options) {
+    if (options.where) return options.where;
+    const pk = this.primaryKeyAttribute || 'id';
+    const pkValue = values?.[pk];
+    if (pkValue === undefined || pkValue === null) {
+      throw new ModelError(`Nested update for model "${this.modelName}" requires options.where or a "${pk}" value`, {code: 'SEQ_NESTED_UPDATE_MISSING_TARGET',details: { model: this.modelName, primaryKey: pk }});
+    }
+    return { [pk]: pkValue };
+  }
+
+  static async _replaceIncludedAssociation(parent, sourceValues, include, options) {
+    const assoc = resolveAssociation(this, include);
+    const alias = resolveIncludeAlias(include, this);
+    const nestedValue = sourceValues[alias];
+    if (nestedValue === undefined) return;
+
+    const parentPK = assoc.source.primaryKeyAttribute || 'id';
+    const parentPKValue = parent.getDataValue(parentPK);
+    const childOptions = { ...options, include: include.include || [] };
+
+    if (assoc.type === 'hasMany') {
+      if (!Array.isArray(nestedValue)) throw new ModelError(`Nested update include "${alias}" must be an array for hasMany association`, {code: 'SEQ_NESTED_UPDATE_INVALID_VALUE', details: { model: this.modelName, include: alias, associationType: assoc.type }});
+      await assoc.target.destroy({ ...options, where: { [assoc.foreignKey]: parentPKValue } });
+      const children = [];
+      for (const childValue of nestedValue) children.push(await assoc.target.create({ ...childValue, [assoc.foreignKey]: parentPKValue }, childOptions));
+      parent.setDataValue(alias, children);
+      return;
+    }
+
+    if (nestedValue !== null && (typeof nestedValue !== 'object' || Array.isArray(nestedValue))) {
+      throw new ModelError(`Nested update include "${alias}" must be an object or null for hasOne association`, {code: 'SEQ_NESTED_UPDATE_INVALID_VALUE', details: { model: this.modelName, include: alias, associationType: assoc.type }});
+    }
+
+    await assoc.target.destroy({ ...options, where: { [assoc.foreignKey]: parentPKValue } });
+    if (nestedValue === null) {
+      parent.setDataValue(alias, null);
+      return;
+    }
+    const child = await assoc.target.create({ ...nestedValue, [assoc.foreignKey]: parentPKValue }, childOptions);
+    parent.setDataValue(alias, child);
   }
 
   /**
