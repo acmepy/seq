@@ -375,6 +375,18 @@ const User = seq.define('User', {
 ```js
 const ana = await User.create({ name: 'Ana', email: 'ana@example.com' });
 
+const userWithTasks = await User.create({
+  name: 'Carla',
+  email: 'carla@example.com',
+  tasks: [
+    { title: 'Create parent and children', completed: true },
+    { title: 'Review nested create result', completed: false }
+  ],
+  profile: { bio: 'Nested create example' }
+}, {
+  include: [Task, Profile]
+});
+
 const users = await User.bulkCreate([
   { name: 'Juan', email: 'juan@example.com' },
   { name: 'Luis', email: 'luis@example.com' }
@@ -404,6 +416,8 @@ await User.truncate();
 `findAndCountAll()` retorna `{ count, rows }`. `rows` respeta `limit`, `offset` y `order`; `count` devuelve el total de registros que coinciden con el `where` sin paginacion.
 
 `upsert()` retorna `[instance, created]`. Para encontrar el registro a actualizar se puede usar `options.where`, `options.conflictFields` o un valor de llave primaria.
+
+`create()` acepta `include` para crear hijos `hasMany` y `hasOne` junto con el padre. Los valores anidados usan el alias de la asociacion, por ejemplo `tasks` y `profile`.
 
 Instancias:
 

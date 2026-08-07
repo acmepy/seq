@@ -99,6 +99,7 @@ export interface MutationOptions {
   where?: WhereOptions;
   hooks?: boolean;
   transaction?: Transaction;
+  include?: IncludeOption | IncludeOption[];
 }
 
 export interface UpsertOptions extends MutationOptions {

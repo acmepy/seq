@@ -3,7 +3,7 @@ import { Association } from './Association.js';
 import { ModelError } from './errors/ModelError.js';
 import { ValidationError, ValidationWhereError, ValidationOrderError, ValidationLimitError, ValidationOffsetError } from './errors/ValidationError.js';
 import { DataTypes } from '../data-types/index.js';
-import { normalizeInclude } from '../utils/include.js';
+import { normalizeInclude, resolveAssociation, resolveIncludeAlias } from '../utils/include.js';
 
 /**
  * Base Model class. All user-defined models must extend this.
@@ -275,12 +275,86 @@ export class Model {
    * @returns {Promise<InstanceType<T>>}
    */
   static async create(values = {}, options = {}) {
+    if (options.include) {
+      const includes = normalizeInclude(options.include);
+      this._validateIncludes(includes);
+      const run = transaction => this._createWithIncludes(values, { ...options, include: includes, transaction });
+      if (options.transaction || !this.seq) return run(options.transaction);
+      return this.seq.transaction(run);
+    }
+
     //this._log('trace', `${this.modelName}.create`, values);
     if (options.hooks !== false) await this._runHooks('beforeCreate', values, options);
     const result = await this._adapter.dml.insert(this, values, options);
     if (options.hooks !== false) await this._runHooks('afterCreate', result, options);
     await this._invalidateCache(options);
     return result;
+  }
+
+  static async _createWithIncludes(values = {}, options = {}) {
+    const includes = options.include || [];
+    this._validateNestedCreateIncludes(includes);
+    const parentValues = this._stripNestedCreateValues(values, includes);
+    if (options.hooks !== false) await this._runHooks('beforeCreate', parentValues, options);
+    const result = await this._adapter.dml.insert(this, parentValues, options);
+
+    for (const include of includes) await this._createIncludedAssociation(result, values, include, options);
+
+    if (options.hooks !== false) await this._runHooks('afterCreate', result, options);
+    await this._invalidateCache(options);
+    return result;
+  }
+
+  static _validateNestedCreateIncludes(includes) {
+    for (const include of includes) {
+      const assoc = resolveAssociation(this, include);
+      const alias = resolveIncludeAlias(include, this);
+      if (!assoc) throw new ModelError(`No association found for include "${alias}" on model "${this.modelName}"`, { code: 'SEQ_INCLUDE_ASSOCIATION_NOT_FOUND' });
+      if (assoc.type !== 'hasMany' && assoc.type !== 'hasOne') {
+        throw new ModelError(`Nested create only supports hasMany and hasOne includes; "${alias}" is ${assoc.type}`, {
+          code: 'SEQ_NESTED_CREATE_UNSUPPORTED_ASSOCIATION',
+          details: { model: this.modelName, include: alias, associationType: assoc.type }
+        });
+      }
+    }
+  }
+
+  static _stripNestedCreateValues(values, includes) {
+    const nestedKeys = new Set(includes.map(include => resolveIncludeAlias(include, this)));
+    return Object.fromEntries(Object.entries(values).filter(([key]) => !nestedKeys.has(key)));
+  }
+
+  static async _createIncludedAssociation(parent, sourceValues, include, options) {
+    const assoc = resolveAssociation(this, include);
+    const alias = resolveIncludeAlias(include, this);
+
+    const nestedValue = sourceValues[alias];
+    if (nestedValue === undefined) return;
+
+    const parentPK = assoc.source.primaryKeyAttribute || 'id';
+    const parentPKValue = parent.getDataValue(parentPK);
+    const childOptions = { ...options, include: include.include || [] };
+
+    if (assoc.type === 'hasMany') {
+      if (!Array.isArray(nestedValue)) throw new ModelError(`Nested create include "${alias}" must be an array for hasMany association`, {code: 'SEQ_NESTED_CREATE_INVALID_VALUE', details: { model: this.modelName, include: alias, associationType: assoc.type }});
+      const children = [];
+      for (const childValue of nestedValue) children.push(await assoc.target.create({ ...childValue, [assoc.foreignKey]: parentPKValue }, childOptions));
+      parent.setDataValue(alias, children);
+      return;
+    }
+
+    if (nestedValue === null) {
+      parent.setDataValue(alias, null);
+      return;
+    }
+    if (typeof nestedValue !== 'object' || Array.isArray(nestedValue)) {
+      throw new ModelError(`Nested create include "${alias}" must be an object for hasOne association`, {
+        code: 'SEQ_NESTED_CREATE_INVALID_VALUE',
+        details: { model: this.modelName, include: alias, associationType: assoc.type }
+      });
+    }
+    const child = await assoc.target.create({ ...nestedValue, [assoc.foreignKey]: parentPKValue }, childOptions);
+    parent.setDataValue(alias, child);
   }
 
   /**

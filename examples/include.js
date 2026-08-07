@@ -51,6 +51,23 @@ await Comment.bulkCreate([
 
 await Profile.create({ bio: 'Full-stack developer', userId: ana.getDataValue('id') });
 
+const nestedUser = await User.create({
+  name: 'Carla',
+  email: 'carla@example.com',
+  tasks: [
+    { title: 'Create parent and children', completed: true },
+    { title: 'Review nested create result', completed: false }
+  ],
+  profile: { bio: 'Nested create example' }
+}, {
+  include: [Task, Profile]
+});
+
+console.log('\n--- Create with include: user, tasks and profile ---');
+console.log(`  ${nestedUser.getDataValue('name')}:`);
+console.log(`    tasks created: ${nestedUser.getDataValue('tasks').length}`);
+console.log(`    profile: ${nestedUser.getDataValue('profile').getDataValue('bio')}`);
+
 console.log('\n--- SQL aliases ---');
 console.log(`  User.alias = "${User.alias}"`);
 console.log(`  Task.alias = "${Task.alias}"`);
