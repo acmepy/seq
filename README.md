@@ -500,6 +500,16 @@ Task.belongsTo(User, { foreignKey: 'userId' });
 const users = await User.findAll({ include: Task });
 ```
 
+Tambien se pueden obtener todas las asociaciones directas de un modelo como descriptores listos para `include`:
+
+```js
+const users = await User.findAll({
+  include: User.getAssociationIncludes()
+});
+```
+
+El metodo retorna objetos con la forma `{ model, name, as, foreignKey }`, por ejemplo `[{ model: Task, name: 'Task', as: 'tasks', foreignKey: 'userId' }]`. En asociaciones `belongsToMany` tambien incluye `otherKey`.
+
 Para muchos-a-muchos, `through` puede ser el nombre de la tabla intermedia o un modelo que represente esa tabla.
 
 ```js

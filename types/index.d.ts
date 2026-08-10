@@ -138,6 +138,7 @@ export class Model<TValues = Record<string, unknown>> {
   static init(attributes: AttributeMap, options?: ModelOptions): typeof Model;
   static define(seq: Seq): void;
   static addHook(name: string, handler: Function): typeof Model;
+  static getAssociationIncludes(): Array<{ model: ModelStatic; name: string; as: string; foreignKey: string | null; otherKey?: string | null }>;
   static create<T extends ModelStatic>(this: T, values?: object, options?: MutationOptions): Promise<InstanceType<T>>;
   static bulkCreate<T extends ModelStatic>(this: T, records?: object[], options?: MutationOptions): Promise<Array<InstanceType<T>>>;
   static upsert<T extends ModelStatic>(this: T, values?: object, options?: UpsertOptions): Promise<[InstanceType<T>, boolean]>;

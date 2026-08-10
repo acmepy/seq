@@ -166,6 +166,53 @@ describe('Associations', () => {
       assert.ok(User.associations.Task);
       assert.ok(User.associations.Profile);
     });
+
+    it('returns association include descriptors', () => {
+      User.hasMany(Task, { foreignKey: 'userId' });
+      User.hasOne(Profile, { foreignKey: 'userId' });
+
+      const includes = User.getAssociationIncludes();
+
+      assert.deepEqual(includes, [
+        { model: Task, name: 'Task', as: 'tasks', foreignKey: 'userId' },
+        { model: Profile, name: 'Profile', as: 'profile', foreignKey: 'userId' }
+      ]);
+    });
+
+    it('returns aliased include descriptors for multiple associations to the same model', () => {
+      class _AuditTask extends Model {}
+      _AuditTask.init(
+        {
+          id: { type: DataTypes.INTEGER, primaryKey: true, autoIncrement: true },
+          title: { type: DataTypes.STRING(100), allowNull: false },
+          creatorId: { type: DataTypes.INTEGER, allowNull: false },
+          updaterId: { type: DataTypes.INTEGER, allowNull: false }
+        },
+        { modelName: 'AuditTask', tableName: 'audit_tasks' }
+      );
+
+      _AuditTask.belongsTo(User, { foreignKey: 'creatorId', as: 'creator' });
+      _AuditTask.belongsTo(User, { foreignKey: 'updaterId', as: 'updater' });
+
+      assert.deepEqual(_AuditTask.getAssociationIncludes(), [
+        { model: User, name: 'User', as: 'creator', foreignKey: 'creatorId' },
+        { model: User, name: 'User', as: 'updater', foreignKey: 'updaterId' }
+      ]);
+    });
+
+    it('returns otherKey for belongsToMany include descriptors', () => {
+      class Role extends Model {}
+      Role.init(
+        { id: { type: DataTypes.INTEGER, primaryKey: true, autoIncrement: true }, name: { type: DataTypes.STRING(50) } },
+        { modelName: 'Role', tableName: 'roles' }
+      );
+
+      User.belongsToMany(Role, { through: 'user_roles', foreignKey: 'userId', otherKey: 'roleId', as: 'roles' });
+
+      assert.deepEqual(User.getAssociationIncludes(), [
+        { model: Role, name: 'Role', as: 'roles', foreignKey: 'userId', otherKey: 'roleId' }
+      ]);
+    });
   });
 
   describe('FK in table definition (references in attributes)', () => {

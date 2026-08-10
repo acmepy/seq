@@ -206,6 +206,28 @@ export class Model {
   }
 
   /**
+   * Returns this model's associations as include descriptors.
+   * @returns {Array<{ model: typeof Model, name: string, as: string, foreignKey: string|null, otherKey?: string|null }>}
+   */
+  static getAssociationIncludes() {
+    const seen = new Set();
+    const includes = [];
+    for (const association of Object.values(this.associations || {})) {
+      if (!association || seen.has(association)) continue;
+      seen.add(association);
+      const include = {
+        model: association.target,
+        name: association.target?.modelName || association.target?.name,
+        as: association.as || association.target?.modelName || association.target?.name,
+        foreignKey: association.foreignKey || null
+      };
+      if (association.otherKey) include.otherKey = association.otherKey;
+      includes.push(include);
+    }
+    return includes;
+  }
+
+  /**
    * Returns the Seq instance associated with this model.
    * @returns {import('./Seq.js').Seq}
    */
