@@ -1,6 +1,6 @@
 {
   "name": "seq",
-  "version": "1.0.2",
+  "version": "1.0.21",
   "description": "seq es un micro orm, modular, flexible y de facil integracion",
   "type": "module",
   "main": "src/index.js",
@@ -19,6 +19,7 @@
   },
   "scripts": {
     "test": "node --test tests/*.test.js",
+    "test:all": "npm run test && npm run test:mysql",
     "test:mysql": "node --test tests/integration/mysql-suite.test.js",
     "test:coverage": "node --test --experimental-test-coverage tests/*.test.js",
     "test:watch": "node --test --watch tests/*.test.js",

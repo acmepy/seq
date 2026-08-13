@@ -29,6 +29,10 @@ export function runAdapterSuite({ name, createSeq, cleanup = async () => {}, sup
       return context;
     }
 
+    function isConstraintError(error, type) {
+      return error?.details?.constraint?.type === type;
+    }
+
     afterEach(async () => {
       if (!context) return;
       try {
@@ -163,7 +167,7 @@ export function runAdapterSuite({ name, createSeq, cleanup = async () => {}, sup
 
       await assert.rejects(
         () => User.create({ email: 'ana@test.com' }),
-        error => String(error.code).includes('CONSTRAINT')
+        error => isConstraintError(error, 'unique')
       );
     });
 
@@ -196,7 +200,7 @@ export function runAdapterSuite({ name, createSeq, cleanup = async () => {}, sup
 
       await assert.rejects(
         () => Task.create({ title: 'orphan', userId: 999999 }),
-        error => String(error.code).includes('CONSTRAINT')
+        error => isConstraintError(error, 'foreignKey')
       );
 
       const user = await User.create({ name: 'Ana' });
