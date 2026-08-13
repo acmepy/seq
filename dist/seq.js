@@ -6,15 +6,19 @@ import crypto from 'crypto';
 class SeqError extends Error {
   /**
    * @param {string} message - Error message
-   * @param {object} [options] - Error options
-   * @param {string} [options.code] - Error code
-   * @param {*} [options.details] - Additional error details
-   * @param {*} [options.cause] - Original cause
+ * @param {object} [options] - Error options
+ * @param {number} [options.status] - HTTP-compatible status for integrations
+ * @param {string} [options.code] - Error code
+ * @param {*} [options.errors] - Field-level normalized errors
+ * @param {*} [options.details] - Additional error details
+ * @param {*} [options.cause] - Original cause
    */
   constructor(message, options = {}) {
     super(message, { cause: options.cause });
     this.name = 'SeqError';
+    this.status = options.status || null;
     this.code = options.code || 'SEQ_ERROR';
+    this.errors = options.errors || null;
     this.details = options.details || null;
   }
 }
@@ -5530,12 +5534,41 @@ SQLiteAdapter requiere la dependencia "${dependency}". Instalala con: npm instal
     if (!String(error?.code || '').startsWith('SQLITE_CONSTRAINT')) return error;
 
     const name = /^(.*? constraint failed)(?::|$)/i.exec(error.message || '')?.[1] || 'SQLITE_CONSTRAINT';
+    const fields = constraintFields$1(error.message);
+    const type = constraintType$1(error.code);
     return new SQLiteError(error.message, {
-      code: 'SEQ_SQLITE_CONSTRAINT',
-      details: { name, sqliteCode: error.code },
+      status: 409,
+      code: 'CONFLICT',
+      errors: constraintErrors$1(fields, type),
+      details: {
+        name,
+        sqliteCode: error.code,
+        constraint: { adapter: 'sqlite', type, fields, name },
+      },
       cause: error
     });
   }
+}
+
+function constraintFields$1(message = '') {
+  return message.match(/(?:UNIQUE|NOT NULL) constraint failed: (.+)$/)?.[1]
+    ?.split(',')
+    .map(field => field.trim().split('.').pop())
+    .filter(Boolean) || [];
+}
+
+function constraintType$1(code) {
+  if (code === 'SQLITE_CONSTRAINT_UNIQUE') return 'unique';
+  if (code === 'SQLITE_CONSTRAINT_NOTNULL') return 'notNull';
+  if (code === 'SQLITE_CONSTRAINT_FOREIGNKEY') return 'foreignKey';
+  if (code === 'SQLITE_CONSTRAINT_CHECK') return 'check';
+  return 'constraint';
+}
+
+function constraintErrors$1(fields, type) {
+  if (!fields.length) return null;
+  const message = type === 'notNull' ? 'Requerido' : 'Ya existe un registro con este valor';
+  return Object.fromEntries(fields.map(field => [field, message]));
 }
 
 class SQLiteDML extends DMLAbstract {
@@ -5904,9 +5937,14 @@ MySQLAdapter requiere la dependencia "${dependency}". Instalala con: npm install
     ]);
     if (!constraintCodes.has(error?.code)) return error;
 
+    const fields = constraintFields(error);
+    const type = constraintType(error.code);
     return new MySQLError(error.message, {
-      code: 'SEQ_MYSQL_CONSTRAINT',
+      status: 409,
+      code: 'CONFLICT',
+      errors: constraintErrors(fields, type),
       details: {
+        constraint: { adapter: 'mysql', type, fields, name: constraintName(error) },
         mysqlCode: error.code,
         errno: error.errno,
         sqlState: error.sqlState
@@ -5914,6 +5952,35 @@ MySQLAdapter requiere la dependencia "${dependency}". Instalala con: npm install
       cause: error
     });
   }
+}
+
+function constraintFields(error) {
+  if (error?.code === 'ER_BAD_NULL_ERROR') return [error.message?.match(/Column '([^']+)' cannot be null/i)?.[1]].filter(Boolean);
+
+  const keyName = constraintName(error);
+  if (!keyName) return [];
+
+  const field = keyName.startsWith('uk_') ? keyName.split('_').pop() : keyName;
+  return [field].filter(Boolean);
+}
+
+function constraintName(error) {
+  return error?.message?.match(/for key ['"`](?:.+\.)?([^'"`]+)['"`]/i)?.[1] || null;
+}
+
+function constraintType(code) {
+  if (code === 'ER_DUP_ENTRY') return 'unique';
+  if (code === 'ER_BAD_NULL_ERROR') return 'notNull';
+  if (code === 'ER_NO_REFERENCED_ROW' || code === 'ER_NO_REFERENCED_ROW_2') return 'foreignKey';
+  if (code === 'ER_ROW_IS_REFERENCED' || code === 'ER_ROW_IS_REFERENCED_2') return 'referenced';
+  if (code === 'ER_CHECK_CONSTRAINT_VIOLATED') return 'check';
+  return 'constraint';
+}
+
+function constraintErrors(fields, type) {
+  if (!fields.length) return null;
+  const message = type === 'notNull' ? 'Requerido' : 'Ya existe un registro con este valor';
+  return Object.fromEntries(fields.map(field => [field, message]));
 }
 
 class MySQLDDL extends DDLAbstract {

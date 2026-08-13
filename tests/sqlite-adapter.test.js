@@ -287,9 +287,11 @@ describe('SQLite Adapter', () => {
           assert.ok(error instanceof SQLiteError);
           assert.ok(error instanceof ErrorAbstract);
           assert.equal(error.name, 'SQLiteError');
-          assert.equal(error.code, 'SEQ_SQLITE_CONSTRAINT');
+          assert.equal(error.status, 409);
+          assert.equal(error.code, 'CONFLICT');
           assert.equal(error.details.name, name);
           assert.ok(String(error.details.sqliteCode).startsWith('SQLITE_CONSTRAINT'));
+          assert.equal(error.details.constraint.adapter, 'sqlite');
           return true;
         }
       );

@@ -31,7 +31,7 @@ SQLiteAdapter requiere la dependencia "${dependency}". Instalala con: npm instal
     const type = constraintType(error.code);
     return new SQLiteError(error.message, {
       status: 409,
-      code: 'SEQ_SQLITE_CONSTRAINT',
+      code: 'CONFLICT',
       errors: constraintErrors(fields, type),
       details: {
         name,
@@ -54,6 +54,7 @@ function constraintType(code) {
   if (code === 'SQLITE_CONSTRAINT_UNIQUE') return 'unique';
   if (code === 'SQLITE_CONSTRAINT_NOTNULL') return 'notNull';
   if (code === 'SQLITE_CONSTRAINT_FOREIGNKEY') return 'foreignKey';
+  if (code === 'SQLITE_CONSTRAINT_CHECK') return 'check';
   return 'constraint';
 }
 
