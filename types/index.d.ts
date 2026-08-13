@@ -252,7 +252,9 @@ export const DataTypes: Record<string, any>;
 export const Op: Record<string, symbol>;
 
 export class SeqError extends Error {
+  status?: number | null;
   code?: string;
+  errors?: Record<string, string> | null;
   details?: unknown;
 }
 
