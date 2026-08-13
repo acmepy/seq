@@ -203,6 +203,7 @@ export class BaseAdapter {
   constructor(options?: AdapterOptions);
   connect(): Promise<void>;
   authenticate(): Promise<boolean>;
+  validateDependencies(): Promise<boolean>;
   close(): Promise<void>;
   initialize(): Promise<void>;
   inspectDatabase(): Promise<object>;

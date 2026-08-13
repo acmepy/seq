@@ -34,7 +34,7 @@ describe('SQLite Adapter', () => {
       assert.equal(map.eager, true);
     });
 
-    it('loads better-sqlite3 on connect and reports when it is missing', async () => {
+    it('validates better-sqlite3 dependency and reports when it is missing', async () => {
       const originalLoadDatabase = SQLiteAdapter._loadDatabase;
       const errors = [];
       let loadCalls = 0;
@@ -60,7 +60,9 @@ describe('SQLite Adapter', () => {
         await assert.rejects(
           () => missingSeq.init(),
           error => {
-            assert.equal(error.name, 'AdapterError');
+            assert.ok(error instanceof SQLiteError);
+            assert.ok(error instanceof ErrorAbstract);
+            assert.equal(error.name, 'SQLiteError');
             assert.equal(error.code, 'SEQ_SQLITE_MISSING_DEPENDENCY');
             assert.match(error.message, /better-sqlite3/);
             assert.equal(error.details.dependency, 'better-sqlite3');
@@ -75,6 +77,13 @@ describe('SQLite Adapter', () => {
       assert.equal(errors.length, 1);
       assert.equal(errors[0][0], '[Seq]');
       assert.match(errors[0][1], /better-sqlite3/);
+    });
+
+    it('exposes dependency validation without opening a connection', async () => {
+      const sqlite = new SQLiteAdapter({ database: ':memory:' });
+
+      assert.equal(await sqlite.validateDependencies(), true);
+      assert.equal(sqlite._db, null);
     });
 
     it('authenticates by connecting and running a lightweight query', async () => {

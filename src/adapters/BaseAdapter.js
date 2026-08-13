@@ -46,6 +46,15 @@ export class BaseAdapter {
   }
 
   /**
+   * Validates optional runtime dependencies required by the adapter.
+   * Adapters with external drivers should override this method.
+   * @returns {Promise<boolean>}
+   */
+  async validateDependencies() {
+    return true;
+  }
+
+  /**
    * Closes the connection (no-op for in-memory adapters).
    */
   async close() {}

@@ -7,6 +7,22 @@ export class SQLiteError extends ErrorAbstract {
     this.code = options.code || 'SEQ_SQLITE_ERROR';
   }
 
+  static missingDependency(dependency, cause) {
+    const message = `
+-------------------------------------------------------------------------------------------------------------
+
+SQLiteAdapter requiere la dependencia "${dependency}". Instalala con: npm install ${dependency}
+
+-------------------------------------------------------------------------------------------------------------
+
+`;
+    return new SQLiteError(message, {
+      code: 'SEQ_SQLITE_MISSING_DEPENDENCY',
+      details: { dependency },
+      cause
+    });
+  }
+
   static from(error) {
     if (!String(error?.code || '').startsWith('SQLITE_CONSTRAINT')) return error;
 

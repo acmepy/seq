@@ -2984,6 +2984,15 @@ class BaseAdapter {
   }
 
   /**
+   * Validates optional runtime dependencies required by the adapter.
+   * Adapters with external drivers should override this method.
+   * @returns {Promise<boolean>}
+   */
+  async validateDependencies() {
+    return true;
+  }
+
+  /**
    * Closes the connection (no-op for in-memory adapters).
    */
   async close() {}
@@ -5493,6 +5502,22 @@ class SQLiteError extends ErrorAbstract {
     this.code = options.code || 'SEQ_SQLITE_ERROR';
   }
 
+  static missingDependency(dependency, cause) {
+    const message = `
+-------------------------------------------------------------------------------------------------------------
+
+SQLiteAdapter requiere la dependencia "${dependency}". Instalala con: npm install ${dependency}
+
+-------------------------------------------------------------------------------------------------------------
+
+`;
+    return new SQLiteError(message, {
+      code: 'SEQ_SQLITE_MISSING_DEPENDENCY',
+      details: { dependency },
+      cause
+    });
+  }
+
   static from(error) {
     if (!String(error?.code || '').startsWith('SQLITE_CONSTRAINT')) return error;
 
@@ -5767,7 +5792,7 @@ class SQLiteAdapter extends BaseAdapter {
 
   async connect() {
     if (this._db) return;
-    const DatabaseConstructor = await this._loadDatabaseDependency();
+    const DatabaseConstructor = await this._getDatabaseConstructor();
     this._db = new DatabaseConstructor(this._dbPath);
     this._db.pragma('journal_mode = WAL');
     this._db.pragma('foreign_keys = ON');
@@ -5780,24 +5805,18 @@ class SQLiteAdapter extends BaseAdapter {
     return true;
   }
 
-  async _loadDatabaseDependency() {
+  async validateDependencies() {
+    await this._getDatabaseConstructor();
+    return true;
+  }
+
+  async _getDatabaseConstructor() {
     try {
       return await this.constructor._loadDatabase();
     } catch (error) {
-      const message = `
--------------------------------------------------------------------------------------------------------------
-
-SQLiteAdapter requiere la dependencia "better-sqlite3". Instalala con: npm install better-sqlite3
-
--------------------------------------------------------------------------------------------------------------
-
-`;
-      this._dependencyWarning(message);
-      throw new AdapterError(message, {
-        code: 'SEQ_SQLITE_MISSING_DEPENDENCY',
-        cause: error,
-        details: { dependency: 'better-sqlite3' }
-      });
+      const sqliteError = SQLiteError.missingDependency('better-sqlite3', error);
+      this._dependencyWarning(sqliteError.message);
+      throw sqliteError;
     }
   }
 
