@@ -1,6 +1,6 @@
 {
   "name": "seq",
-  "version": "0.8.8",
+  "version": "0.8.9",
   "description": "seq es un micro orm, modular, flexible y de facil integracion",
   "type": "module",
   "main": "src/index.js",
@@ -24,6 +24,11 @@
 
     "lint": "eslint src tests examples",
     "format": "prettier --write src tests examples types README.md package.json",
+
+    "prebuild": "node -e \"require('fs').rmSync('dist',{recursive:true,force:true})\"",
+    "build": "rollup -c",
+    "dev": "rollup -c -w",
+    "prepack": "npm run build",
 
     "example:basic": "node examples/basic.js",
     "example:associations": "node examples/associations.js",
@@ -53,7 +58,8 @@
   "devDependencies": {
     "better-sqlite3": "^12.11.1",
     "eslint": "^10.7.0",
-    "prettier": "^3.9.6"
+    "prettier": "^3.9.6",
+    "rollup": "^4.46.2"
   },
   "author": "Hugo",
   "license": "MIT",

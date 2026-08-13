@@ -213,6 +213,8 @@ export class BaseAdapter {
   get eager(): boolean;
 }
 
+export class ErrorAbstract extends SeqError {}
+
 export interface SQLiteAdapterOptions extends AdapterOptions {
   database?: string;
 }
@@ -220,6 +222,8 @@ export interface SQLiteAdapterOptions extends AdapterOptions {
 export class SQLiteAdapter extends BaseAdapter {
   constructor(options?: SQLiteAdapterOptions);
 }
+
+export class SQLiteError extends ErrorAbstract {}
 
 export class MapAdapter extends BaseAdapter {
   constructor(options?: AdapterOptions);

@@ -4,6 +4,8 @@ import { Seq } from '../src/core/Seq.js';
 import { Model } from '../src/core/Model.js';
 import { DataTypes } from '../src/data-types/index.js';
 import { SQLiteAdapter } from '../src/adapters/sqlite/SQLiteAdapter.js';
+import { SQLiteError } from '../src/adapters/sqlite/SQLiteError.js';
+import { ErrorAbstract } from '../src/adapters/abstract/ErrorAbstract.js';
 import { MapAdapter } from '../src/adapters/map/MapAdapter.js';
 
 describe('SQLite Adapter', () => {
@@ -255,6 +257,83 @@ describe('SQLite Adapter', () => {
       const rec = await Ts.create({ name: 'test' });
       assert.ok(rec.getDataValue('createdAt'));
       assert.ok(rec.getDataValue('updatedAt'));
+    });
+  });
+
+  describe('constraint errors', () => {
+    async function withConstraintAdapter(callback) {
+      const sqlite = new SQLiteAdapter({ database: ':memory:' });
+      await sqlite.connect();
+      try {
+        await callback(sqlite);
+      } finally {
+        await sqlite.close();
+      }
+    }
+
+    async function assertConstraint(sqlite, action, name) {
+      await assert.rejects(
+        async () => action(),
+        error => {
+          assert.ok(error instanceof SQLiteError);
+          assert.ok(error instanceof ErrorAbstract);
+          assert.equal(error.name, 'SQLiteError');
+          assert.equal(error.code, 'SEQ_SQLITE_CONSTRAINT');
+          assert.equal(error.details.name, name);
+          assert.ok(String(error.details.sqliteCode).startsWith('SQLITE_CONSTRAINT'));
+          return true;
+        }
+      );
+    }
+
+    it('maps UNIQUE constraint failed', async () => {
+      await withConstraintAdapter(async sqlite => {
+        sqlite.dml._execute('CREATE TABLE users (id INTEGER PRIMARY KEY, email TEXT UNIQUE)');
+        sqlite.dml._execute('INSERT INTO users (email) VALUES (?)', ['ana@test.com']);
+
+        await assertConstraint(
+          sqlite,
+          () => sqlite.dml._execute('INSERT INTO users (email) VALUES (?)', ['ana@test.com']),
+          'UNIQUE constraint failed'
+        );
+      });
+    });
+
+    it('maps FOREIGN KEY constraint failed', async () => {
+      await withConstraintAdapter(async sqlite => {
+        sqlite.dml._execute('CREATE TABLE users (id INTEGER PRIMARY KEY)');
+        sqlite.dml._execute('CREATE TABLE tasks (id INTEGER PRIMARY KEY, user_id INTEGER REFERENCES users(id))');
+
+        await assertConstraint(
+          sqlite,
+          () => sqlite.dml._execute('INSERT INTO tasks (user_id) VALUES (?)', [1]),
+          'FOREIGN KEY constraint failed'
+        );
+      });
+    });
+
+    it('maps NOT NULL constraint failed', async () => {
+      await withConstraintAdapter(async sqlite => {
+        sqlite.dml._execute('CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT NOT NULL)');
+
+        await assertConstraint(
+          sqlite,
+          () => sqlite.dml._execute('INSERT INTO users (name) VALUES (?)', [null]),
+          'NOT NULL constraint failed'
+        );
+      });
+    });
+
+    it('maps CHECK constraint failed', async () => {
+      await withConstraintAdapter(async sqlite => {
+        sqlite.dml._execute('CREATE TABLE users (id INTEGER PRIMARY KEY, age INTEGER CHECK (age >= 18))');
+
+        await assertConstraint(
+          sqlite,
+          () => sqlite.dml._execute('INSERT INTO users (age) VALUES (?)', [17]),
+          'CHECK constraint failed'
+        );
+      });
     });
   });
 

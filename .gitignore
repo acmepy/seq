@@ -11,8 +11,6 @@ pnpm-debug.log*
 # Runtime and coverage output
 coverage/
 .nyc_output/
-dist/
-build/
 examples/*.sqlite
 examples/*.sqlite-*
 

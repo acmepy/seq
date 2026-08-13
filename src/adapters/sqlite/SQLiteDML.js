@@ -1,5 +1,6 @@
 import { DMLAbstract } from "../abstract/DMLAbstract.js";
 import { AdapterError } from '../../core/errors/AdapterError.js';
+import { SQLiteError } from './SQLiteError.js';
 
 export class SQLiteDML extends DMLAbstract {
   constructor(adapter) {
@@ -26,7 +27,11 @@ export class SQLiteDML extends DMLAbstract {
 
   _execute(sql, params = []) {
     this._log('trace', sql, params);
-    return this._db().prepare(sql).run(...params);
+    try {
+      return this._db().prepare(sql).run(...params);
+    } catch (error) {
+      throw SQLiteError.from(error);
+    }
   }
 
   _mapRows(rows, model, schema, options = {}) {
