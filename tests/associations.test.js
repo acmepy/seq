@@ -1,12 +1,12 @@
 import { describe, it, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
-import { Seq } from '../src/core/Seq.js';
 import { Model } from '../src/core/Model.js';
 import { DataTypes } from '../src/data-types/index.js';
-import { SQLiteAdapter } from '../src/adapters/sqlite/SQLiteAdapter.js';
+import { cleanupTestContext, createTestContext, testTable } from './shared/test-context.js';
 
 describe('Associations', () => {
   let seq, adapter;
+  let context;
   let User, Task, Profile;
 
   function defineModels(options = {}) {
@@ -16,7 +16,7 @@ describe('Associations', () => {
         id: { type: DataTypes.INTEGER, primaryKey: true, autoIncrement: true },
         name: { type: DataTypes.STRING(100), allowNull: false }
       },
-      { modelName: 'User', tableName: 'users', ...options.user }
+      { modelName: 'User', tableName: testTable('users'), ...options.user }
     );
 
     class _Task extends Model {}
@@ -26,7 +26,7 @@ describe('Associations', () => {
         title: { type: DataTypes.STRING(100), allowNull: false },
         userId: { type: DataTypes.INTEGER, allowNull: false }
       },
-      { modelName: 'Task', tableName: 'tasks', ...options.task }
+      { modelName: 'Task', tableName: testTable('tasks'), ...options.task }
     );
 
     class _Profile extends Model {}
@@ -36,7 +36,7 @@ describe('Associations', () => {
         bio: { type: DataTypes.STRING(200) },
         userId: { type: DataTypes.INTEGER, allowNull: false, unique: true }
       },
-      { modelName: 'Profile', tableName: 'profiles', ...options.profile }
+      { modelName: 'Profile', tableName: testTable('profiles'), ...options.profile }
     );
 
     User = _User;
@@ -45,20 +45,31 @@ describe('Associations', () => {
   }
 
   async function createSeq(models, opts = {}) {
-    adapter = new SQLiteAdapter({ database: ':memory:' });
-    await adapter.connect();
-    seq = new Seq({
-      adapter,
+    context = await createTestContext({
       models,
-      ...opts,
-      logging: false
+      logging: false,
+      adapterOptions: opts.adapterOptions || {}
     });
-    await seq.init();
+    ({ seq, adapter } = context);
     return seq;
   }
 
+  function constraintTableName(tableName) {
+    const prefix = adapter.naming?.prefix;
+    if (!prefix) return String(tableName);
+    const token = String(prefix).endsWith('_') ? String(prefix) : `${prefix}_`;
+    return String(tableName).replaceAll(token, '');
+  }
+
+  function expectedForeignKeyName(sourceTable, targetTable, foreignKeyColumn) {
+    return `fk_${constraintTableName(sourceTable)}_${constraintTableName(targetTable)}_${foreignKeyColumn}`;
+  }
+
   afterEach(async () => {
-    if (seq) await seq.close();
+    await cleanupTestContext(context);
+    context = null;
+    seq = null;
+    adapter = null;
   });
 
   describe('Association declaration', () => {
@@ -220,7 +231,7 @@ describe('Associations', () => {
       class _User extends Model {}
       _User.init(
         { id: { type: DataTypes.INTEGER, primaryKey: true, autoIncrement: true }, name: { type: DataTypes.STRING(100) } },
-        { modelName: 'User', tableName: 'users' }
+        { modelName: 'User', tableName: testTable('users') }
       );
 
       class _Task extends Model {}
@@ -230,13 +241,13 @@ describe('Associations', () => {
           title: { type: DataTypes.STRING(100) },
           userId: { type: DataTypes.INTEGER, references: { model: 'User', key: 'id' } }
         },
-        { modelName: 'Task', tableName: 'tasks' }
+        { modelName: 'Task', tableName: testTable('tasks') }
       );
 
       await createSeq([_User, _Task]);
       await seq.sync();
 
-      const schema = seq._adapter.schemas.get('tasks');
+      const schema = seq._adapter.schemas.get(_Task.tableName);
       assert.equal(schema.foreignKeys.length, 1);
       assert.equal(schema.foreignKeys[0].attributeName, 'userId');
       assert.equal(schema.foreignKeys[0].references.model, 'User');
@@ -253,13 +264,13 @@ describe('Associations', () => {
       await createSeq([User, Task, Profile]);
       await seq.sync();
 
-      const taskSchema = seq._adapter.schemas.get('tasks');
+      const taskSchema = seq._adapter.schemas.get(Task.tableName);
       const fk = taskSchema.foreignKeys.find(f => f.attributeName === 'userId');
       assert.ok(fk);
       assert.equal(fk.references.model, 'User');
       assert.equal(fk.references.key, 'id');
 
-      const profileSchema = seq._adapter.schemas.get('profiles');
+      const profileSchema = seq._adapter.schemas.get(Profile.tableName);
       const pfk = profileSchema.foreignKeys.find(f => f.attributeName === 'userId');
       assert.ok(pfk);
       assert.equal(pfk.references.model, 'User');
@@ -269,7 +280,7 @@ describe('Associations', () => {
       class _User extends Model {}
       _User.init(
         { id: { type: DataTypes.INTEGER, primaryKey: true, autoIncrement: true }, name: { type: DataTypes.STRING(100) } },
-        { modelName: 'User', tableName: 'users' }
+        { modelName: 'User', tableName: testTable('users') }
       );
 
       class _Task extends Model {}
@@ -279,25 +290,17 @@ describe('Associations', () => {
           title: { type: DataTypes.STRING(100) },
           userId: { type: DataTypes.INTEGER }
         },
-        { modelName: 'Task', tableName: 'tasks' }
+        { modelName: 'Task', tableName: testTable('tasks') }
       );
 
       _User.hasMany(_Task, { foreignKey: 'userId' });
 
-      adapter = new SQLiteAdapter({
-        database: ':memory:',
-        naming: { columns: 'snake_case' }
+      await createSeq([_User, _Task], {
+        adapterOptions: { naming: { columns: 'snake_case' } }
       });
-      await adapter.connect();
-      seq = new Seq({
-        adapter,
-        models: [_User, _Task],
-        logging: false
-      });
-      await seq.init();
       await seq.sync();
 
-      const schema = seq._adapter.schemas.get('tasks');
+      const schema = seq._adapter.schemas.get(_Task.tableName);
       const fk = schema.foreignKeys.find(f => f.attributeName === 'userId');
       assert.ok(fk);
       assert.equal(fk.columnName, 'user_id');
@@ -333,12 +336,12 @@ describe('Associations', () => {
           title: { type: DataTypes.STRING(100) },
           userId: { type: DataTypes.INTEGER, allowNull: true }
         },
-        { modelName: 'Task2', tableName: 'tasks2' }
+        { modelName: 'Task2', tableName: testTable('tasks2') }
       );
       User.hasMany(_Task2, { foreignKey: 'userId' });
 
-      seq = new Seq({ adapter, models: [User, _Task2], logging: false });
-      await seq.init();
+      await cleanupTestContext(context);
+      await createSeq([User, _Task2]);
       await seq.sync();
 
       const task = await _Task2.create({ title: 'Task null' });
@@ -377,7 +380,7 @@ describe('Associations', () => {
       class _User extends Model {}
       _User.init(
         { id: { type: DataTypes.INTEGER, primaryKey: true, autoIncrement: true }, name: { type: DataTypes.STRING(100) } },
-        { modelName: 'User', tableName: 'users' }
+        { modelName: 'User', tableName: testTable('users') }
       );
 
       class _Task extends Model {}
@@ -387,7 +390,7 @@ describe('Associations', () => {
           title: { type: DataTypes.STRING(100) },
           userId: { type: DataTypes.INTEGER, references: { model: 'User', key: 'id' } }
         },
-        { modelName: 'Task', tableName: 'tasks' }
+        { modelName: 'Task', tableName: testTable('tasks') }
       );
 
       await createSeq([_User, _Task]);
@@ -449,7 +452,7 @@ describe('Associations', () => {
       class _User extends Model {}
       _User.init(
         { id: { type: DataTypes.INTEGER, primaryKey: true, autoIncrement: true }, name: { type: DataTypes.STRING(100) } },
-        { modelName: 'User', tableName: 'users' }
+        { modelName: 'User', tableName: testTable('users') }
       );
 
       class _Task extends Model {}
@@ -459,7 +462,7 @@ describe('Associations', () => {
           title: { type: DataTypes.STRING(100) },
           userId: { type: DataTypes.INTEGER, allowNull: true }
         },
-        { modelName: 'Task', tableName: 'tasks' }
+        { modelName: 'Task', tableName: testTable('tasks') }
       );
 
       _User.hasMany(_Task, { foreignKey: 'userId', onDelete: 'SET NULL' });
@@ -481,7 +484,7 @@ describe('Associations', () => {
       class _User extends Model {}
       _User.init(
         { userId: { type: DataTypes.INTEGER, primaryKey: true, autoIncrement: true }, name: { type: DataTypes.STRING(100) } },
-        { modelName: 'User', tableName: 'users' }
+        { modelName: 'User', tableName: testTable('users') }
       );
 
       class _Task extends Model {}
@@ -491,7 +494,7 @@ describe('Associations', () => {
           title: { type: DataTypes.STRING(100) },
           userUserId: { type: DataTypes.INTEGER }
         },
-        { modelName: 'Task', tableName: 'tasks' }
+        { modelName: 'Task', tableName: testTable('tasks') }
       );
 
       _User.hasMany(_Task, { foreignKey: 'userUserId', onUpdate: 'CASCADE' });
@@ -527,9 +530,9 @@ describe('Associations', () => {
       await createSeq([User, Task]);
       await seq.sync();
 
-      const schema = seq._adapter.schemas.get('tasks');
+      const schema = seq._adapter.schemas.get(Task.tableName);
       const fk = schema.foreignKeys.find(f => f.attributeName === 'userId');
-      assert.equal(fk.constraintName, 'fk_tasks_users');
+      assert.equal(fk.constraintName, expectedForeignKeyName(Task.tableName, User.tableName, 'user_id'));
     });
 
     it('auto-generates from fk_{source_table}_{target_table} on belongsTo', async () => {
@@ -539,9 +542,9 @@ describe('Associations', () => {
       await createSeq([User, Task]);
       await seq.sync();
 
-      const schema = seq._adapter.schemas.get('tasks');
+      const schema = seq._adapter.schemas.get(Task.tableName);
       const fk = schema.foreignKeys.find(f => f.attributeName === 'userId');
-      assert.equal(fk.constraintName, 'fk_tasks_users');
+      assert.equal(fk.constraintName, expectedForeignKeyName(Task.tableName, User.tableName, 'user_id'));
     });
 
     it('auto-generates from fk_{source_table}_{target_table} on hasOne', async () => {
@@ -551,16 +554,16 @@ describe('Associations', () => {
       await createSeq([User, Profile]);
       await seq.sync();
 
-      const schema = seq._adapter.schemas.get('profiles');
+      const schema = seq._adapter.schemas.get(Profile.tableName);
       const fk = schema.foreignKeys.find(f => f.attributeName === 'userId');
-      assert.equal(fk.constraintName, 'fk_profiles_users');
+      assert.equal(fk.constraintName, expectedForeignKeyName(Profile.tableName, User.tableName, 'user_id'));
     });
 
     it('uses explicit constraintName from references in attributes', async () => {
       class _User extends Model {}
       _User.init(
         { id: { type: DataTypes.INTEGER, primaryKey: true, autoIncrement: true }, name: { type: DataTypes.STRING(100) } },
-        { modelName: 'User', tableName: 'users' }
+        { modelName: 'User', tableName: testTable('users') }
       );
 
       class _Task extends Model {}
@@ -570,13 +573,13 @@ describe('Associations', () => {
           title: { type: DataTypes.STRING(100) },
           userId: { type: DataTypes.INTEGER, references: { model: 'User', key: 'id', constraintName: 'custom_fk_name' } }
         },
-        { modelName: 'Task', tableName: 'tasks' }
+        { modelName: 'Task', tableName: testTable('tasks') }
       );
 
       await createSeq([_User, _Task]);
       await seq.sync();
 
-      const schema = seq._adapter.schemas.get('tasks');
+      const schema = seq._adapter.schemas.get(_Task.tableName);
       const fk = schema.foreignKeys.find(f => f.attributeName === 'userId');
       assert.equal(fk.constraintName, 'custom_fk_name');
     });
@@ -585,7 +588,7 @@ describe('Associations', () => {
       class _User extends Model {}
       _User.init(
         { id: { type: DataTypes.INTEGER, primaryKey: true, autoIncrement: true }, name: { type: DataTypes.STRING(100) } },
-        { modelName: 'User', tableName: 'users' }
+        { modelName: 'User', tableName: testTable('users') }
       );
 
       class _Task extends Model {}
@@ -595,15 +598,42 @@ describe('Associations', () => {
           title: { type: DataTypes.STRING(100) },
           userId: { type: DataTypes.INTEGER, references: { model: 'User', key: 'id' } }
         },
-        { modelName: 'Task', tableName: 'tasks' }
+        { modelName: 'Task', tableName: testTable('tasks') }
       );
 
       await createSeq([_User, _Task]);
       await seq.sync();
 
-      const schema = seq._adapter.schemas.get('tasks');
+      const schema = seq._adapter.schemas.get(_Task.tableName);
       const fk = schema.foreignKeys.find(f => f.attributeName === 'userId');
-      assert.equal(fk.constraintName, 'fk_tasks_users');
+      assert.equal(fk.constraintName, expectedForeignKeyName(_Task.tableName, _User.tableName, 'user_id'));
+    });
+
+    it('omits adapter naming prefix from auto-generated constraint names', async () => {
+      class _User extends Model {}
+      _User.init(
+        { id: { type: DataTypes.INTEGER, primaryKey: true, autoIncrement: true }, name: { type: DataTypes.STRING(100) } },
+        { modelName: 'User', tableName: 'tenant_users' }
+      );
+
+      class _Task extends Model {}
+      _Task.init(
+        {
+          id: { type: DataTypes.INTEGER, primaryKey: true, autoIncrement: true },
+          title: { type: DataTypes.STRING(100) },
+          userId: { type: DataTypes.INTEGER, references: { model: 'User', key: 'id' } }
+        },
+        { modelName: 'Task', tableName: 'tenant_tasks' }
+      );
+
+      await createSeq([_User, _Task], {
+        adapterOptions: { naming: { prefix: 'tenant' } }
+      });
+      await seq.sync();
+
+      const schema = seq._adapter.schemas.get(_Task.tableName);
+      const fk = schema.foreignKeys.find(f => f.attributeName === 'userId');
+      assert.equal(fk.constraintName, 'fk_tasks_users_user_id');
     });
 
     it('rejects invalid FK with constraint info in schema', async () => {
@@ -640,7 +670,7 @@ describe('Associations', () => {
       await createSeq([User, Task]);
       await seq.sync();
 
-      const schema = seq._adapter.schemas.get('tasks');
+      const schema = seq._adapter.schemas.get(Task.tableName);
       const fk = schema.foreignKeys.find(f => f.attributeName === 'userId');
       assert.equal(fk.constraintName, 'my_custom_fk');
     });

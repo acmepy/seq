@@ -1,6 +1,7 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { Seq, Model, DataTypes, MapAdapter, SQLiteAdapter } from '../src/index.js';
+import { Seq, Model, DataTypes, MapAdapter } from '../src/index.js';
+import { cleanupTestContext, createTestContext, testTable } from './shared/test-context.js';
 
 describe('Logging levels', () => {
   it('uses info and error console handlers by default', () => {
@@ -103,7 +104,7 @@ describe('Logging levels', () => {
     ]]);
   });
 
-  it('logs SQLite statements through trace', async () => {
+  it('logs SQL statements through trace', async () => {
     const calls = [];
 
     class User extends Model {}
@@ -112,11 +113,10 @@ describe('Logging levels', () => {
         id: { type: DataTypes.INTEGER, primaryKey: true, autoIncrement: true },
         name: { type: DataTypes.STRING(100), allowNull: false }
       },
-      { modelName: 'User', tableName: 'users', timestamps: false }
+      { modelName: 'User', tableName: testTable('users'), timestamps: false }
     );
 
-    const seq = new Seq({
-      adapter: new SQLiteAdapter({ database: ':memory:' }),
+    const context = await createTestContext({
       models: [User],
       logging: {
         info: false,
@@ -124,12 +124,15 @@ describe('Logging levels', () => {
         error: false
       }
     });
+    const seq = context.seq;
 
-    await seq.init();
-    await seq.sync();
-    await User.create({ name: 'Ana' });
-    await User.findAll();
-    await seq.close();
+    try {
+      await seq.sync();
+      await User.create({ name: 'Ana' });
+      await User.findAll();
+    } finally {
+      await cleanupTestContext(context);
+    }
 
     assert.ok(calls.some(args => args[1]?.startsWith?.('INSERT INTO')));
     assert.ok(calls.some(args => args[1]?.startsWith?.('SELECT')));

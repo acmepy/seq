@@ -3,8 +3,8 @@ import assert from 'node:assert/strict';
 import { Seq } from '../src/core/Seq.js';
 import { Model } from '../src/core/Model.js';
 import { DataTypes } from '../src/data-types/index.js';
-import { SQLiteAdapter } from '../src/adapters/sqlite/SQLiteAdapter.js';
 import { MapAdapter } from '../src/adapters/map/MapAdapter.js';
+import { cleanupTestContext, createTestContext, testTable } from './shared/test-context.js';
 
 describe('Model upsert', () => {
   function defineUser() {
@@ -16,33 +16,34 @@ describe('Model upsert', () => {
         name: { type: DataTypes.STRING(100), allowNull: false },
         active: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: true }
       },
-      { modelName: 'User', tableName: 'users', timestamps: true }
+      { modelName: 'User', tableName: testTable('users'), timestamps: true }
     );
     return User;
   }
 
-  describe('SQLiteAdapter', () => {
+  describe('SQL adapter', () => {
     let seq;
     let User;
     let trace;
+    let context;
 
     beforeEach(async () => {
       trace = [];
       User = defineUser();
-      const adapter = new SQLiteAdapter({ database: ':memory:' });
-      await adapter.connect();
-      seq = new Seq({
-        adapter,
+      context = await createTestContext({
         models: [User],
         logging: { trace: (...args) => trace.push(args), info: false, warn: false, error: false }
       });
+      seq = context.seq;
       await seq.init();
       await seq.sync();
       trace = [];
     });
 
     afterEach(async () => {
-      await seq.close();
+      await cleanupTestContext(context);
+      context = null;
+      seq = null;
     });
 
     it('inserts when no matching row exists', async () => {

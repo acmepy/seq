@@ -1,10 +1,10 @@
-import { describe, it, beforeEach } from 'node:test';
+import { describe, it, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
-import { Seq, Op, Model, DataTypes } from '../src/index.js';
-import { SQLiteAdapter } from '../src/adapters/sqlite/SQLiteAdapter.js';
+import { Op, Model, DataTypes } from '../src/index.js';
+import { cleanupTestContext, createTestContext, testTable } from './shared/test-context.js';
 
 describe('Operators (Op)', () => {
-  let seq, adapter, User;
+  let context, User;
 
   beforeEach(async () => {
     class _User extends Model {}
@@ -15,20 +15,22 @@ describe('Operators (Op)', () => {
         age: { type: DataTypes.INTEGER, allowNull: false },
         active: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: true }
       },
-      { modelName: 'User', tableName: 'users', timestamps: false }
+      { modelName: 'User', tableName: testTable('users'), timestamps: false }
     );
     User = _User;
 
-    adapter = new SQLiteAdapter({ database: ':memory:' });
-    await adapter.connect();
-    seq = new Seq({ adapter, models: [User], logging: false });
-    await seq.init();
-    await seq.sync();
+    context = await createTestContext({ models: [User] });
+    await context.seq.sync();
 
     await User.create({ name: 'Ana', age: 25, active: true });
     await User.create({ name: 'Juan', age: 30, active: true });
     await User.create({ name: 'Luis', age: 35, active: false });
     await User.create({ name: 'Ana María', age: 28, active: true });
+  });
+
+  afterEach(async () => {
+    await cleanupTestContext(context);
+    context = null;
   });
 
   describe('Op.eq', () => {

@@ -1,12 +1,12 @@
 import { describe, it, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
-import { Seq } from '../src/core/Seq.js';
 import { Model } from '../src/core/Model.js';
 import { DataTypes } from '../src/data-types/index.js';
-import { SQLiteAdapter } from '../src/adapters/sqlite/SQLiteAdapter.js';
+import { cleanupTestContext, createTestContext, testTable } from './shared/test-context.js';
 
 describe('Unique Constraints', () => {
   let seq, adapter;
+  let context;
   let User;
 
   beforeEach(async () => {
@@ -18,23 +18,20 @@ describe('Unique Constraints', () => {
         email: { type: DataTypes.STRING(150), allowNull: false, unique: true },
         username: { type: DataTypes.STRING(50), allowNull: false, unique: true }
       },
-      { modelName: 'User', tableName: 'users' }
+      { modelName: 'User', tableName: testTable('users') }
     );
     User = _User;
 
-    adapter = new SQLiteAdapter({ database: ':memory:' });
-    await adapter.connect();
-    seq = new Seq({
-      adapter,
-      models: [User],
-      logging: false
-    });
-    await seq.init();
+    context = await createTestContext({ models: [User], logging: false });
+    ({ seq, adapter } = context);
     await seq.sync();
   });
 
   afterEach(async () => {
-    await seq.close();
+    await cleanupTestContext(context);
+    context = null;
+    seq = null;
+    adapter = null;
   });
 
   describe('insert', () => {
@@ -60,21 +57,20 @@ describe('Unique Constraints', () => {
           name: { type: DataTypes.STRING(100), allowNull: false },
           nickname: { type: DataTypes.STRING(50), allowNull: true, unique: true }
         },
-        { modelName: 'NullUser', tableName: 'null_users' }
+        { modelName: 'NullUser', tableName: testTable('null_users') }
       );
 
-      seq = new Seq({
-        adapter,
-        models: [_NullUser],
-        logging: false
-      });
-      await seq.init();
-      await seq.sync();
+      const nullContext = await createTestContext({ models: [_NullUser], logging: false });
 
-      const user1 = await _NullUser.create({ name: 'Ana' });
-      const user2 = await _NullUser.create({ name: 'Juan' });
-      assert.ok(user1);
-      assert.ok(user2);
+      try {
+        await nullContext.seq.sync();
+        const user1 = await _NullUser.create({ name: 'Ana' });
+        const user2 = await _NullUser.create({ name: 'Juan' });
+        assert.ok(user1);
+        assert.ok(user2);
+      } finally {
+        await cleanupTestContext(nullContext);
+      }
     });
 
     it('rejects duplicate on second unique column', async () => {

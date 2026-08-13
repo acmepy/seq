@@ -7,9 +7,11 @@ import { Seq } from '../src/core/Seq.js';
 import { Model } from '../src/core/Model.js';
 import { DataTypes } from '../src/data-types/index.js';
 import { SQLiteAdapter } from '../src/adapters/sqlite/SQLiteAdapter.js';
+import { cleanupTestContext, createTestContext, testAdapterName, testTable } from './shared/test-context.js';
 
 describe('Seq.sync', () => {
   let seq, adapter;
+  let context;
   let User;
   let Product;
 
@@ -20,7 +22,7 @@ describe('Seq.sync', () => {
         id: { type: DataTypes.INTEGER, primaryKey: true, autoIncrement: true },
         name: { type: DataTypes.STRING(100), allowNull: false }
       },
-      { modelName: 'User', tableName: 'users', timestamps: true }
+      { modelName: 'User', tableName: testTable('users'), timestamps: true }
     );
     User = _User;
 
@@ -31,27 +33,24 @@ describe('Seq.sync', () => {
         title: { type: DataTypes.STRING(200), allowNull: false },
         price: { type: DataTypes.DECIMAL(10, 2), allowNull: false, defaultValue: 0 }
       },
-      { modelName: 'Product', tableName: 'products', timestamps: true }
+      { modelName: 'Product', tableName: testTable('products'), timestamps: true }
     );
     Product = _Product;
 
-    adapter = new SQLiteAdapter({ database: ':memory:' });
-    await adapter.connect();
-    seq = new Seq({
-      adapter,
-      models: [User, Product],
-      logging: false
-    });
-    await seq.init();
+    context = await createTestContext({ models: [User, Product], logging: false });
+    ({ seq, adapter } = context);
   });
 
   afterEach(async () => {
-    await seq.close();
+    await cleanupTestContext(context);
+    context = null;
+    seq = null;
+    adapter = null;
   });
 
   it('creates missing tables', async () => {
     const result = await seq.sync();
-    assert.deepEqual(result.created.sort(), ['products', 'users']);
+    assert.deepEqual(result.created.sort(), [Product.tableName, User.tableName].sort());
     assert.deepEqual(result.existing, []);
   });
 
@@ -59,10 +58,12 @@ describe('Seq.sync', () => {
     await seq.sync();
     const result = await seq.sync();
     assert.deepEqual(result.created, []);
-    assert.deepEqual(result.existing.sort(), ['products', 'users']);
+    assert.deepEqual(result.existing.sort(), [Product.tableName, User.tableName].sort());
   });
 
   it('registers schemas for existing SQLite tables after reopening', async () => {
+    if (testAdapterName() !== 'sqlite') return;
+
     const database = join(tmpdir(), `seq-reopen-${process.pid}-${Date.now()}.sqlite`);
 
     class _Permission extends Model {}
@@ -126,8 +127,8 @@ describe('Seq.sync', () => {
   it('recreates tables with force: true', async () => {
     await seq.sync();
     const result = await seq.sync({ force: true });
-    assert.deepEqual(result.dropped.sort(), ['products', 'users']);
-    assert.deepEqual(result.created.sort(), ['products', 'users']);
+    assert.deepEqual(result.dropped.sort(), [Product.tableName, User.tableName].sort());
+    assert.deepEqual(result.created.sort(), [Product.tableName, User.tableName].sort());
   });
 
   it('recreates related tables with force: true after truncating data', async () => {
@@ -137,7 +138,7 @@ describe('Seq.sync', () => {
         id: { type: DataTypes.INTEGER, primaryKey: true, autoIncrement: true },
         name: { type: DataTypes.STRING(100), allowNull: false }
       },
-      { modelName: 'Parent', tableName: 'parents', timestamps: false }
+      { modelName: 'Parent', tableName: testTable('parents'), timestamps: false }
     );
 
     class _Child extends Model {}
@@ -146,31 +147,25 @@ describe('Seq.sync', () => {
         id: { type: DataTypes.INTEGER, primaryKey: true, autoIncrement: true },
         parentId: { type: DataTypes.INTEGER, allowNull: false }
       },
-      { modelName: 'Child', tableName: 'children', timestamps: false }
+      { modelName: 'Child', tableName: testTable('children'), timestamps: false }
     );
 
     _Parent.hasMany(_Child, { foreignKey: 'parentId' });
     _Child.belongsTo(_Parent, { foreignKey: 'parentId' });
 
-    const relatedAdapter = new SQLiteAdapter({ database: ':memory:' });
-    const relatedSeq = new Seq({
-      adapter: relatedAdapter,
-      models: [_Parent, _Child],
-      logging: false
-    });
+    const relatedContext = await createTestContext({ models: [_Parent, _Child], logging: false });
 
     try {
-      await relatedSeq.init();
-      await relatedSeq.sync();
+      await relatedContext.seq.sync();
       const parent = await _Parent.create({ name: 'Ana' });
       await _Child.create({ parentId: parent.getDataValue('id') });
 
-      const result = await relatedSeq.sync({ force: true });
+      const result = await relatedContext.seq.sync({ force: true });
 
-      assert.deepEqual(result.dropped.sort(), ['children', 'parents']);
-      assert.deepEqual(result.created.sort(), ['children', 'parents']);
+      assert.deepEqual(result.dropped.sort(), [_Child.tableName, _Parent.tableName].sort());
+      assert.deepEqual(result.created.sort(), [_Child.tableName, _Parent.tableName].sort());
     } finally {
-      await relatedSeq.close();
+      await cleanupTestContext(relatedContext);
     }
   });
 
@@ -183,13 +178,13 @@ describe('Seq.sync', () => {
         name: { type: DataTypes.STRING(100) },
         extra: { type: DataTypes.STRING(50) }
       },
-      { modelName: 'Extra', tableName: 'extras', timestamps: false }
+      { modelName: 'Extra', tableName: testTable('extras'), timestamps: false }
     );
 
     seq.registerModel(_Extra);
     _Extra.seq = seq;
 
     const result = await seq.sync({ alter: true });
-    assert.ok(result.created.includes('extras'));
+    assert.ok(result.created.includes(_Extra.tableName));
   });
 });

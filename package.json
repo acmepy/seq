@@ -1,6 +1,6 @@
 {
   "name": "seq",
-  "version": "0.9.1",
+  "version": "1.0.1",
   "description": "seq es un micro orm, modular, flexible y de facil integracion",
   "type": "module",
   "main": "src/index.js",
@@ -19,17 +19,15 @@
   },
   "scripts": {
     "test": "node --test tests/*.test.js",
+    "test:mysql": "node --test tests/integration/mysql-suite.test.js",
     "test:coverage": "node --test --experimental-test-coverage tests/*.test.js",
     "test:watch": "node --test --watch tests/*.test.js",
-
     "lint": "eslint src tests examples",
     "format": "prettier --write src tests examples types README.md package.json",
-
     "prebuild": "node -e \"require('fs').rmSync('dist',{recursive:true,force:true})\"",
     "build": "rollup -c",
     "dev": "rollup -c -w",
     "prepack": "npm run build",
-
     "example:basic": "node examples/basic.js",
     "example:associations": "node examples/associations.js",
     "example:find": "node examples/find.js",
@@ -45,19 +43,26 @@
     "model",
     "database",
     "sqlite",
+    "mysql",
     "oracle"
   ],
   "peerDependencies": {
-    "better-sqlite3": "^12.11.1"
+    "better-sqlite3": "^12.11.1",
+    "mysql2": "^3.14.0"
   },
   "peerDependenciesMeta": {
     "better-sqlite3": {
+      "optional": true
+    },
+    "mysql2": {
       "optional": true
     }
   },
   "devDependencies": {
     "better-sqlite3": "^12.11.1",
+    "dotenv": "^17.4.2",
     "eslint": "^10.7.0",
+    "mysql2": "^3.14.0",
     "prettier": "^3.9.6",
     "rollup": "^4.46.2"
   },

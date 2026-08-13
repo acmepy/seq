@@ -7,6 +7,8 @@ export { ErrorAbstract } from './adapters/abstract/ErrorAbstract.js';
 export { MapAdapter } from './adapters/map/MapAdapter.js';
 export { SQLiteAdapter } from './adapters/sqlite/SQLiteAdapter.js';
 export { SQLiteError } from './adapters/sqlite/SQLiteError.js';
+export { MySQLAdapter } from './adapters/mysql/MySQLAdapter.js';
+export { MySQLError } from './adapters/mysql/MySQLError.js';
 export { DataTypes } from './data-types/index.js';
 export { Op } from './operators.js';
 

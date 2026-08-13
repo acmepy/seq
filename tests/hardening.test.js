@@ -1,25 +1,35 @@
 import { afterEach, describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { DataTypes, MapAdapter, Model, Op, Seq, SQLiteAdapter } from '../src/index.js';
+import { cleanupTestContext, createTestContext, testAdapterName, testTable } from './shared/test-context.js';
 
 const open = [];
 afterEach(async () => {
-  while (open.length) await open.pop().close();
+  while (open.length) await cleanupTestContext(open.pop());
 });
 
 async function setup(adapter, attributes, options = {}) {
   class TestModel extends Model {}
-  TestModel.init(attributes, { modelName: options.modelName || 'TestModel', tableName: options.tableName || 'test_models', timestamps: false });
+  TestModel.init(attributes, { modelName: options.modelName || 'TestModel', tableName: options.tableName || testTable('test_models'), timestamps: false });
   const seq = new Seq({ adapter, models: [TestModel], logging: false });
   await seq.init();
   await seq.sync();
-  open.push(seq);
+  open.push({ seq, adapter, models: [TestModel] });
   return { seq, ModelClass: TestModel };
+}
+
+async function setupSql(attributes, options = {}) {
+  class TestModel extends Model {}
+  TestModel.init(attributes, { modelName: options.modelName || 'TestModel', tableName: options.tableName || testTable('test_models'), timestamps: false });
+  const context = await createTestContext({ models: [TestModel], logging: false, adapterOptions: options.adapterOptions || {} });
+  await context.seq.sync();
+  open.push(context);
+  return { seq: context.seq, ModelClass: TestModel };
 }
 
 describe('SQL and validation hardening', () => {
   it('rejects injected and unknown order clauses', async () => {
-    const { ModelClass } = await setup(new SQLiteAdapter(), {
+    const { ModelClass } = await setupSql({
       id: { type: DataTypes.INTEGER, primaryKey: true, autoIncrement: true },
       name: { type: DataTypes.STRING }
     });
@@ -28,20 +38,30 @@ describe('SQL and validation hardening', () => {
   });
 
   it('handles null and empty IN predicates consistently', async () => {
-    for (const adapter of [new SQLiteAdapter(), new MapAdapter()]) {
-      const { ModelClass } = await setup(adapter, {
+    const cases = [
+      ['sql', () => setupSql({
         id: { type: DataTypes.INTEGER, primaryKey: true, autoIncrement: true },
         value: { type: DataTypes.STRING, allowNull: true }
-      }, { tableName: `nulls_${open.length}` });
+      }, { tableName: testTable('nulls') })]
+    ];
+    if (testAdapterName() === 'sqlite') {
+      cases.push(['map', () => setup(new MapAdapter(), {
+        id: { type: DataTypes.INTEGER, primaryKey: true, autoIncrement: true },
+        value: { type: DataTypes.STRING, allowNull: true }
+      }, { tableName: `nulls_${open.length}` })]);
+    }
+
+    for (const [name, factory] of cases) {
+      const { ModelClass } = await factory();
       await ModelClass.create({ value: null });
       assert.equal(await ModelClass.count({ where: { value: null } }), 1);
       assert.equal(await ModelClass.count({ where: { id: { [Op.in]: [] } } }), 0);
-      assert.equal(await ModelClass.count({ where: { id: { [Op.notIn]: [] } } }), 1);
+      assert.equal(await ModelClass.count({ where: { id: { [Op.notIn]: [] } } }), 1, name);
     }
   });
 
   it('quotes identifiers and string defaults safely', async () => {
-    const { ModelClass } = await setup(new SQLiteAdapter(), {
+    const { ModelClass } = await setupSql({
       id: { type: DataTypes.INTEGER, primaryKey: true, autoIncrement: true },
       odd: { type: DataTypes.STRING, field: 'odd"column', defaultValue: "O'Brien" }
     });
@@ -49,8 +69,8 @@ describe('SQL and validation hardening', () => {
     assert.equal(row.getDataValue('odd'), "O'Brien");
   });
 
-  it('validates SQLite updates and returns rows when the where field changes', async () => {
-    const { ModelClass } = await setup(new SQLiteAdapter(), {
+  it('validates SQL updates and returns rows when the where field changes', async () => {
+    const { ModelClass } = await setupSql({
       id: { type: DataTypes.INTEGER, primaryKey: true, autoIncrement: true },
       code: { type: DataTypes.STRING(3), allowNull: false }
     });
@@ -62,7 +82,7 @@ describe('SQL and validation hardening', () => {
   });
 
   it('supports DEFAULT VALUES inserts', async () => {
-    const { ModelClass } = await setup(new SQLiteAdapter(), {
+    const { ModelClass } = await setupSql({
       id: { type: DataTypes.INTEGER, primaryKey: true, autoIncrement: true }
     });
     assert.equal((await ModelClass.create({})).getDataValue('id'), 1);
@@ -71,6 +91,8 @@ describe('SQL and validation hardening', () => {
 
 describe('Map atomicity', () => {
   it('rolls back failed updates and bulk inserts', async () => {
+    if (testAdapterName() !== 'sqlite') return;
+
     const { ModelClass } = await setup(new MapAdapter(), {
       id: { type: DataTypes.INTEGER, primaryKey: true, autoIncrement: true },
       email: { type: DataTypes.STRING, unique: true }
@@ -83,6 +105,8 @@ describe('Map atomicity', () => {
   });
 
   it('reindexes primary keys atomically', async () => {
+    if (testAdapterName() !== 'sqlite') return;
+
     const { ModelClass } = await setup(new MapAdapter(), {
       id: { type: DataTypes.INTEGER, primaryKey: true },
       name: { type: DataTypes.STRING }
@@ -96,6 +120,8 @@ describe('Map atomicity', () => {
 
 describe('Schema introspection', () => {
   it('adds a physically missing column after reopening', async () => {
+    if (testAdapterName() !== 'sqlite') return;
+
     class User extends Model {}
     User.init({
       id: { type: DataTypes.INTEGER, primaryKey: true, autoIncrement: true },
@@ -107,7 +133,7 @@ describe('Schema introspection', () => {
     adapter._db.exec('CREATE TABLE users (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT)');
     const seq = new Seq({ adapter, models: [User], logging: false });
     await seq.init();
-    open.push(seq);
+    open.push({ seq, adapter, models: [User] });
     const result = await seq.sync({ alter: true });
     assert.deepEqual(result.altered, ['users']);
     assert.ok(adapter._db.pragma('table_info(users)').some(column => column.name === 'added'));
@@ -118,11 +144,12 @@ describe('Includes and data types', () => {
   it('does not truncate eager child collections when paginating parents', async () => {
     class User extends Model {}
     class Task extends Model {}
-    User.init({ id: { type: DataTypes.INTEGER, primaryKey: true, autoIncrement: true } }, { timestamps: false });
-    Task.init({ id: { type: DataTypes.INTEGER, primaryKey: true, autoIncrement: true }, userId: { type: DataTypes.INTEGER }, title: { type: DataTypes.STRING } }, { timestamps: false });
+    User.init({ id: { type: DataTypes.INTEGER, primaryKey: true, autoIncrement: true } }, { tableName: testTable('users'), timestamps: false });
+    Task.init({ id: { type: DataTypes.INTEGER, primaryKey: true, autoIncrement: true }, userId: { type: DataTypes.INTEGER }, title: { type: DataTypes.STRING } }, { tableName: testTable('tasks'), timestamps: false });
     User.hasMany(Task, { foreignKey: 'userId' });
-    const seq = new Seq({ adapter: new SQLiteAdapter(), models: [User, Task], logging: false });
-    await seq.init(); await seq.sync(); open.push(seq);
+    const context = await createTestContext({ models: [User, Task], logging: false });
+    const seq = context.seq;
+    await seq.sync(); open.push(context);
     await User.create({});
     await Task.bulkCreate([{ userId: 1, title: 'a' }, { userId: 1, title: 'b' }, { userId: 1, title: 'c' }]);
     const rows = await User.findAll({ include: [{ model: Task, eager: true, attributes: ['title'] }], limit: 1 });
@@ -130,13 +157,15 @@ describe('Includes and data types', () => {
   });
 
   it('supports required lazy includes with MapAdapter', async () => {
+    if (testAdapterName() !== 'sqlite') return;
+
     class User extends Model {}
     class Task extends Model {}
     User.init({ id: { type: DataTypes.INTEGER, primaryKey: true, autoIncrement: true } }, { timestamps: false });
     Task.init({ id: { type: DataTypes.INTEGER, primaryKey: true, autoIncrement: true }, userId: { type: DataTypes.INTEGER } }, { timestamps: false });
     User.hasMany(Task, { foreignKey: 'userId' });
     const seq = new Seq({ adapter: new MapAdapter(), models: [User, Task], logging: false });
-    await seq.init(); await seq.sync(); open.push(seq);
+    await seq.init(); await seq.sync(); open.push({ seq, adapter: seq.adapter, models: [User, Task] });
     await User.bulkCreate([{}, {}]); await Task.create({ userId: 1 });
     const rows = await User.findAll({ include: [{ model: Task, required: true }] });
     assert.deepEqual(rows.map(row => row.getDataValue('id')), [1]);
@@ -145,19 +174,16 @@ describe('Includes and data types', () => {
   it('supports lazy include where clauses when columns use snake_case', async () => {
     class User extends Model {}
     class Task extends Model {}
-    User.init({ id: { type: DataTypes.INTEGER, primaryKey: true, autoIncrement: true }, name: { type: DataTypes.STRING } }, { timestamps: false });
+    User.init({ id: { type: DataTypes.INTEGER, primaryKey: true, autoIncrement: true }, name: { type: DataTypes.STRING } }, { tableName: testTable('users'), timestamps: false });
     Task.init({
       id: { type: DataTypes.INTEGER, primaryKey: true, autoIncrement: true },
       userId: { type: DataTypes.INTEGER },
       completed: { type: DataTypes.BOOLEAN }
-    }, { timestamps: false });
+    }, { tableName: testTable('tasks'), timestamps: false });
     User.hasMany(Task, { foreignKey: 'userId' });
-    const seq = new Seq({
-      adapter: new SQLiteAdapter(),
-      models: [User, Task],
-      logging: false
-    });
-    await seq.init(); await seq.sync(); open.push(seq);
+    const context = await createTestContext({ models: [User, Task], logging: false });
+    const seq = context.seq;
+    await seq.sync(); open.push(context);
     await User.bulkCreate([{ name: 'Ana' }, { name: 'Juan' }]);
     await Task.bulkCreate([
       { userId: 1, completed: true },
@@ -171,16 +197,17 @@ describe('Includes and data types', () => {
   it('supports two aliased associations to the same model', async () => {
     class User extends Model {}
     class Task extends Model {}
-    User.init({ id: { type: DataTypes.INTEGER, primaryKey: true, autoIncrement: true }, name: { type: DataTypes.STRING } }, { timestamps: false });
+    User.init({ id: { type: DataTypes.INTEGER, primaryKey: true, autoIncrement: true }, name: { type: DataTypes.STRING } }, { tableName: testTable('users'), timestamps: false });
     Task.init({
       id: { type: DataTypes.INTEGER, primaryKey: true, autoIncrement: true },
       creatorId: { type: DataTypes.INTEGER },
       updaterId: { type: DataTypes.INTEGER }
-    }, { timestamps: false });
+    }, { tableName: testTable('tasks'), timestamps: false });
     Task.belongsTo(User, { foreignKey: 'creatorId', as: 'creator' });
     Task.belongsTo(User, { foreignKey: 'updaterId', as: 'updater' });
-    const seq = new Seq({ adapter: new SQLiteAdapter(), models: [User, Task], logging: false });
-    await seq.init(); await seq.sync(); open.push(seq);
+    const context = await createTestContext({ models: [User, Task], logging: false });
+    const seq = context.seq;
+    await seq.sync(); open.push(context);
     await User.bulkCreate([{ name: 'Ana' }, { name: 'Bea' }]);
     await Task.create({ creatorId: 1, updaterId: 2 });
     const row = await Task.findOne({ include: [{ model: User, as: 'creator', eager: true }, { model: User, as: 'updater', eager: true }] });
@@ -197,6 +224,8 @@ describe('Includes and data types', () => {
 
 describe('Explicit transactions', () => {
   it('keeps Map changes private until commit and rejects missing tokens', async () => {
+    if (testAdapterName() !== 'sqlite') return;
+
     const { seq, ModelClass } = await setup(new MapAdapter(), {
       id: { type: DataTypes.INTEGER, primaryKey: true, autoIncrement: true },
       name: { type: DataTypes.STRING }

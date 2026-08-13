@@ -517,7 +517,7 @@ export class Seq {
   _buildForeignKeys(modelClass, attrToColumn) {
     const fkMap = new Map();
     const sourceTable = modelClass._resolvedTableName || this._resolveTableName(modelClass);
-    const autoConstraintName = (refTable) => `fk_${sourceTable}_${refTable}`;
+    const autoConstraintName = (refTable, fkCol) => `fk_${this._constraintTableName(sourceTable)}_${this._constraintTableName(refTable)}_${fkCol}`;
     const upsertFK = (fkCol, entry) => {
       const existing = fkMap.get(fkCol);
       if (!existing) {
@@ -538,7 +538,7 @@ export class Seq {
         const refTable = refModel._resolvedTableName || this._resolveTableName(refModel);
         const refPkCol = this._resolveColumnName(refModel.rawAttributes[refPkAttr] || {}, refPkAttr);
         const fkCol = attrToColumn[attrName] || attrName;
-        const constraintName = def.references.constraintName || autoConstraintName(refTable);
+        const constraintName = def.references.constraintName || autoConstraintName(refTable, fkCol);
         upsertFK(fkCol, {
           attributeName: attrName,
           columnName: fkCol,
@@ -558,7 +558,7 @@ export class Seq {
         const refTable = assoc.target._resolvedTableName || this._resolveTableName(assoc.target);
         const refPkCol = this._resolveColumnName(assoc.target.rawAttributes[refPkAttr] || {}, refPkAttr);
         const fkCol = attrToColumn[fkAttr] || fkAttr;
-        const constraintName = assoc.constraintName || autoConstraintName(refTable);
+        const constraintName = assoc.constraintName || autoConstraintName(refTable, fkCol);
         upsertFK(fkCol, {
           attributeName: fkAttr,
           columnName: fkCol,
@@ -581,7 +581,7 @@ export class Seq {
         const refTable = assoc.source._resolvedTableName || this._resolveTableName(assoc.source);
         const refPkCol = this._resolveColumnName(assoc.source.rawAttributes[refPkAttr] || {}, refPkAttr);
         const fkCol = attrToColumn[fkAttr] || fkAttr;
-        const constraintName = assoc.constraintName || autoConstraintName(refTable);
+        const constraintName = assoc.constraintName || autoConstraintName(refTable, fkCol);
         upsertFK(fkCol, {
           attributeName: fkAttr,
           columnName: fkCol,
@@ -593,6 +593,14 @@ export class Seq {
       }
     }
     return Array.from(fkMap.values());
+  }
+
+  _constraintTableName(tableName) {
+    const prefix = this._adapter.naming?.prefix;
+    if (!prefix) return String(tableName);
+
+    const token = String(prefix).endsWith('_') ? String(prefix) : `${prefix}_`;
+    return String(tableName).replaceAll(token, '');
   }
 
   /**

@@ -1,22 +1,21 @@
 import { describe, it, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
-import { Seq } from '../src/core/Seq.js';
 import { Model } from '../src/core/Model.js';
 import { DataTypes } from '../src/data-types/index.js';
-import { SQLiteAdapter } from '../src/adapters/sqlite/SQLiteAdapter.js';
+import { cleanupTestContext, createTestContext, testTable } from './shared/test-context.js';
 
 describe('Nested update with include', () => {
-  let seq, Order, OrderDetail, Shipment, Product;
+  let context, seq, Order, OrderDetail, Shipment, Product, orderProductsTable;
 
   async function createSeq(models) {
-    const adapter = new SQLiteAdapter({ database: ':memory:' });
-    await adapter.connect();
-    seq = new Seq({ adapter, models, logging: false });
-    await seq.init();
+    context = await createTestContext({ models });
+    seq = context.seq;
     await seq.sync();
   }
 
   beforeEach(async () => {
+    orderProductsTable = testTable('order_products');
+
     class _Order extends Model {}
     _Order.init(
       {
@@ -24,7 +23,7 @@ describe('Nested update with include', () => {
         customer: { type: DataTypes.STRING(100), allowNull: false },
         total: { type: DataTypes.DECIMAL(10, 2), allowNull: false }
       },
-      { modelName: 'Order', tableName: 'orders', timestamps: false }
+      { modelName: 'Order', tableName: testTable('orders'), timestamps: false }
     );
 
     class _OrderDetail extends Model {}
@@ -36,7 +35,7 @@ describe('Nested update with include', () => {
         quantity: { type: DataTypes.INTEGER, allowNull: false },
         price: { type: DataTypes.DECIMAL(10, 2), allowNull: false }
       },
-      { modelName: 'OrderDetail', tableName: 'order_details', timestamps: false }
+      { modelName: 'OrderDetail', tableName: testTable('order_details'), timestamps: false }
     );
 
     class _Shipment extends Model {}
@@ -46,7 +45,7 @@ describe('Nested update with include', () => {
         orderId: { type: DataTypes.INTEGER, allowNull: false, unique: true },
         trackingCode: { type: DataTypes.STRING(50), allowNull: false }
       },
-      { modelName: 'Shipment', tableName: 'shipments', timestamps: false }
+      { modelName: 'Shipment', tableName: testTable('shipments'), timestamps: false }
     );
 
     class _Product extends Model {}
@@ -55,7 +54,7 @@ describe('Nested update with include', () => {
         id: { type: DataTypes.INTEGER, primaryKey: true, autoIncrement: true },
         name: { type: DataTypes.STRING(50), allowNull: false }
       },
-      { modelName: 'Product', tableName: 'products', timestamps: false }
+      { modelName: 'Product', tableName: testTable('products'), timestamps: false }
     );
 
     Order = _Order;
@@ -70,7 +69,9 @@ describe('Nested update with include', () => {
   });
 
   afterEach(async () => {
-    if (seq) await seq.close();
+    await cleanupTestContext(context);
+    context = null;
+    seq = null;
   });
 
   async function seedOrder() {
@@ -206,7 +207,7 @@ describe('Nested update with include', () => {
   });
 
   it('rejects belongsToMany includes for nested update', async () => {
-    Order.belongsToMany(Product, { through: 'order_products', foreignKey: 'orderId', otherKey: 'productId', as: 'products' });
+    Order.belongsToMany(Product, { through: orderProductsTable, foreignKey: 'orderId', otherKey: 'productId', as: 'products' });
     await seq.sync();
     const original = await seedOrder();
 

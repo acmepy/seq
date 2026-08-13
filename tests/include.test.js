@@ -1,20 +1,23 @@
 import { describe, it, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
-import { Seq, Model, DataTypes } from '../src/index.js';
-import { SQLiteAdapter } from '../src/adapters/sqlite/SQLiteAdapter.js';
+import { Model, DataTypes } from '../src/index.js';
 import { buildIncludeSqlAliasMap, normalizeInclude, resolveIncludeAlias, resolveEager } from '../src/utils/include.js';
+import { cleanupTestContext, createTestContext, quoteTestIdentifier, testAdapterName, testTable } from './shared/test-context.js';
 
 describe('Aliases & Include', () => {
-  let seq, adapter, User, Task, Profile, Comment, Role, Permission;
+  let context, seq, adapter, User, Task, Profile, Comment, Role, Permission, userRolesTable, rolePermissionsTable;
 
   beforeEach(async () => {
+    userRolesTable = testTable('user_roles');
+    rolePermissionsTable = testTable('role_permissions');
+
     class _User extends Model {}
     _User.init(
       {
         id: { type: DataTypes.INTEGER, primaryKey: true, autoIncrement: true },
         name: { type: DataTypes.STRING(100), allowNull: false },
       },
-      { modelName: 'User', tableName: 'users', timestamps: false }
+      { modelName: 'User', tableName: testTable('users'), timestamps: false }
     );
     User = _User;
 
@@ -26,7 +29,7 @@ describe('Aliases & Include', () => {
         completed: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: false },
         userId: { type: DataTypes.INTEGER, allowNull: false },
       },
-      { modelName: 'Task', tableName: 'tasks', timestamps: false }
+      { modelName: 'Task', tableName: testTable('tasks'), timestamps: false }
     );
     Task = _Task;
 
@@ -38,7 +41,7 @@ describe('Aliases & Include', () => {
         public: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: true },
         taskId: { type: DataTypes.INTEGER, allowNull: false },
       },
-      { modelName: 'Comment', tableName: 'comments', timestamps: false }
+      { modelName: 'Comment', tableName: testTable('comments'), timestamps: false }
     );
     Comment = _Comment;
 
@@ -49,7 +52,7 @@ describe('Aliases & Include', () => {
         bio: { type: DataTypes.STRING(255) },
         userId: { type: DataTypes.INTEGER, allowNull: false },
       },
-      { modelName: 'Profile', tableName: 'profiles', timestamps: false }
+      { modelName: 'Profile', tableName: testTable('profiles'), timestamps: false }
     );
     Profile = _Profile;
 
@@ -59,7 +62,7 @@ describe('Aliases & Include', () => {
         id: { type: DataTypes.INTEGER, primaryKey: true, autoIncrement: true },
         name: { type: DataTypes.STRING(50), allowNull: false },
       },
-      { modelName: 'Role', tableName: 'roles', timestamps: false }
+      { modelName: 'Role', tableName: testTable('roles'), timestamps: false }
     );
     Role = _Role;
 
@@ -69,7 +72,7 @@ describe('Aliases & Include', () => {
         id: { type: DataTypes.INTEGER, primaryKey: true, autoIncrement: true },
         name: { type: DataTypes.STRING(50), allowNull: false },
       },
-      { modelName: 'Permission', tableName: 'permissions', timestamps: false }
+      { modelName: 'Permission', tableName: testTable('permissions'), timestamps: false }
     );
     Permission = _Permission;
 
@@ -80,15 +83,14 @@ describe('Aliases & Include', () => {
     Comment.belongsTo(Task);
     Profile.belongsTo(User);
 
-    User.belongsToMany(Role, { through: 'user_roles', foreignKey: 'userId', otherKey: 'roleId' });
-    Role.belongsToMany(User, { through: 'user_roles', foreignKey: 'roleId', otherKey: 'userId' });
-    Role.belongsToMany(Permission, { through: 'role_permissions', foreignKey: 'roleId', otherKey: 'permissionId' });
-    Permission.belongsToMany(Role, { through: 'role_permissions', foreignKey: 'permissionId', otherKey: 'roleId' });
+    User.belongsToMany(Role, { through: userRolesTable, foreignKey: 'userId', otherKey: 'roleId' });
+    Role.belongsToMany(User, { through: userRolesTable, foreignKey: 'roleId', otherKey: 'userId' });
+    Role.belongsToMany(Permission, { through: rolePermissionsTable, foreignKey: 'roleId', otherKey: 'permissionId' });
+    Permission.belongsToMany(Role, { through: rolePermissionsTable, foreignKey: 'permissionId', otherKey: 'roleId' });
 
-    adapter = new SQLiteAdapter({ database: ':memory:' });
-    await adapter.connect();
-    seq = new Seq({ adapter, models: [User, Task, Profile, Comment, Role, Permission], logging: false });
-    await seq.init();
+    context = await createTestContext({ models: [User, Task, Profile, Comment, Role, Permission] });
+    seq = context.seq;
+    adapter = context.adapter;
     await seq.sync();
 
     await User.create({ name: 'Ana' });
@@ -100,6 +102,11 @@ describe('Aliases & Include', () => {
     await Comment.create({ body: 'private note', taskId: 1, public: false });
     await Comment.create({ body: 'take the leash', taskId: 2, public: true });
     await Profile.create({ bio: 'Developer', userId: 1 });
+  });
+
+  afterEach(async () => {
+    await cleanupTestContext(context);
+    context = null;
   });
 
   // ---------------------------------------------------------------------------
@@ -181,21 +188,21 @@ describe('Aliases & Include', () => {
       const { tableName, schema, alias } = seq.adapter.dml._schema(User);
       assert.equal(alias, 'u');
       const sql = alias
-        ? `SELECT * FROM "${tableName}" AS "${alias}"`
-        : `SELECT * FROM "${tableName}"`;
-      assert.ok(sql.includes('AS "u"'));
+        ? `SELECT * FROM ${quoteTestIdentifier(tableName)} AS ${quoteTestIdentifier(alias)}`
+        : `SELECT * FROM ${quoteTestIdentifier(tableName)}`;
+      assert.ok(sql.includes(`AS ${quoteTestIdentifier('u')}`));
     });
 
     it('WHERE uses alias-prefixed columns', () => {
       const { schema, alias } = seq.adapter.dml._schema(User);
       const where = seq.adapter.dml._buildWhere({ name: 'Ana' }, schema, alias);
-      assert.ok(where.sql.includes('"u"."name" = ?'));
+      assert.ok(where.sql.includes(`${quoteTestIdentifier('u')}.${quoteTestIdentifier('name')} = ?`));
     });
 
     it('ORDER BY uses alias-prefixed columns', () => {
       const { schema, alias } = seq.adapter.dml._schema(User);
       const order = seq.adapter.dml._buildOrderBy([['name', 'ASC']], schema, alias);
-      assert.ok(order.includes('"u"."name" ASC'));
+      assert.ok(order.includes(`${quoteTestIdentifier('u')}.${quoteTestIdentifier('name')} ASC`));
     });
 
     it('uses model aliases for eager SQL separately from include property aliases', async () => {
@@ -206,7 +213,7 @@ describe('Aliases & Include', () => {
           permissionId: { type: DataTypes.INTEGER, allowNull: false, field: 'permission_id' },
           active: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: true },
         },
-        { modelName: 'RolePermission', tableName: 'role_permission', timestamps: false }
+        { modelName: 'RolePermission', tableName: testTable('role_permission'), timestamps: false }
       );
 
       class _Permission extends Model {}
@@ -216,17 +223,13 @@ describe('Aliases & Include', () => {
           permission: { type: DataTypes.STRING(100), allowNull: false },
           active: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: true },
         },
-        { modelName: 'Permission', tableName: 'permission', timestamps: false }
+        { modelName: 'Permission', tableName: testTable('permission'), timestamps: false }
       );
 
       _RolePermission.belongsTo(_Permission, { foreignKey: 'permissionId', as: 'permission' });
 
-      const localSeq = new Seq({
-        adapter: new SQLiteAdapter({ database: ':memory:' }),
-        models: [_RolePermission, _Permission],
-        logging: false,
-      });
-      await localSeq.init();
+      const localContext = await createTestContext({ models: [_RolePermission, _Permission] });
+      const localSeq = localContext.seq;
       await localSeq.sync();
 
       try {
@@ -236,11 +239,11 @@ describe('Aliases & Include', () => {
         const select = localSeq.adapter.dml._buildQualifiedSelect(_RolePermission, schema, alias, include, sqlAliases);
         const join = localSeq.adapter.dml._buildJoinClause(include, _RolePermission, alias, resolveIncludeAlias, sqlAliases);
 
-        assert.ok(select.includes('"p"."permission" AS "p.permission"'));
-        assert.ok(join.sql.includes('JOIN "permission" AS "p"'));
-        assert.equal(join.sql.includes('AS "permission"'), false);
+        assert.ok(select.includes(`${quoteTestIdentifier('p')}.${quoteTestIdentifier('permission')} AS ${quoteTestIdentifier('p.permission')}`));
+        assert.ok(join.sql.includes(`JOIN ${quoteTestIdentifier(_Permission.tableName)} AS ${quoteTestIdentifier('p')}`));
+        assert.equal(join.sql.includes(`AS ${quoteTestIdentifier('permission')}`), false);
       } finally {
-        await localSeq.close();
+        await cleanupTestContext(localContext);
       }
     });
   });
@@ -677,7 +680,7 @@ describe('Aliases & Include', () => {
           id: { type: DataTypes.INTEGER, primaryKey: true, autoIncrement: true },
           name: { type: DataTypes.STRING(100), allowNull: false },
         },
-        { modelName: 'AdapterUser', tableName: 'adapter_users', timestamps: false }
+        { modelName: 'AdapterUser', tableName: testTable('adapter_users'), timestamps: false }
       );
 
       class AdapterTask extends Model {}
@@ -687,38 +690,39 @@ describe('Aliases & Include', () => {
           title: { type: DataTypes.STRING(100), allowNull: false },
           adapterUserId: { type: DataTypes.INTEGER, allowNull: false },
         },
-        { modelName: 'AdapterTask', tableName: 'adapter_tasks', timestamps: false }
+        { modelName: 'AdapterTask', tableName: testTable('adapter_tasks'), timestamps: false }
       );
 
       AdapterUser.hasMany(AdapterTask, { foreignKey: 'adapterUserId' });
       AdapterTask.belongsTo(AdapterUser, { foreignKey: 'adapterUserId' });
 
-      const eagerAdapter = new SQLiteAdapter({ database: ':memory:', eager: true });
-      const eagerSeq = new Seq({
-        adapter: eagerAdapter,
+      const eagerContext = await createTestContext({
         models: [AdapterUser, AdapterTask],
+        adapterOptions: { eager: true },
         logging: {
           info: false,
           trace: (...args) => calls.push(args),
           error: false
         }
       });
+      const eagerSeq = eagerContext.seq;
 
-      await eagerSeq.init();
-      await eagerSeq.sync();
-      await AdapterUser.create({ name: 'Ana' });
-      await AdapterTask.create({ title: 'Buy milk', adapterUserId: 1 });
+      try {
+        await eagerSeq.sync();
+        await AdapterUser.create({ name: 'Ana' });
+        await AdapterTask.create({ title: 'Buy milk', adapterUserId: 1 });
 
-      calls.length = 0;
-      const users = await AdapterUser.findAll({ include: AdapterTask });
-      assert.equal(users[0].getDataValue('adaptertasks').length, 1);
-      assert.ok(calls.some(args => args[1]?.includes?.('LEFT JOIN')));
+        calls.length = 0;
+        const users = await AdapterUser.findAll({ include: AdapterTask });
+        assert.equal(users[0].getDataValue('adaptertasks').length, 1);
+        assert.ok(calls.some(args => args[1]?.includes?.('LEFT JOIN')));
 
-      calls.length = 0;
-      await AdapterUser.findAll({ include: { model: AdapterTask, eager: false } });
-      assert.equal(calls.some(args => args[1]?.includes?.('LEFT JOIN')), false);
-
-      await eagerSeq.close();
+        calls.length = 0;
+        await AdapterUser.findAll({ include: { model: AdapterTask, eager: false } });
+        assert.equal(calls.some(args => args[1]?.includes?.('LEFT JOIN')), false);
+      } finally {
+        await cleanupTestContext(eagerContext);
+      }
     });
   });
 
@@ -736,12 +740,12 @@ describe('Aliases & Include', () => {
       writePerm = await Permission.create({ name: 'write' });
       deletePerm = await Permission.create({ name: 'delete' });
 
-      const userRolesSQL = `INSERT INTO "user_roles" ("userId", "roleId") VALUES (?, ?)`;
+      const userRolesSQL = `INSERT INTO ${quoteTestIdentifier(userRolesTable)} (${quoteTestIdentifier('userId')}, ${quoteTestIdentifier('roleId')}) VALUES (?, ?)`;
       await seq._adapter.dml._execute(userRolesSQL, [1, admin.getDataValue('id')]);
       await seq._adapter.dml._execute(userRolesSQL, [1, editor.getDataValue('id')]);
       await seq._adapter.dml._execute(userRolesSQL, [2, admin.getDataValue('id')]);
 
-      const rolePermsSQL = `INSERT INTO "role_permissions" ("roleId", "permissionId") VALUES (?, ?)`;
+      const rolePermsSQL = `INSERT INTO ${quoteTestIdentifier(rolePermissionsTable)} (${quoteTestIdentifier('roleId')}, ${quoteTestIdentifier('permissionId')}) VALUES (?, ?)`;
       await seq._adapter.dml._execute(rolePermsSQL, [admin.getDataValue('id'), readPerm.getDataValue('id')]);
       await seq._adapter.dml._execute(rolePermsSQL, [admin.getDataValue('id'), writePerm.getDataValue('id')]);
       await seq._adapter.dml._execute(rolePermsSQL, [admin.getDataValue('id'), deletePerm.getDataValue('id')]);
@@ -751,8 +755,8 @@ describe('Aliases & Include', () => {
 
     it('sync creates junction tables', async () => {
       const tables = await seq._adapter.ddl.listTables();
-      assert.ok(tables.includes('user_roles'));
-      assert.ok(tables.includes('role_permissions'));
+      assert.ok(tables.includes(userRolesTable));
+      assert.ok(tables.includes(rolePermissionsTable));
     });
 
     it('lazy loads belongsToMany roles for user', async () => {
@@ -851,12 +855,12 @@ describe('Aliases & Include', () => {
       writePerm = await Permission.create({ name: 'write' });
       deletePerm = await Permission.create({ name: 'delete' });
 
-      const userRolesSQL = `INSERT INTO "user_roles" ("userId", "roleId") VALUES (?, ?)`;
+      const userRolesSQL = `INSERT INTO ${quoteTestIdentifier(userRolesTable)} (${quoteTestIdentifier('userId')}, ${quoteTestIdentifier('roleId')}) VALUES (?, ?)`;
       await seq._adapter.dml._execute(userRolesSQL, [1, admin.getDataValue('id')]);
       await seq._adapter.dml._execute(userRolesSQL, [1, editor.getDataValue('id')]);
       await seq._adapter.dml._execute(userRolesSQL, [2, admin.getDataValue('id')]);
 
-      const rolePermsSQL = `INSERT INTO "role_permissions" ("roleId", "permissionId") VALUES (?, ?)`;
+      const rolePermsSQL = `INSERT INTO ${quoteTestIdentifier(rolePermissionsTable)} (${quoteTestIdentifier('roleId')}, ${quoteTestIdentifier('permissionId')}) VALUES (?, ?)`;
       await seq._adapter.dml._execute(rolePermsSQL, [admin.getDataValue('id'), readPerm.getDataValue('id')]);
       await seq._adapter.dml._execute(rolePermsSQL, [admin.getDataValue('id'), writePerm.getDataValue('id')]);
       await seq._adapter.dml._execute(rolePermsSQL, [admin.getDataValue('id'), deletePerm.getDataValue('id')]);
@@ -943,7 +947,7 @@ describe('Aliases & Include', () => {
 });
 
 describe('belongsToMany with through model', () => {
-  let seq, adapter, User, Role, UserRole;
+  let context, adapter, User, Role, UserRole;
 
   beforeEach(async () => {
     class _User extends Model {}
@@ -952,7 +956,7 @@ describe('belongsToMany with through model', () => {
         id: { type: DataTypes.INTEGER, primaryKey: true, autoIncrement: true },
         name: { type: DataTypes.STRING(100), allowNull: false },
       },
-      { modelName: 'User', tableName: 'users', timestamps: false }
+      { modelName: 'User', tableName: testTable('users'), timestamps: false }
     );
     User = _User;
 
@@ -962,7 +966,7 @@ describe('belongsToMany with through model', () => {
         id: { type: DataTypes.INTEGER, primaryKey: true, autoIncrement: true },
         name: { type: DataTypes.STRING(50), allowNull: false },
       },
-      { modelName: 'Role', tableName: 'roles', timestamps: false }
+      { modelName: 'Role', tableName: testTable('roles'), timestamps: false }
     );
     Role = _Role;
 
@@ -973,18 +977,16 @@ describe('belongsToMany with through model', () => {
         roleId: { type: DataTypes.INTEGER, allowNull: false, field: 'role_id' },
         note: { type: DataTypes.STRING(50), allowNull: true },
       },
-      { modelName: 'UserRole', tableName: 'users_roles', timestamps: false }
+      { modelName: 'UserRole', tableName: testTable('users_roles'), timestamps: false }
     );
     UserRole = _UserRole;
 
     User.belongsToMany(Role, { through: UserRole, foreignKey: 'userId', otherKey: 'roleId', as: 'roles' });
     Role.belongsToMany(User, { through: UserRole, foreignKey: 'roleId', otherKey: 'userId', as: 'users' });
 
-    adapter = new SQLiteAdapter({ database: ':memory:' });
-    await adapter.connect();
-    seq = new Seq({ adapter, models: [User, Role, UserRole], logging: false });
-    await seq.init();
-    await seq.sync();
+    context = await createTestContext({ models: [User, Role, UserRole] });
+    adapter = context.adapter;
+    await context.seq.sync();
 
     const ana = await User.create({ name: 'Ana' });
     const juan = await User.create({ name: 'Juan' });
@@ -997,15 +999,16 @@ describe('belongsToMany with through model', () => {
   });
 
   afterEach(async () => {
-    if (seq) await seq.close();
+    await cleanupTestContext(context);
+    context = null;
   });
 
   it('syncs the through model table instead of creating an automatic junction table', async () => {
     const tables = await adapter.ddl.listTables();
 
-    assert.ok(tables.includes('users_roles'));
+    assert.ok(tables.includes(UserRole.tableName));
     assert.ok(!tables.includes('user_roles'));
-    assert.deepEqual(Object.keys(adapter.schemas.get('users_roles').columns), ['userId', 'roleId', 'note']);
+    assert.deepEqual(Object.keys(adapter.schemas.get(UserRole.tableName).columns), ['userId', 'roleId', 'note']);
   });
 
   it('lazy loads belongsToMany through a model table', async () => {
@@ -1034,7 +1037,7 @@ describe('IAM-style lazy include projection', () => {
         username: { type: DataTypes.STRING(100), allowNull: false },
         active: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: true },
       },
-      { modelName: 'IamUser', tableName: 'iam_user', timestamps: false }
+      { modelName: 'IamUser', tableName: testTable('iam_user'), timestamps: false }
     );
 
     class _IamRole extends Model {}
@@ -1044,7 +1047,7 @@ describe('IAM-style lazy include projection', () => {
         role: { type: DataTypes.STRING(100), allowNull: false },
         active: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: true },
       },
-      { modelName: 'IamRole', tableName: 'iam_role', timestamps: false }
+      { modelName: 'IamRole', tableName: testTable('iam_role'), timestamps: false }
     );
 
     class _IamPermission extends Model {}
@@ -1054,7 +1057,7 @@ describe('IAM-style lazy include projection', () => {
         permission: { type: DataTypes.STRING(100), allowNull: false },
         active: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: true },
       },
-      { modelName: 'IamPermission', tableName: 'iam_permission', timestamps: false }
+      { modelName: 'IamPermission', tableName: testTable('iam_permission'), timestamps: false }
     );
 
     class _IamUserRole extends Model {}
@@ -1065,7 +1068,7 @@ describe('IAM-style lazy include projection', () => {
         roleId: { type: DataTypes.INTEGER, allowNull: false, field: 'role_id' },
         active: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: true },
       },
-      { modelName: 'IamUserRole', tableName: 'iam_user_role', timestamps: false }
+      { modelName: 'IamUserRole', tableName: testTable('iam_user_role'), timestamps: false }
     );
 
     class _IamRolePermission extends Model {}
@@ -1076,7 +1079,7 @@ describe('IAM-style lazy include projection', () => {
         permissionId: { type: DataTypes.INTEGER, allowNull: false, field: 'permission_id' },
         active: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: true },
       },
-      { modelName: 'IamRolePermission', tableName: 'iam_role_permission', timestamps: false }
+      { modelName: 'IamRolePermission', tableName: testTable('iam_role_permission'), timestamps: false }
     );
 
     _IamRole.hasMany(_IamUserRole, { foreignKey: 'roleId', as: 'userRoles' });
@@ -1084,13 +1087,8 @@ describe('IAM-style lazy include projection', () => {
     _IamRolePermission.belongsTo(_IamRole, { foreignKey: 'roleId', as: 'role' });
     _IamRolePermission.belongsTo(_IamPermission, { foreignKey: 'permissionId', as: 'permission' });
 
-    const localSeq = new Seq({
-      adapter: new SQLiteAdapter({ database: ':memory:' }),
-      models: [_IamUser, _IamRole, _IamPermission, _IamUserRole, _IamRolePermission],
-      logging: false,
-    });
-
-    await localSeq.init();
+    const localContext = await createTestContext({ models: [_IamUser, _IamRole, _IamPermission, _IamUserRole, _IamRolePermission] });
+    const localSeq = localContext.seq;
     await localSeq.sync();
 
     try {
@@ -1138,7 +1136,7 @@ describe('IAM-style lazy include projection', () => {
       assert.equal(rolePermissions[0].getDataValue('permission').getDataValue('permission'), 'portal.fes.list');
       assert.equal(rolePermissions[0].getDataValue('role').getDataValue('userRoles').length, 1);
     } finally {
-      await localSeq.close();
+      await cleanupTestContext(localContext);
     }
   });
 });

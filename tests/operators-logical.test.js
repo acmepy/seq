@@ -1,8 +1,8 @@
-import { describe, it, beforeEach } from 'node:test';
+import { describe, it, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { Seq, Op, Model, DataTypes } from '../src/index.js';
-import { SQLiteAdapter } from '../src/adapters/sqlite/SQLiteAdapter.js';
 import { MapAdapter } from '../src/adapters/map/MapAdapter.js';
+import { cleanupTestContext, createTestContext, testAdapterName, testTable } from './shared/test-context.js';
 
 describe('Logical Operators and API Improvements', () => {
   let User, Profile;
@@ -16,7 +16,7 @@ describe('Logical Operators and API Improvements', () => {
         age: { type: DataTypes.INTEGER, allowNull: false },
         active: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: true }
       },
-      { modelName: 'User', tableName: 'users', timestamps: false }
+      { modelName: 'User', tableName: testTable('users'), timestamps: false }
     );
     User = _User;
 
@@ -27,7 +27,7 @@ describe('Logical Operators and API Improvements', () => {
         userId: { type: DataTypes.INTEGER, allowNull: false },
         bio: { type: DataTypes.STRING(255) }
       },
-      { modelName: 'Profile', tableName: 'profiles', timestamps: false }
+      { modelName: 'Profile', tableName: testTable('profiles'), timestamps: false }
     );
     Profile = _Profile;
   });
@@ -40,25 +40,37 @@ describe('Logical Operators and API Improvements', () => {
     });
   });
 
-  for (const adapterType of ['SQLiteAdapter', 'MapAdapter']) {
+  const sqlAdapterType = testAdapterName() === 'mysql' ? 'MySQLAdapter' : 'SQLiteAdapter';
+  for (const adapterType of [sqlAdapterType, 'MapAdapter']) {
     describe(`With ${adapterType}`, () => {
-      let seq, adapter;
+      let seq, adapter, context;
 
       beforeEach(async () => {
-        if (adapterType === 'SQLiteAdapter') {
-          adapter = new SQLiteAdapter({ database: ':memory:' });
-        } else {
+        if (adapterType === 'MapAdapter') {
           adapter = new MapAdapter();
+          await adapter.connect();
+          seq = new Seq({ adapter, models: [User, Profile], logging: false });
+          await seq.init();
+        } else {
+          context = await createTestContext({ models: [User, Profile] });
+          adapter = context.adapter;
+          seq = context.seq;
         }
-        await adapter.connect();
-        seq = new Seq({ adapter, models: [User, Profile], logging: false });
-        await seq.init();
         await seq.sync();
 
         await User.create({ name: 'Ana', age: 25, active: true });
         await User.create({ name: 'Juan', age: 30, active: true });
         await User.create({ name: 'Luis', age: 35, active: false });
         await User.create({ name: 'Ana María', age: 28, active: true });
+      });
+
+      afterEach(async () => {
+        if (context) {
+          await cleanupTestContext(context);
+          context = null;
+        } else if (seq) {
+          await seq.close();
+        }
       });
 
       describe('findByPk checks', () => {

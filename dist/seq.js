@@ -2806,7 +2806,7 @@ class Seq {
   _buildForeignKeys(modelClass, attrToColumn) {
     const fkMap = new Map();
     const sourceTable = modelClass._resolvedTableName || this._resolveTableName(modelClass);
-    const autoConstraintName = (refTable) => `fk_${sourceTable}_${refTable}`;
+    const autoConstraintName = (refTable, fkCol) => `fk_${this._constraintTableName(sourceTable)}_${this._constraintTableName(refTable)}_${fkCol}`;
     const upsertFK = (fkCol, entry) => {
       const existing = fkMap.get(fkCol);
       if (!existing) {
@@ -2827,7 +2827,7 @@ class Seq {
         const refTable = refModel._resolvedTableName || this._resolveTableName(refModel);
         const refPkCol = this._resolveColumnName(refModel.rawAttributes[refPkAttr] || {}, refPkAttr);
         const fkCol = attrToColumn[attrName] || attrName;
-        const constraintName = def.references.constraintName || autoConstraintName(refTable);
+        const constraintName = def.references.constraintName || autoConstraintName(refTable, fkCol);
         upsertFK(fkCol, {
           attributeName: attrName,
           columnName: fkCol,
@@ -2847,7 +2847,7 @@ class Seq {
         const refTable = assoc.target._resolvedTableName || this._resolveTableName(assoc.target);
         const refPkCol = this._resolveColumnName(assoc.target.rawAttributes[refPkAttr] || {}, refPkAttr);
         const fkCol = attrToColumn[fkAttr] || fkAttr;
-        const constraintName = assoc.constraintName || autoConstraintName(refTable);
+        const constraintName = assoc.constraintName || autoConstraintName(refTable, fkCol);
         upsertFK(fkCol, {
           attributeName: fkAttr,
           columnName: fkCol,
@@ -2870,7 +2870,7 @@ class Seq {
         const refTable = assoc.source._resolvedTableName || this._resolveTableName(assoc.source);
         const refPkCol = this._resolveColumnName(assoc.source.rawAttributes[refPkAttr] || {}, refPkAttr);
         const fkCol = attrToColumn[fkAttr] || fkAttr;
-        const constraintName = assoc.constraintName || autoConstraintName(refTable);
+        const constraintName = assoc.constraintName || autoConstraintName(refTable, fkCol);
         upsertFK(fkCol, {
           attributeName: fkAttr,
           columnName: fkCol,
@@ -2882,6 +2882,14 @@ class Seq {
       }
     }
     return Array.from(fkMap.values());
+  }
+
+  _constraintTableName(tableName) {
+    const prefix = this._adapter.naming?.prefix;
+    if (!prefix) return String(tableName);
+
+    const token = String(prefix).endsWith('_') ? String(prefix) : `${prefix}_`;
+    return String(tableName).replaceAll(token, '');
   }
 
   /**
@@ -5210,7 +5218,7 @@ class TCLAbstract extends BaseAbstract {
 /**
  * Transaction ID counter.
  */
-let transactionIdCounter$1 = 0;
+let transactionIdCounter$2 = 0;
 
 /**
  * TCL operations for the MapAdapter.
@@ -5244,7 +5252,7 @@ class MapTCL extends TCLAbstract {
       throw new AdapterError('Nested or concurrent Map transactions are not supported', { code: 'SEQ_ADAPTER_TRANSACTION_CONCURRENT' });
     }
     const transaction = {
-      id: ++transactionIdCounter$1,
+      id: ++transactionIdCounter$2,
       active: true,
       adapter: this._adapter,
       baseDatabase: this._adapter.database,
@@ -5717,7 +5725,7 @@ class SQLiteDML extends DMLAbstract {
   }
 }
 
-let transactionIdCounter = 0;
+let transactionIdCounter$1 = 0;
 
 class SQLiteTCL extends TCLAbstract {
   constructor(adapter) {
@@ -5739,7 +5747,7 @@ class SQLiteTCL extends TCLAbstract {
     }
     this._execute('BEGIN IMMEDIATE');
     const transaction = {
-      id: ++transactionIdCounter,
+      id: ++transactionIdCounter$1,
       active: true,
       adapter: this._adapter
     };
@@ -5861,5 +5869,591 @@ class SQLiteAdapter extends BaseAdapter {
   }
 }
 
-export { AdapterError, Association, BaseAdapter, ConfigurationError, DataTypes, ErrorAbstract, MapAdapter, Model, ModelError, ModelRegistry, Op, SQLiteAdapter, SQLiteError, Seq, SeqError, ValidationError };
-//# sourceMappingURL=yep.js.map
+class MySQLError extends ErrorAbstract {
+  constructor(message, options = {}) {
+    super(message, options);
+    this.name = 'MySQLError';
+    this.code = options.code || 'SEQ_MYSQL_ERROR';
+  }
+
+  static missingDependency(dependency, cause) {
+    const message = `
+-------------------------------------------------------------------------------------------------------------
+
+MySQLAdapter requiere la dependencia "${dependency}". Instalala con: npm install ${dependency}
+
+-------------------------------------------------------------------------------------------------------------
+
+`;
+    return new MySQLError(message, {
+      code: 'SEQ_MYSQL_MISSING_DEPENDENCY',
+      details: { dependency },
+      cause
+    });
+  }
+
+  static from(error) {
+    const constraintCodes = new Set([
+      'ER_DUP_ENTRY',
+      'ER_NO_REFERENCED_ROW',
+      'ER_NO_REFERENCED_ROW_2',
+      'ER_ROW_IS_REFERENCED',
+      'ER_ROW_IS_REFERENCED_2',
+      'ER_BAD_NULL_ERROR',
+      'ER_CHECK_CONSTRAINT_VIOLATED'
+    ]);
+    if (!constraintCodes.has(error?.code)) return error;
+
+    return new MySQLError(error.message, {
+      code: 'SEQ_MYSQL_CONSTRAINT',
+      details: {
+        mysqlCode: error.code,
+        errno: error.errno,
+        sqlState: error.sqlState
+      },
+      cause: error
+    });
+  }
+}
+
+class MySQLDDL extends DDLAbstract {
+  constructor(adapter) {
+    super(adapter);
+  }
+
+  _connection() {
+    return this._adapter._connection();
+  }
+
+  async _execute(sql, params = []) {
+    this._log('trace', sql.replaceAll('\n  ', ' '), params);
+    try {
+      const [result] = await this._connection().execute(sql, params);
+      return result;
+    } catch (error) {
+      throw MySQLError.from(error);
+    }
+  }
+
+  async createTableStructure(def) {
+    const colDefs = [];
+    const primaryKeys = [];
+
+    for (const [attrName, colDef] of Object.entries(def.columns)) {
+      const colName = colDef.field || attrName;
+      const parts = [this._q(colName), this._adapter.mapDataType(colDef.type)];
+      if (!colDef.allowNull && !colDef.primaryKey) parts.push('NOT NULL');
+      if (colDef.autoIncrement) parts.push('AUTO_INCREMENT');
+      if (colDef.defaultValue !== undefined && colDef.defaultValue !== null && typeof colDef.defaultValue !== 'function') {
+        parts.push(`DEFAULT ${this._formatDefaultValue(colDef.defaultValue)}`);
+      }
+      colDefs.push(parts.join(' '));
+      if (colDef.primaryKey) primaryKeys.push(colName);
+    }
+
+    if (primaryKeys.length > 0) {
+      colDefs.push(`PRIMARY KEY (${primaryKeys.map(col => this._q(col)).join(', ')})`);
+    }
+
+    const sql = `CREATE TABLE ${this._q(def.tableName)} (\n  ${colDefs.join(',\n  ')}\n)`;
+    await this._execute(sql);
+  }
+
+  async dropTable(tableName, options = {}) {
+    if (options.ignoreForeignKeys !== false) await this._execute('SET FOREIGN_KEY_CHECKS = 0');
+    try {
+      await this._execute(`DROP TABLE IF EXISTS ${this._q(tableName)}`);
+    } finally {
+      if (options.ignoreForeignKeys !== false) await this._execute('SET FOREIGN_KEY_CHECKS = 1');
+    }
+    await super.dropTable(tableName, options);
+  }
+
+  async truncateTable(tableName, options = {}) {
+    if (options.ifExists && !(await this.hasTable(tableName))) return;
+    if (options.ignoreForeignKeys !== false) await this._execute('SET FOREIGN_KEY_CHECKS = 0');
+    try {
+      await this._execute(`TRUNCATE TABLE ${this._q(tableName)}`);
+    } finally {
+      if (options.ignoreForeignKeys !== false) await this._execute('SET FOREIGN_KEY_CHECKS = 1');
+    }
+  }
+
+  async hasTable(tableName) {
+    const row = await this._executeGet(
+      'SELECT TABLE_NAME FROM information_schema.TABLES WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ? LIMIT 1',
+      [tableName]
+    );
+    return !!row;
+  }
+
+  async describeTable(tableName) {
+    if (!(await this.hasTable(tableName))) {
+      throw new AdapterError(`Table "${tableName}" does not exist`, { code: 'SEQ_ADAPTER_TABLE_NOT_FOUND' });
+    }
+    const rows = await this._executeQueryAll(
+      `SELECT COLUMN_NAME, COLUMN_TYPE, IS_NULLABLE, COLUMN_KEY, COLUMN_DEFAULT, EXTRA
+       FROM information_schema.COLUMNS
+       WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ?
+       ORDER BY ORDINAL_POSITION`,
+      [tableName]
+    );
+    return {
+      tableName,
+      columns: rows.map(row => ({
+        name: row.COLUMN_NAME,
+        type: row.COLUMN_TYPE,
+        allowNull: row.IS_NULLABLE === 'YES',
+        primaryKey: row.COLUMN_KEY === 'PRI',
+        autoIncrement: String(row.EXTRA || '').includes('auto_increment'),
+        defaultValue: row.COLUMN_DEFAULT
+      }))
+    };
+  }
+
+  async introspectDefinition(definition) {
+    const def = this.normalizeDefinition(definition);
+    const columnsInfo = await this._executeQueryAll(
+      `SELECT COLUMN_NAME
+       FROM information_schema.COLUMNS
+       WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ?`,
+      [def.tableName]
+    );
+    const physicalColumns = new Set(columnsInfo.map(row => row.COLUMN_NAME));
+    const columns = {};
+    const attrToColumn = {};
+    const columnToAttr = {};
+
+    for (const [attrName, colDef] of Object.entries(def.columns)) {
+      const columnName = colDef.field || def.attrToColumn[attrName] || attrName;
+      if (!physicalColumns.has(columnName)) continue;
+      columns[attrName] = colDef;
+      attrToColumn[attrName] = columnName;
+      columnToAttr[columnName] = attrName;
+    }
+
+    const indexRows = await this._executeQueryAll(
+      `SELECT DISTINCT INDEX_NAME
+       FROM information_schema.STATISTICS
+       WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ?`,
+      [def.tableName]
+    );
+    const existingIndexNames = new Set(indexRows.map(row => row.INDEX_NAME));
+    const uniqueConstraints = def.uniqueConstraints.filter(item => existingIndexNames.has(item.constraintName));
+    const indexes = def.indexes.filter(item => existingIndexNames.has(item.name));
+
+    const fkRows = await this._executeQueryAll(
+      `SELECT CONSTRAINT_NAME
+       FROM information_schema.KEY_COLUMN_USAGE
+       WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ? AND REFERENCED_TABLE_NAME IS NOT NULL`,
+      [def.tableName]
+    );
+    const existingFKNames = new Set(fkRows.map(row => row.CONSTRAINT_NAME));
+    const foreignKeys = def.foreignKeys.filter(fk => existingFKNames.has(fk.constraintName));
+
+    return { ...def, columns, attrToColumn, columnToAttr, uniqueConstraints, indexes, foreignKeys };
+  }
+
+  async listTables() {
+    const rows = await this._executeQueryAll(
+      'SELECT TABLE_NAME FROM information_schema.TABLES WHERE TABLE_SCHEMA = DATABASE() AND TABLE_TYPE = ?',
+      ['BASE TABLE']
+    );
+    return rows.map(row => row.TABLE_NAME);
+  }
+
+  async addColumns(tableName, missingColumns) {
+    const schema = this._adapter.schemas.get(tableName);
+    for (const [name, colDef] of Object.entries(missingColumns)) {
+      const colType = this._adapter.mapDataType(colDef.type);
+      const columnName = colDef.field || name;
+      const constraints = [];
+      if (!colDef.allowNull && colDef.defaultValue === undefined) {
+        throw new AdapterError(`Cannot add required column "${name}" without a default value`, {
+          code: 'SEQ_DDL_REQUIRED_COLUMN_NEEDS_DEFAULT',
+          details: { tableName, field: name }
+        });
+      }
+      if (!colDef.allowNull) constraints.push('NOT NULL');
+      if (colDef.defaultValue !== undefined && colDef.defaultValue !== null) {
+        const value = typeof colDef.defaultValue === 'function' ? colDef.defaultValue() : colDef.defaultValue;
+        constraints.push(`DEFAULT ${this._formatDefaultValue(value)}`);
+      }
+      await this._execute(`ALTER TABLE ${this._q(tableName)} ADD COLUMN ${this._q(columnName)} ${colType}${constraints.length ? ` ${constraints.join(' ')}` : ''}`);
+      schema.columns[name] = colDef;
+      schema.attrToColumn[name] = columnName;
+      schema.columnToAttr[columnName] = name;
+    }
+  }
+
+  async addUniqueConstraint(tableName, constraint) {
+    const schema = this._adapter.schemas.get(tableName);
+    const cols = constraint.columns.map(c => this._q(c)).join(', ');
+    await this._execute(`CREATE UNIQUE INDEX ${this._q(constraint.constraintName)} ON ${this._q(tableName)} (${cols})`);
+    schema.uniqueConstraints.push({ ...constraint });
+  }
+
+  async addIndex(tableName, index) {
+    const schema = this._adapter.schemas.get(tableName);
+    const cols = index.columns.map(c => this._q(c)).join(', ');
+    const unique = index.unique ? 'UNIQUE ' : '';
+    await this._execute(`CREATE ${unique}INDEX ${this._q(index.name)} ON ${this._q(tableName)} (${cols})`);
+    schema.indexes.push({ ...index });
+  }
+
+  async addForeignKey(tableName, fk) {
+    const sql = `ALTER TABLE ${this._q(tableName)} ADD CONSTRAINT ${this._q(fk.constraintName)} FOREIGN KEY (${this._q(fk.columnName)}) REFERENCES ${this._q(fk.references.table)} (${this._q(fk.references.column)}) ON DELETE ${fk.onDelete || 'RESTRICT'} ON UPDATE ${fk.onUpdate || 'RESTRICT'}`;
+    await this._execute(sql);
+    const schema = this._adapter.schemas.get(tableName);
+    schema.foreignKeys.push({ ...fk });
+  }
+
+  async _executeQueryAll(sql, params = []) {
+    this._log('trace', sql, params);
+    const [rows] = await this._connection().execute(sql, params);
+    return rows;
+  }
+
+  async _executeGet(sql, params = []) {
+    const rows = await this._executeQueryAll(sql, params);
+    return rows[0] || null;
+  }
+
+  _formatDefaultValue(value) {
+    if (value === null) return 'NULL';
+    if (value instanceof Date) return `'${this._formatDate(value)}'`;
+    if (typeof value === 'string') return `'${value.replaceAll("'", "''")}'`;
+    if (typeof value === 'boolean') return value ? '1' : '0';
+    if (typeof value === 'number' && Number.isFinite(value)) return String(value);
+    if (Array.isArray(value) || (typeof value === 'object' && value !== null)) {
+      return `'${JSON.stringify(value).replaceAll("'", "''")}'`;
+    }
+    throw new AdapterError('Unsupported MySQL default value', { code: 'SEQ_DDL_INVALID_DEFAULT' });
+  }
+
+  _formatDate(date) {
+    return date.toISOString().slice(0, 23).replace('T', ' ');
+  }
+}
+
+class MySQLDML extends DMLAbstract {
+  constructor(adapter) {
+    super(adapter);
+  }
+
+  _connection() {
+    return this._adapter._connection();
+  }
+
+  async _executeQueryAll(sql, params = []) {
+    this._log('trace', sql, params);
+    try {
+      const [rows] = await this._connection().execute(sql, params);
+      return rows;
+    } catch (error) {
+      throw MySQLError.from(error);
+    }
+  }
+
+  async _executeGet(sql, params = []) {
+    const rows = await this._executeQueryAll(sql, params);
+    return rows[0] || null;
+  }
+
+  async _execute(sql, params = []) {
+    this._log('trace', sql, params);
+    try {
+      const [result] = await this._connection().execute(sql, params);
+      return {
+        changes: result.affectedRows || 0,
+        lastInsertRowid: result.insertId || 0
+      };
+    } catch (error) {
+      throw MySQLError.from(error);
+    }
+  }
+
+  _buildLimitOffset(options) {
+    if (options.limit !== undefined && (!Number.isInteger(options.limit) || options.limit < 1)) {
+      throw new ValidationError('limit must be an integer >= 1', { code: 'SEQ_VALIDATION_LIMIT' });
+    }
+    if (options.offset !== undefined && (!Number.isInteger(options.offset) || options.offset < 0)) {
+      throw new ValidationError('offset must be an integer >= 0', { code: 'SEQ_VALIDATION_OFFSET' });
+    }
+    if (options.limit && options.offset) return ` LIMIT ${options.limit} OFFSET ${options.offset}`;
+    if (options.limit) return ` LIMIT ${options.limit}`;
+    if (options.offset) return ` LIMIT 18446744073709551615 OFFSET ${options.offset}`;
+    return '';
+  }
+
+  async insert(model, values, options = {}) {
+    this._assertTransaction(options);
+    const { tableName, schema } = this._schema(model);
+    const colRecord = this._toColumnNames(values, schema);
+    this._applyDefaults(colRecord, schema);
+    this._applyTimestamps(colRecord, schema);
+    if (schema.autoIncrement && colRecord[schema.autoIncrement] === undefined) delete colRecord[schema.autoIncrement];
+    this._validateRecord(colRecord, schema, model.modelName);
+
+    const cols = Object.keys(colRecord);
+    if (cols.length === 0) {
+      const info = await this._execute(`INSERT INTO ${this._q(tableName)} () VALUES ()`, []);
+      if (schema.primaryKey) colRecord[schema.primaryKey] = Number(info.lastInsertRowid);
+      return new model(this._toAttrNames(colRecord, schema), { _isNew: false });
+    }
+
+    const colNames = cols.map(c => this._q(c)).join(', ');
+    const placeholders = cols.map(() => '?').join(', ');
+    const sql = `INSERT INTO ${this._q(tableName)} (${colNames}) VALUES (${placeholders})`;
+    const params = cols.map(c => this._serializeValue(colRecord[c]));
+    const info = await this._execute(sql, params);
+    if (schema.primaryKey && !colRecord[schema.primaryKey]) colRecord[schema.primaryKey] = Number(info.lastInsertRowid);
+    return new model(this._toAttrNames(colRecord, schema), { _isNew: false });
+  }
+
+  async truncate(model, options = {}) {
+    this._assertTransaction(options);
+    const { tableName } = this._schema(model);
+    await this._execute('SET FOREIGN_KEY_CHECKS = 0', []);
+    try {
+      await this._execute(`TRUNCATE TABLE ${this._q(tableName)}`, []);
+    } finally {
+      await this._execute('SET FOREIGN_KEY_CHECKS = 1', []);
+    }
+  }
+
+  _serializeValue(value) {
+    if (value instanceof Date) return this._formatDate(value);
+    if (value === undefined) return null;
+    if (typeof value === 'boolean') return value ? 1 : 0;
+    if (Array.isArray(value) || (typeof value === 'object' && value !== null)) return JSON.stringify(value);
+    return value;
+  }
+
+  _toAttrNames(record, schema) {
+    const result = {};
+    const map = schema.columnToAttr;
+    const columns = schema.columns || {};
+    for (const [key, value] of Object.entries(record)) {
+      const attrName = map[key] || key;
+      const colDef = columns[attrName];
+      const typeName = colDef?.type?.constructor?.name;
+      if (typeName === 'ArrayType' || typeName === 'ObjectType' || typeName === 'JSONType') {
+        if (typeof value === 'string') {
+          try { result[attrName] = JSON.parse(value); } catch { result[attrName] = value; }
+        } else {
+          result[attrName] = value;
+        }
+      } else if (typeName === 'BooleanType') {
+        if (typeof value === 'boolean') result[attrName] = value;
+        else result[attrName] = value === 1 || value === '1';
+      } else if (typeName === 'DateType') {
+        if (value instanceof Date) result[attrName] = value;
+        else if (typeof value === 'string') result[attrName] = new Date(value);
+        else result[attrName] = value;
+      } else if (typeName === 'DecimalType' || typeName === 'NumberType') {
+        result[attrName] = value === null || value === undefined ? value : Number(value);
+      } else {
+        result[attrName] = value;
+      }
+    }
+    return result;
+  }
+
+  _mapRows(rows, model, schema, options = {}) {
+    return rows.map(row => new model(this._toAttrNames(row, schema), {
+      _isNew: false,
+      _partial: Array.isArray(options.attributes) && options.attributes.length > 0
+    }));
+  }
+
+  _formatDate(date) {
+    return date.toISOString().slice(0, 23).replace('T', ' ');
+  }
+}
+
+let transactionIdCounter = 0;
+
+class MySQLTCL extends TCLAbstract {
+  constructor(adapter) {
+    super(adapter);
+  }
+
+  async begin(options = {}) {
+    if (this._adapter._activeTransaction) {
+      throw new AdapterError('Nested or concurrent MySQL transactions are not supported', {
+        code: 'SEQ_ADAPTER_TRANSACTION_CONCURRENT'
+      });
+    }
+
+    await this._adapter.connect();
+    const connection = await this._adapter._pool.getConnection();
+    await connection.beginTransaction();
+    const transaction = {
+      id: ++transactionIdCounter,
+      active: true,
+      adapter: this._adapter,
+      connection
+    };
+    this._adapter._activeTransaction = transaction;
+    return transaction;
+  }
+
+  async commit(transaction) {
+    this._validateTransaction(transaction);
+    try {
+      await transaction.connection.commit();
+    } finally {
+      this._release(transaction);
+    }
+  }
+
+  async rollback(transaction) {
+    this._validateTransaction(transaction);
+    try {
+      await transaction.connection.rollback();
+    } finally {
+      this._release(transaction);
+    }
+  }
+
+  _release(transaction) {
+    transaction.active = false;
+    transaction.connection.release();
+    transaction.connection = null;
+    this._adapter._activeTransaction = null;
+  }
+}
+
+let mysqlClient = null;
+
+class MySQLAdapter extends BaseAdapter {
+  static defaultNaming = {
+    tables: 'snake_case',
+    columns: 'snake_case',
+    prefix: undefined,
+    caseStyle: 'lower'
+  };
+
+  constructor(options = {}) {
+    super({ fkStrategy: 'alter', ...options });
+    this._pool = null;
+    this._connectionOptions = this._normalizeConnectionOptions(options);
+    this.ddl = new MySQLDDL(this);
+    this.dml = new MySQLDML(this);
+    this.dcl = null;
+    this.tcl = new MySQLTCL(this);
+  }
+
+  static async _loadClient() {
+    if (!mysqlClient) mysqlClient = await import('mysql2/promise');
+    return mysqlClient;
+  }
+
+  async validateDependencies() {
+    await this._getClient();
+    return true;
+  }
+
+  async connect() {
+    if (this._pool) return;
+    const mysql = await this._getClient();
+    this._pool = mysql.createPool(this._connectionOptions);
+    this._log('info', 'conectado');
+  }
+
+  async authenticate() {
+    await this.connect();
+    await this.dml._executeGet('SELECT 1 AS ok', []);
+    return true;
+  }
+
+  async close() {
+    if (this._activeTransaction) await this.tcl.rollback(this._activeTransaction);
+    if (this._pool) {
+      await this._pool.end();
+      this._pool = null;
+      this._log('info', 'desconectado');
+    }
+  }
+
+  async initialize() {
+    if (!this._pool) await this.connect();
+  }
+
+  _connection() {
+    return this._activeTransaction?.connection || this._pool;
+  }
+
+  _quoteIdentifier(name) {
+    if (typeof name !== 'string' || name.length === 0 || name.includes('\0')) {
+      throw new TypeError('SQL identifiers must be non-empty strings without null bytes');
+    }
+    return `\`${name.replaceAll('`', '``')}\``;
+  }
+
+  mapDataType(dataType) {
+    const name = dataType?.constructor?.name || String(dataType);
+    switch (name) {
+      case 'IntegerType': return 'INTEGER';
+      case 'DecimalType': {
+        const precision = dataType.options?.precision ?? 10;
+        const scale = dataType.options?.scale ?? 2;
+        return `DECIMAL(${precision}, ${scale})`;
+      }
+      case 'NumberType': return 'DOUBLE';
+      case 'StringType': return `VARCHAR(${dataType.options?.length ?? 255})`;
+      case 'BooleanType': return 'TINYINT(1)';
+      case 'DateType': return 'DATETIME(3)';
+      case 'ArrayType':
+      case 'ObjectType':
+      case 'JSONType': return 'JSON';
+      default: return 'TEXT';
+    }
+  }
+
+  cloneRecord(record) {
+    return { ...record };
+  }
+
+  async _getClient() {
+    try {
+      return await this.constructor._loadClient();
+    } catch (error) {
+      const mysqlError = MySQLError.missingDependency('mysql2', error);
+      this._dependencyWarning(mysqlError.message);
+      throw mysqlError;
+    }
+  }
+
+  _dependencyWarning(message) {
+    if (this._seq) {
+      this._log('error', message);
+      return;
+    }
+    console.error(`[Seq] ${message}`);
+  }
+
+  _normalizeConnectionOptions(options) {
+    const {
+      naming,
+      fkStrategy,
+      eager,
+      ...connectionOptions
+    } = options;
+    return {
+      host: 'localhost',
+      port: 3306,
+      user: 'root',
+      database: 'seq',
+      waitForConnections: true,
+      connectionLimit: 10,
+      timezone: 'Z',
+      supportBigNumbers: true,
+      ...connectionOptions
+    };
+  }
+}
+
+export { AdapterError, Association, BaseAdapter, ConfigurationError, DataTypes, ErrorAbstract, MapAdapter, Model, ModelError, ModelRegistry, MySQLAdapter, MySQLError, Op, SQLiteAdapter, SQLiteError, Seq, SeqError, ValidationError };
+//# sourceMappingURL=seq.js.map

@@ -1,12 +1,35 @@
-import { describe, it, beforeEach } from 'node:test';
+import { describe, it, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
-import { Seq } from '../src/core/Seq.js';
 import { Model } from '../src/core/Model.js';
 import { DataTypes } from '../src/data-types/index.js';
-import { SQLiteAdapter } from '../src/adapters/sqlite/SQLiteAdapter.js';
+import { cleanupTestContext, createTestContext, testTable } from './shared/test-context.js';
 
 describe('DDL Phases', () => {
   let seq;
+  let context;
+
+  async function initSeq(models) {
+    context = await createTestContext({ models, logging: false });
+    seq = context.seq;
+    return seq;
+  }
+
+  function constraintTableName(tableName) {
+    const prefix = seq._adapter.naming?.prefix;
+    if (!prefix) return String(tableName);
+    const token = String(prefix).endsWith('_') ? String(prefix) : `${prefix}_`;
+    return String(tableName).replaceAll(token, '');
+  }
+
+  function expectedForeignKeyName(sourceTable, targetTable, foreignKeyColumn) {
+    return `fk_${constraintTableName(sourceTable)}_${constraintTableName(targetTable)}_${foreignKeyColumn}`;
+  }
+
+  afterEach(async () => {
+    await cleanupTestContext(context);
+    context = null;
+    seq = null;
+  });
 
   describe('_buildTableDefinition grouping', () => {
     it('separates unique constraints from columns', async () => {
@@ -17,11 +40,10 @@ describe('DDL Phases', () => {
           email: { type: DataTypes.STRING(150), allowNull: false, unique: true },
           name: { type: DataTypes.STRING(100) }
         },
-        { modelName: 'User', tableName: 'users' }
+        { modelName: 'User', tableName: testTable('users') }
       );
 
-      seq = new Seq({ adapter: new SQLiteAdapter({ database: ':memory:' }), models: [User], logging: false });
-      await seq.init();
+      await initSeq([User]);
 
       const def = seq._buildTableDefinition(User);
 
@@ -29,7 +51,7 @@ describe('DDL Phases', () => {
       assert.equal(def.columns.email.unique, undefined, 'unique flag removed from column');
       assert.equal(def.uniqueConstraints.length, 1);
       assert.deepEqual(def.uniqueConstraints[0].columns, ['email']);
-      assert.equal(def.uniqueConstraints[0].constraintName, 'uk_users_email');
+      assert.equal(def.uniqueConstraints[0].constraintName, `uk_${User.tableName}_email`);
     });
 
     it('includes indexes array (empty for now)', async () => {
@@ -39,11 +61,10 @@ describe('DDL Phases', () => {
           id: { type: DataTypes.INTEGER, primaryKey: true, autoIncrement: true },
           name: { type: DataTypes.STRING(100) }
         },
-        { modelName: 'User', tableName: 'users' }
+        { modelName: 'User', tableName: testTable('users') }
       );
 
-      seq = new Seq({ adapter: new SQLiteAdapter({ database: ':memory:' }), models: [User], logging: false });
-      await seq.init();
+      await initSeq([User]);
 
       const def = seq._buildTableDefinition(User);
       assert.ok(Array.isArray(def.indexes));
@@ -58,17 +79,16 @@ describe('DDL Phases', () => {
           email: { type: DataTypes.STRING(150), unique: true },
           username: { type: DataTypes.STRING(50), unique: true }
         },
-        { modelName: 'User', tableName: 'users' }
+        { modelName: 'User', tableName: testTable('users') }
       );
 
-      seq = new Seq({ adapter: new SQLiteAdapter({ database: ':memory:' }), models: [User], logging: false });
-      await seq.init();
+      await initSeq([User]);
 
       const def = seq._buildTableDefinition(User);
       assert.equal(def.uniqueConstraints.length, 2);
       const names = def.uniqueConstraints.map(uk => uk.constraintName);
-      assert.ok(names.includes('uk_users_email'));
-      assert.ok(names.includes('uk_users_username'));
+      assert.ok(names.includes(`uk_${User.tableName}_email`));
+      assert.ok(names.includes(`uk_${User.tableName}_username`));
     });
 
     it('columns retain no unique flag', async () => {
@@ -78,11 +98,10 @@ describe('DDL Phases', () => {
           id: { type: DataTypes.INTEGER, primaryKey: true, autoIncrement: true },
           email: { type: DataTypes.STRING(150), unique: true }
         },
-        { modelName: 'User', tableName: 'users' }
+        { modelName: 'User', tableName: testTable('users') }
       );
 
-      seq = new Seq({ adapter: new SQLiteAdapter({ database: ':memory:' }), models: [User], logging: false });
-      await seq.init();
+      await initSeq([User]);
 
       const def = seq._buildTableDefinition(User);
       assert.equal(Object.keys(def.columns.email).includes('unique'), false);
@@ -102,11 +121,10 @@ describe('DDL Phases', () => {
             }
           }
         },
-        { modelName: 'User', tableName: 'users', timestamps: false }
+        { modelName: 'User', tableName: testTable('users'), timestamps: false }
       );
 
-      seq = new Seq({ adapter: new SQLiteAdapter({ database: ':memory:' }), models: [User], logging: false });
-      await seq.init();
+      await initSeq([User]);
 
       const def = seq._buildTableDefinition(User);
       assert.ok(!def.columns.fullName);
@@ -124,26 +142,25 @@ describe('DDL Phases', () => {
           id: { type: DataTypes.INTEGER, primaryKey: true, autoIncrement: true },
           email: { type: DataTypes.STRING(150), unique: true }
         },
-        { modelName: 'User', tableName: 'users' }
+        { modelName: 'User', tableName: testTable('users') }
       );
 
-      seq = new Seq({ adapter: new SQLiteAdapter({ database: ':memory:' }), models: [User], logging: false });
-      await seq.init();
+      await initSeq([User]);
       await seq.sync();
 
-      const schema = seq._adapter.schemas.get('users');
+      const schema = seq._adapter.schemas.get(User.tableName);
       assert.ok(Array.isArray(schema.uniqueConstraints));
       assert.ok(Array.isArray(schema.indexes));
       assert.ok(Array.isArray(schema.foreignKeys));
       assert.equal(schema.uniqueConstraints.length, 1);
-      assert.equal(schema.uniqueConstraints[0].constraintName, 'uk_users_email');
+      assert.equal(schema.uniqueConstraints[0].constraintName, `uk_${User.tableName}_email`);
     });
 
     it('foreignKeys stored separately from createTable', async () => {
       class User extends Model {}
       User.init(
         { id: { type: DataTypes.INTEGER, primaryKey: true, autoIncrement: true }, name: { type: DataTypes.STRING(100) } },
-        { modelName: 'User', tableName: 'users' }
+        { modelName: 'User', tableName: testTable('users') }
       );
 
       class Task extends Model {}
@@ -153,19 +170,18 @@ describe('DDL Phases', () => {
           title: { type: DataTypes.STRING(100) },
           userId: { type: DataTypes.INTEGER }
         },
-        { modelName: 'Task', tableName: 'tasks' }
+        { modelName: 'Task', tableName: testTable('tasks') }
       );
 
       User.hasMany(Task, { foreignKey: 'userId' });
       Task.belongsTo(User, { foreignKey: 'userId' });
 
-      seq = new Seq({ adapter: new SQLiteAdapter({ database: ':memory:' }), models: [User, Task], logging: false });
-      await seq.init();
+      await initSeq([User, Task]);
       await seq.sync();
 
-      const schema = seq._adapter.schemas.get('tasks');
+      const schema = seq._adapter.schemas.get(Task.tableName);
       assert.equal(schema.foreignKeys.length, 1);
-      assert.equal(schema.foreignKeys[0].constraintName, 'fk_tasks_users');
+      assert.equal(schema.foreignKeys[0].constraintName, expectedForeignKeyName(Task.tableName, User.tableName, 'user_id'));
     });
   });
 
@@ -174,41 +190,39 @@ describe('DDL Phases', () => {
       class User extends Model {}
       User.init(
         { id: { type: DataTypes.INTEGER, primaryKey: true, autoIncrement: true }, email: { type: DataTypes.STRING(150) } },
-        { modelName: 'User', tableName: 'users' }
+        { modelName: 'User', tableName: testTable('users') }
       );
 
-      seq = new Seq({ adapter: new SQLiteAdapter({ database: ':memory:' }), models: [User], logging: false });
-      await seq.init();
+      await initSeq([User]);
       await seq.sync();
 
-      await seq._adapter.ddl.addUniqueConstraint('users', { columns: ['email'], constraintName: 'uk_users_email' });
-      const schema = seq._adapter.schemas.get('users');
+      await seq._adapter.ddl.addUniqueConstraint(User.tableName, { columns: ['email'], constraintName: `uk_${User.tableName}_email` });
+      const schema = seq._adapter.schemas.get(User.tableName);
       assert.equal(schema.uniqueConstraints.length, 1);
-      assert.equal(schema.uniqueConstraints[0].constraintName, 'uk_users_email');
+      assert.equal(schema.uniqueConstraints[0].constraintName, `uk_${User.tableName}_email`);
     });
 
     it('addIndex stores index on schema', async () => {
       class User extends Model {}
       User.init(
         { id: { type: DataTypes.INTEGER, primaryKey: true, autoIncrement: true }, name: { type: DataTypes.STRING(100) } },
-        { modelName: 'User', tableName: 'users' }
+        { modelName: 'User', tableName: testTable('users') }
       );
 
-      seq = new Seq({ adapter: new SQLiteAdapter({ database: ':memory:' }), models: [User], logging: false });
-      await seq.init();
+      await initSeq([User]);
       await seq.sync();
 
-      await seq._adapter.ddl.addIndex('users', { columns: ['name'], name: 'idx_users_name', unique: false });
-      const schema = seq._adapter.schemas.get('users');
+      await seq._adapter.ddl.addIndex(User.tableName, { columns: ['name'], name: `idx_${User.tableName}_name`, unique: false });
+      const schema = seq._adapter.schemas.get(User.tableName);
       assert.equal(schema.indexes.length, 1);
-      assert.equal(schema.indexes[0].name, 'idx_users_name');
+      assert.equal(schema.indexes[0].name, `idx_${User.tableName}_name`);
     });
 
     it('addForeignKey stores fk on schema', async () => {
       class User extends Model {}
       User.init(
         { id: { type: DataTypes.INTEGER, primaryKey: true, autoIncrement: true }, name: { type: DataTypes.STRING(100) } },
-        { modelName: 'User', tableName: 'users' }
+        { modelName: 'User', tableName: testTable('users') }
       );
 
       class Task extends Model {}
@@ -218,16 +232,15 @@ describe('DDL Phases', () => {
           title: { type: DataTypes.STRING(100) },
           userId: { type: DataTypes.INTEGER, references: { model: 'User', key: 'id' } }
         },
-        { modelName: 'Task', tableName: 'tasks' }
+        { modelName: 'Task', tableName: testTable('tasks') }
       );
 
-      seq = new Seq({ adapter: new SQLiteAdapter({ database: ':memory:' }), models: [User, Task], logging: false });
-      await seq.init();
+      await initSeq([User, Task]);
       await seq.sync();
 
-      const schema = seq._adapter.schemas.get('tasks');
+      const schema = seq._adapter.schemas.get(Task.tableName);
       assert.equal(schema.foreignKeys.length, 1);
-      assert.equal(schema.foreignKeys[0].constraintName, 'fk_tasks_users');
+      assert.equal(schema.foreignKeys[0].constraintName, expectedForeignKeyName(Task.tableName, User.tableName, 'user_id'));
     });
   });
 
@@ -239,18 +252,17 @@ describe('DDL Phases', () => {
           id: { type: DataTypes.INTEGER, primaryKey: true, autoIncrement: true },
           email: { type: DataTypes.STRING(150) }
         },
-        { modelName: 'User', tableName: 'users' }
+        { modelName: 'User', tableName: testTable('users') }
       );
 
-      seq = new Seq({ adapter: new SQLiteAdapter({ database: ':memory:' }), models: [User], logging: false });
-      await seq.init();
+      await initSeq([User]);
       await seq.sync();
 
-      const schema1 = seq._adapter.schemas.get('users');
+      const schema1 = seq._adapter.schemas.get(User.tableName);
       assert.equal(schema1.uniqueConstraints.length, 0);
 
       const def = seq._buildTableDefinition(User);
-      const changed = await seq._adapter.ddl.alterTable('users', def);
+      const changed = await seq._adapter.ddl.alterTable(User.tableName, def);
       assert.equal(changed, false);
     });
 

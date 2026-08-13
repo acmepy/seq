@@ -1,12 +1,11 @@
 import { describe, it, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
-import { Seq } from '../src/core/Seq.js';
 import { Model } from '../src/core/Model.js';
 import { DataTypes } from '../src/data-types/index.js';
-import { SQLiteAdapter } from '../src/adapters/sqlite/SQLiteAdapter.js';
+import { cleanupTestContext, createTestContext, testTable } from './shared/test-context.js';
 
 describe('DML hooks', () => {
-  let seq, adapter, User;
+  let context, User;
 
   beforeEach(async () => {
     class _User extends Model {}
@@ -16,19 +15,17 @@ describe('DML hooks', () => {
         name: { type: DataTypes.STRING(100), allowNull: false },
         active: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: true }
       },
-      { modelName: 'User', tableName: 'users', timestamps: false }
+      { modelName: 'User', tableName: testTable('users'), timestamps: false }
     );
     User = _User;
 
-    adapter = new SQLiteAdapter({ database: ':memory:' });
-    await adapter.connect();
-    seq = new Seq({ adapter, models: [User], logging: false });
-    await seq.init();
-    await seq.sync();
+    context = await createTestContext({ models: [User] });
+    await context.seq.sync();
   });
 
   afterEach(async () => {
-    await seq.close();
+    await cleanupTestContext(context);
+    context = null;
   });
 
   it('runs static create hooks without save hooks', async () => {

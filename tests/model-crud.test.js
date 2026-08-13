@@ -1,12 +1,11 @@
 import { describe, it, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
-import { Seq } from '../src/core/Seq.js';
 import { Model } from '../src/core/Model.js';
 import { DataTypes } from '../src/data-types/index.js';
-import { SQLiteAdapter } from '../src/adapters/sqlite/SQLiteAdapter.js';
+import { cleanupTestContext, createTestContext, quoteTestIdentifier, testTable } from './shared/test-context.js';
 
 describe('Model CRUD', () => {
-  let seq, adapter;
+  let context;
   let User;
 
   beforeEach(async () => {
@@ -19,23 +18,17 @@ describe('Model CRUD', () => {
         balance: { type: DataTypes.DECIMAL(12, 2), allowNull: false, defaultValue: 0 },
         active: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: true }
       },
-      { modelName: 'User', tableName: 'users', timestamps: true }
+      { modelName: 'User', tableName: testTable('users'), timestamps: true }
     );
     User = _User;
 
-    adapter = new SQLiteAdapter({ database: ':memory:' });
-    await adapter.connect();
-    seq = new Seq({
-      adapter,
-      models: [User],
-      logging: false
-    });
-    await seq.init();
-    await seq.sync();
+    context = await createTestContext({ models: [User] });
+    await context.seq.sync();
   });
 
   afterEach(async () => {
-    await seq.close();
+    await cleanupTestContext(context);
+    context = null;
   });
 
   describe('create', () => {
@@ -399,7 +392,7 @@ describe('Model CRUD', () => {
   });
 
   describe('field mapping', () => {
-    let seq2;
+    let fieldContext;
     let Product;
 
     beforeEach(async () => {
@@ -411,18 +404,22 @@ describe('Model CRUD', () => {
           unitPrice: { type: DataTypes.DECIMAL(10, 2), allowNull: false, defaultValue: 0, field: 'unit_price' },
           inStock: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: true, field: 'in_stock' }
         },
-        { modelName: 'Product', tableName: 'products', timestamps: false }
+        { modelName: 'Product', tableName: testTable('products'), timestamps: false }
       );
       Product = _Product;
 
-      seq2 = new Seq({ adapter, models: [Product], logging: false });
-      await seq2.init();
-      await seq2.sync();
+      fieldContext = await createTestContext({ models: [Product] });
+      await fieldContext.seq.sync();
+    });
+
+    afterEach(async () => {
+      await cleanupTestContext(fieldContext);
+      fieldContext = null;
     });
 
     it('stores records using column names', async () => {
       await Product.create({ productName: 'Laptop', unitPrice: 999.99 });
-      const raw = adapter._db.prepare('SELECT * FROM products LIMIT 1').get();
+      const raw = await fieldContext.adapter.dml._executeGet(`SELECT * FROM ${quoteTestIdentifier(Product.tableName)} LIMIT 1`, []);
       assert.ok('product_name' in raw);
       assert.ok('unit_price' in raw);
       assert.ok('in_stock' in raw);
@@ -516,37 +513,40 @@ describe('Model CRUD', () => {
             }
           }
         },
-        { modelName: 'Person', tableName: 'people', timestamps: false }
+        { modelName: 'Person', tableName: testTable('people'), timestamps: false }
       );
 
-      const virtualSeq = new Seq({ adapter, models: [Person], logging: false });
-      await virtualSeq.init();
-      await virtualSeq.sync();
+      const virtualContext = await createTestContext({ models: [Person] });
+      await virtualContext.seq.sync();
 
-      const created = await Person.create({
-        firstName: 'Ana',
-        lastName: 'Demo',
-        fullName: 'Ignored Value'
-      });
-      assert.equal(created.getDataValue('fullName'), 'Ana Demo');
-      assert.equal(created.toJSON().fullName, 'Ana Demo');
+      try {
+        const created = await Person.create({
+          firstName: 'Ana',
+          lastName: 'Demo',
+          fullName: 'Ignored Value'
+        });
+        assert.equal(created.getDataValue('fullName'), 'Ana Demo');
+        assert.equal(created.toJSON().fullName, 'Ana Demo');
 
-      const raw = adapter._db.prepare('SELECT * FROM people LIMIT 1').get();
-      assert.deepEqual(Object.keys(raw).sort(), ['first_name', 'id', 'last_name'].sort());
+        const raw = await virtualContext.adapter.dml._executeGet(`SELECT * FROM ${quoteTestIdentifier(Person.tableName)} LIMIT 1`, []);
+        assert.deepEqual(Object.keys(raw).sort(), ['first_name', 'id', 'last_name'].sort());
 
-      const found = await Person.findOne({
-        attributes: ['id', 'firstName', 'lastName', 'fullName'],
-        where: { id: created.getDataValue('id') }
-      });
-      assert.equal(found.getDataValue('fullName'), 'Ana Demo');
+        const found = await Person.findOne({
+          attributes: ['id', 'firstName', 'lastName', 'fullName'],
+          where: { id: created.getDataValue('id') }
+        });
+        assert.equal(found.getDataValue('fullName'), 'Ana Demo');
 
-      found.setDataValue('fullName', 'Luis Tester');
-      await found.save();
+        found.setDataValue('fullName', 'Luis Tester');
+        await found.save();
 
-      const updated = await Person.findByPk(created.getDataValue('id'));
-      assert.equal(updated.getDataValue('firstName'), 'Luis');
-      assert.equal(updated.getDataValue('lastName'), 'Tester');
-      assert.equal(updated.getDataValue('fullName'), 'Luis Tester');
+        const updated = await Person.findByPk(created.getDataValue('id'));
+        assert.equal(updated.getDataValue('firstName'), 'Luis');
+        assert.equal(updated.getDataValue('lastName'), 'Tester');
+        assert.equal(updated.getDataValue('fullName'), 'Luis Tester');
+      } finally {
+        await cleanupTestContext(virtualContext);
+      }
     });
   });
 

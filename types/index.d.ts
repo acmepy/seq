@@ -226,6 +226,24 @@ export class SQLiteAdapter extends BaseAdapter {
 
 export class SQLiteError extends ErrorAbstract {}
 
+export interface MySQLAdapterOptions extends AdapterOptions {
+  host?: string;
+  port?: number;
+  user?: string;
+  password?: string;
+  database?: string;
+  connectionLimit?: number;
+  waitForConnections?: boolean;
+  timezone?: string;
+  ssl?: unknown;
+}
+
+export class MySQLAdapter extends BaseAdapter {
+  constructor(options?: MySQLAdapterOptions);
+}
+
+export class MySQLError extends ErrorAbstract {}
+
 export class MapAdapter extends BaseAdapter {
   constructor(options?: AdapterOptions);
 }

@@ -1,12 +1,12 @@
 import { describe, it, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
-import { Seq } from '../src/core/Seq.js';
 import { Model } from '../src/core/Model.js';
 import { DataTypes } from '../src/data-types/index.js';
-import { SQLiteAdapter } from '../src/adapters/sqlite/SQLiteAdapter.js';
+import { cleanupTestContext, createTestContext, testTable } from './shared/test-context.js';
 
 describe('Transactions', () => {
   let seq, adapter;
+  let context;
   let User;
 
   beforeEach(async () => {
@@ -17,23 +17,20 @@ describe('Transactions', () => {
         name: { type: DataTypes.STRING(100), allowNull: false },
         balance: { type: DataTypes.DECIMAL(12, 2), allowNull: false, defaultValue: 0 }
       },
-      { modelName: 'User', tableName: 'users', timestamps: false }
+      { modelName: 'User', tableName: testTable('users'), timestamps: false }
     );
     User = _User;
 
-    adapter = new SQLiteAdapter({ database: ':memory:' });
-    await adapter.connect();
-    seq = new Seq({
-      adapter,
-      models: [User],
-      logging: false
-    });
-    await seq.init();
+    context = await createTestContext({ models: [User], logging: false });
+    ({ seq, adapter } = context);
     await seq.sync();
   });
 
   afterEach(async () => {
-    await seq.close();
+    await cleanupTestContext(context);
+    context = null;
+    seq = null;
+    adapter = null;
   });
 
   it('begin creates a transaction', async () => {

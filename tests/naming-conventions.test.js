@@ -1,4 +1,4 @@
-import { describe, it, beforeEach } from 'node:test';
+import { describe, it, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { BaseAdapter } from '../src/adapters/BaseAdapter.js';
 import { SQLiteAdapter } from '../src/adapters/sqlite/SQLiteAdapter.js';
@@ -7,8 +7,14 @@ import { Seq } from '../src/core/Seq.js';
 import { Model } from '../src/core/Model.js';
 import { DataTypes } from '../src/data-types/index.js';
 import { toSnakeCase, toCamelCase, applyConvention, applyCase } from '../src/utils/naming.js';
+import { cleanupTestContext, createTestContext, testTable } from './shared/test-context.js';
 
 describe('Naming Conventions', () => {
+  const open = [];
+
+  afterEach(async () => {
+    while (open.length) await cleanupTestContext(open.pop());
+  });
 
   describe('Utility functions', () => {
     describe('toSnakeCase', () => {
@@ -508,6 +514,8 @@ describe('Naming Conventions', () => {
 
   describe('Integration with sync', () => {
     it('creates table with convention-applied name', async () => {
+      const prefix = testTable('app');
+
       class UserProfile extends Model {
         static define(seq) {
           this.init({
@@ -517,22 +525,21 @@ describe('Naming Conventions', () => {
         }
       }
 
-      const adapter = new SQLiteAdapter({
-        database: ':memory:',
-        naming: { prefix: 'app' }
+      const context = await createTestContext({
+        models: [UserProfile],
+        adapterOptions: { naming: { prefix } }
       });
-      const seq = new Seq({
-        adapter,
-        models: [UserProfile]
-      });
-      await seq.init();
+      const { adapter, seq } = context;
+      open.push(context);
       const result = await seq.sync();
 
-      assert.deepEqual(result.created, ['app_user_profile']);
-      assert.ok(await adapter.ddl.hasTable('app_user_profile'));
+      assert.deepEqual(result.created, [`${prefix}_user_profile`]);
+      assert.ok(await adapter.ddl.hasTable(`${prefix}_user_profile`));
     });
 
     it('CRUD works with convention-applied names', async () => {
+      const prefix = testTable('shop');
+
       class OrderItem extends Model {
         static define(seq) {
           this.init({
@@ -543,15 +550,12 @@ describe('Naming Conventions', () => {
         }
       }
 
-      const adapter = new SQLiteAdapter({
-        database: ':memory:',
-        naming: { prefix: 'shop' }
+      const context = await createTestContext({
+        models: [OrderItem],
+        adapterOptions: { naming: { prefix } }
       });
-      const seq = new Seq({
-        adapter,
-        models: [OrderItem]
-      });
-      await seq.init();
+      const seq = context.seq;
+      open.push(context);
       await seq.sync();
 
       const item = await OrderItem.create({
