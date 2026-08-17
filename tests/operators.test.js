@@ -3,6 +3,15 @@ import assert from 'node:assert/strict';
 import { Op, Model, DataTypes } from '../src/index.js';
 import { cleanupTestContext, createTestContext, testTable } from './shared/test-context.js';
 
+it('uses stable operator symbols across module instances', async () => {
+  const first = await import('../src/operators.js?instance=first');
+  const second = await import('../src/operators.js?instance=second');
+
+  assert.equal(first.Op.or, second.Op.or);
+  assert.equal(first.Op.and, second.Op.and);
+  assert.equal(first.Op.eq, second.Op.eq);
+});
+
 describe('Operators (Op)', () => {
   let context, User;
 
