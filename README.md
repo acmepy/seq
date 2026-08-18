@@ -408,16 +408,34 @@ const [savedUser, created] = await User.upsert(
   { conflictFields: ['email'] }
 );
 
+const [order, orderCreated] = await Order.upsert({
+  number: 'A-100',
+  details: [{ sku: 'BOOK', qty: 2 }],
+  shipment: { trackingCode: 'TRK-1' }
+}, {
+  conflictFields: ['number'],
+  include: [{ model: OrderDetail, as: 'details' }, Shipment]
+});
+
 await User.update({ active: false }, { where: { name: 'Luis' } });
+await Order.update({
+  id: 1,
+  details: [{ sku: 'PEN', qty: 5 }],
+  shipment: null
+}, {
+  include: [{ model: OrderDetail, as: 'details' }, Shipment]
+});
 await User.destroy({ where: { name: 'Luis' } });
 await User.truncate();
 ```
 
 `findAndCountAll()` retorna `{ count, rows }`. `rows` respeta `limit`, `offset` y `order`; `count` devuelve el total de registros que coinciden con el `where` sin paginacion.
 
-`upsert()` retorna `[instance, created]`. Para encontrar el registro a actualizar se puede usar `options.where`, `options.conflictFields` o un valor de llave primaria.
+`upsert()` retorna `[instance, created]`. Para encontrar el registro a actualizar se puede usar `options.where`, `options.conflictFields` o un valor de llave primaria. SQLite usa `ON CONFLICT` cuando el conflicto se puede resolver nativamente; si no, cae al flujo comun del adapter.
 
-`create()` acepta `include` para crear hijos `hasMany` y `hasOne` junto con el padre. Los valores anidados usan el alias de la asociacion, por ejemplo `tasks` y `profile`.
+`create()`, `update()` y `upsert()` aceptan `include` para escribir hijos `hasMany` y `hasOne` junto con el padre. Los valores anidados usan el alias de la asociacion, por ejemplo `tasks`, `profile` o el `as` explicito del include. Las asociaciones `belongsTo` y `belongsToMany` no se escriben de forma anidada.
+
+En mutaciones anidadas, `create()` crea los hijos recibidos; `update()` reemplaza los hijos recibidos para cada padre actualizado; `upsert()` hace upsert de los hijos recibidos. Si se omite la clave anidada no toca esa asociacion. En `hasOne`, `null` no crea hijo en `create()`, elimina el hijo actual en `update()` y deja intacto el hijo existente en `upsert()`.
 
 Instancias:
 
@@ -434,10 +452,11 @@ await user.destroy();
 
 console.log(user.get('name'));
 console.log(user.get());
+console.log(user.get({ plain: true }));
 console.log(user.toJSON());
 ```
 
-`user.get('name')` y `user.getDataValue('name')` retornan el mismo valor de campo. Se prefiere `get('name')` para codigo de aplicacion; `getDataValue('name')` queda disponible para compatibilidad o para logica interna de getters/setters.
+`user.get('name')` y `user.getDataValue('name')` retornan el mismo valor de campo. `user.get()` devuelve una copia de todos los valores de datos e incluye virtuals con getter. `user.get({ plain: true })` ademas convierte instancias incluidas y arrays anidados a objetos planos; `toJSON()` usa esa misma forma. Se prefiere `get('name')` para codigo de aplicacion; `getDataValue('name')` queda disponible para compatibilidad o para logica interna de getters/setters.
 
 `Model.create()` inserta directamente y ejecuta hooks de create. `instance.save()` ejecuta hooks de save y luego los hooks de create/update segun corresponda.
 
@@ -467,7 +486,15 @@ await Task.findAll({
     ]
   }
 });
+
+const plainTasks = await Task.findAll({
+  where: { completed: false },
+  include: [User],
+  plain: true
+});
 ```
+
+`plain: true` esta disponible en `findOne()`, `findAll()` y `findAndCountAll()`. Convierte el resultado final a objetos planos, incluyendo asociaciones cargadas, pero no es equivalente a `raw`: la consulta sigue hidratando instancias internamente, ejecuta hooks y loaders de include, y recien al final serializa con la misma logica de `get({ plain: true })`.
 
 Operadores disponibles:
 
@@ -574,6 +601,36 @@ await User.findAll({
 });
 ```
 
+El anidamiento es recursivo: cada include puede tener su propio `include`, `where`, `attributes`, `required` y `eager`. Esto funciona tanto en carga lazy como eager, y tambien en mutaciones anidadas de `create()`, `update()` y `upsert()` para asociaciones `hasMany`/`hasOne`:
+
+```js
+const order = await Order.create({
+  number: 'A-101',
+  details: [{
+    sku: 'BOOK',
+    qty: 1,
+    taxes: [{ name: 'VAT', amount: 10 }]
+  }]
+}, {
+  include: [{
+    model: OrderDetail,
+    as: 'details',
+    include: [{ model: Tax, as: 'taxes' }]
+  }]
+});
+
+const users = await User.findAll({
+  include: [{
+    model: Role,
+    include: [{
+      model: Permission,
+      include: [Scope]
+    }]
+  }],
+  plain: true
+});
+```
+
 Tambien se puede mezclar estrategias por nivel. En este ejemplo `Role` se carga con JOIN y `Permission` con una consulta lazy separada:
 
 ```js
@@ -640,6 +697,34 @@ Hooks disponibles:
 | `instance.save()` | `beforeSave`, `beforeCreate`/`beforeUpdate`, `afterCreate`/`afterUpdate`, `afterSave` |
 
 Todos los hooks se pueden desactivar por operacion con `{ hooks: false }`.
+
+## Cache
+
+La cache se activa desde `Seq` con la opcion `cache`. Si no se pasa un adapter, usa `MapCacheAdapter` en memoria.
+
+```js
+import { Seq, SQLiteAdapter } from 'seq';
+
+const seq = new Seq({
+  adapter: new SQLiteAdapter({ database: 'app.sqlite' }),
+  models: [User, Role],
+  cache: {
+    ttl: 60_000,
+    users: { ttl: 5_000 },
+    roles: false
+  }
+});
+
+await User.findAll({ where: { active: true } }); // miss y set
+await User.findAll({ where: { active: true } }); // hit
+await User.findAll({ where: { active: true }, cache: false }); // bypass
+```
+
+Se cachean `findOne()`, `findByPk()` (usa `findOne()`), `findAll()` y `count()`. `findAndCountAll()` reutiliza `count()` y `findAll()`, por lo que sus dos partes pueden entrar en cache. Las claves son deterministicas y se generan con modelo, operacion y opciones de query; el orden de propiedades del `where` no cambia la clave. Opciones que no alteran el resultado SQL, como `cache`, `transaction`, `hooks`, `_isNew` y `_partial`, no participan en el hash.
+
+Las lecturas con `{ transaction }` no leen ni escriben cache para evitar datos desactualizados. Las mutaciones (`create`, `bulkCreate`, `upsert`, `update`, `destroy`, `truncate`) invalidan la cache del modelo; dentro de una transaccion la invalidacion se registra para ejecutarse despues del commit.
+
+La configuracion por modelo puede desactivar cache con `false` o definir un TTL propio. Los adapters de cache implementan `get(key)`, `set(key, value, modelName, ttl)`, `invalidate(modelName)` y `clear()`. `get(key)` debe retornar `{ hit: true, value }` o `{ hit: false }`; en el adapter `MapCacheAdapter`, si una entrada expiro, `get(key)` la elimina y responde miss.
 
 ## Transacciones
 

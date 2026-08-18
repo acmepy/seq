@@ -18,6 +18,7 @@
     }
   },
   "scripts": {
+    "----------------------https://testcontainers.com/------------------":"",
     "test": "node --test tests/*.test.js",
     "test:all": "npm run test && npm run test:mysql",
     "test:mysql": "node --test tests/integration/mysql-suite.test.js",
