@@ -23,6 +23,10 @@ export function runAdapterSuite({ name, createSeq, cleanup = async () => {}, sup
       return `${prefix}_${counter}_${baseAliases[base] || base}`;
     }
 
+    function physicalTableName(model) {
+      return model._resolvedTableName || model.tableName;
+    }
+
     async function setup(models) {
       context = await createSeq({ models });
       await context.seq.init();
@@ -58,8 +62,8 @@ export function runAdapterSuite({ name, createSeq, cleanup = async () => {}, sup
       assert.equal(await context.seq.authenticate(), true);
       const result = await context.seq.sync();
 
-      assert.ok(result.created.includes(User.tableName) || result.existing.includes(User.tableName));
-      assert.equal(await context.adapter.ddl.hasTable(User.tableName), true);
+      assert.ok(result.created.includes(physicalTableName(User)) || result.existing.includes(physicalTableName(User)));
+      assert.equal(await context.adapter.ddl.hasTable(physicalTableName(User)), true);
     });
 
     it('[adapter] creates missing tables and detects existing tables', async () => {
@@ -86,8 +90,8 @@ export function runAdapterSuite({ name, createSeq, cleanup = async () => {}, sup
       const created = await seq.sync();
       const existing = await seq.sync();
 
-      assert.deepEqual(created.created.sort(), [Product.tableName, User.tableName].sort());
-      assert.deepEqual(existing.existing.sort(), [Product.tableName, User.tableName].sort());
+      assert.deepEqual(created.created.sort(), [physicalTableName(Product), physicalTableName(User)].sort());
+      assert.deepEqual(existing.existing.sort(), [physicalTableName(Product), physicalTableName(User)].sort());
     });
 
     it('[adapter] recreates tables with force sync', async () => {
@@ -107,8 +111,8 @@ export function runAdapterSuite({ name, createSeq, cleanup = async () => {}, sup
 
       const result = await seq.sync({ force: true });
 
-      assert.ok(result.dropped.includes(User.tableName));
-      assert.ok(result.created.includes(User.tableName));
+      assert.ok(result.dropped.includes(physicalTableName(User)));
+      assert.ok(result.created.includes(physicalTableName(User)));
       assert.equal(await User.count(), 0);
     });
 

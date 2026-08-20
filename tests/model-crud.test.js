@@ -2,7 +2,22 @@ import { describe, it, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { Model } from '../src/core/Model.js';
 import { DataTypes } from '../src/data-types/index.js';
-import { cleanupTestContext, createTestContext, quoteTestIdentifier, testTable } from './shared/test-context.js';
+import { cleanupTestContext, createTestContext, quoteTestIdentifier, testAdapterName, testTable } from './shared/test-context.js';
+
+function physicalTableName(model) {
+  return model._resolvedTableName || model.tableName;
+}
+
+function physicalColumnName(context, model, attrName) {
+  const schema = context.adapter.schemas.get(physicalTableName(model));
+  return schema.attrToColumn[attrName] || attrName;
+}
+
+function selectFirstSql(context, model) {
+  const sql = `SELECT * FROM ${quoteTestIdentifier(physicalTableName(model))}`;
+  if (testAdapterName().startsWith('oracle')) return `${sql} WHERE ROWNUM <= 1`;
+  return context.adapter.dml._applyLimitOffset(sql, { limit: 1 });
+}
 
 describe('Model CRUD', () => {
   let context;
@@ -270,7 +285,7 @@ describe('Model CRUD', () => {
       const user = await User.create({ name: 'Ana', email: 'a@test.com' });
       const originalUpdatedAt = user.getDataValue('updatedAt');
 
-      await new Promise(r => setTimeout(r, 10));
+      await new Promise(r => setTimeout(r, testAdapterName().startsWith('oracle') ? 1100 : 10));
       await User.update({ balance: 100 }, { where: { name: 'Ana' } });
 
       const updated = await User.findOne({ where: { name: 'Ana' } });
@@ -419,10 +434,10 @@ describe('Model CRUD', () => {
 
     it('stores records using column names', async () => {
       await Product.create({ productName: 'Laptop', unitPrice: 999.99 });
-      const raw = await fieldContext.adapter.dml._executeGet(`SELECT * FROM ${quoteTestIdentifier(Product.tableName)} LIMIT 1`, []);
-      assert.ok('product_name' in raw);
-      assert.ok('unit_price' in raw);
-      assert.ok('in_stock' in raw);
+      const raw = await fieldContext.adapter.dml._executeGet(selectFirstSql(fieldContext, Product), []);
+      assert.ok(physicalColumnName(fieldContext, Product, 'productName') in raw);
+      assert.ok(physicalColumnName(fieldContext, Product, 'unitPrice') in raw);
+      assert.ok(physicalColumnName(fieldContext, Product, 'inStock') in raw);
       assert.ok(!('productName' in raw));
     });
 
@@ -528,8 +543,12 @@ describe('Model CRUD', () => {
         assert.equal(created.getDataValue('fullName'), 'Ana Demo');
         assert.equal(created.toJSON().fullName, 'Ana Demo');
 
-        const raw = await virtualContext.adapter.dml._executeGet(`SELECT * FROM ${quoteTestIdentifier(Person.tableName)} LIMIT 1`, []);
-        assert.deepEqual(Object.keys(raw).sort(), ['first_name', 'id', 'last_name'].sort());
+        const raw = await virtualContext.adapter.dml._executeGet(selectFirstSql(virtualContext, Person), []);
+        assert.deepEqual(Object.keys(raw).sort(), [
+          physicalColumnName(virtualContext, Person, 'firstName'),
+          physicalColumnName(virtualContext, Person, 'id'),
+          physicalColumnName(virtualContext, Person, 'lastName')
+        ].sort());
 
         const found = await Person.findOne({
           attributes: ['id', 'firstName', 'lastName', 'fullName'],

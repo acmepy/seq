@@ -196,13 +196,15 @@ describe('Aliases & Include', () => {
     it('WHERE uses alias-prefixed columns', () => {
       const { schema, alias } = seq.adapter.dml._schema(User);
       const where = seq.adapter.dml._buildWhere({ name: 'Ana' }, schema, alias);
-      assert.ok(where.sql.includes(`${quoteTestIdentifier('u')}.${quoteTestIdentifier('name')} = ?`));
+      const nameColumn = schema.attrToColumn.name;
+      assert.ok(where.sql.includes(`${quoteTestIdentifier('u')}.${quoteTestIdentifier(nameColumn)} = ?`));
     });
 
     it('ORDER BY uses alias-prefixed columns', () => {
       const { schema, alias } = seq.adapter.dml._schema(User);
       const order = seq.adapter.dml._buildOrderBy([['name', 'ASC']], schema, alias);
-      assert.ok(order.includes(`${quoteTestIdentifier('u')}.${quoteTestIdentifier('name')} ASC`));
+      const nameColumn = schema.attrToColumn.name;
+      assert.ok(order.includes(`${quoteTestIdentifier('u')}.${quoteTestIdentifier(nameColumn)} ASC`));
     });
 
     it('uses model aliases for eager SQL separately from include property aliases', async () => {
@@ -238,9 +240,11 @@ describe('Aliases & Include', () => {
         const sqlAliases = buildIncludeSqlAliasMap(include, _RolePermission, localSeq.adapter.dml);
         const select = localSeq.adapter.dml._buildQualifiedSelect(_RolePermission, schema, alias, include, sqlAliases);
         const join = localSeq.adapter.dml._buildJoinClause(include, _RolePermission, alias, resolveIncludeAlias, sqlAliases);
+        const permissionSchema = localSeq.adapter.schemas.get(_Permission._resolvedTableName);
+        const permissionColumn = permissionSchema.attrToColumn.permission;
 
-        assert.ok(select.includes(`${quoteTestIdentifier('p')}.${quoteTestIdentifier('permission')} AS ${quoteTestIdentifier('p.permission')}`));
-        assert.ok(join.sql.includes(`JOIN ${quoteTestIdentifier(_Permission.tableName)} AS ${quoteTestIdentifier('p')}`));
+        assert.ok(select.includes(`${quoteTestIdentifier('p')}.${quoteTestIdentifier(permissionColumn)} AS ${quoteTestIdentifier('p.permission')}`));
+        assert.ok(join.sql.includes(`JOIN ${localSeq.adapter.dml._tableWithAlias(_Permission._resolvedTableName, 'p')}`));
         assert.equal(join.sql.includes(`AS ${quoteTestIdentifier('permission')}`), false);
       } finally {
         await cleanupTestContext(localContext);
@@ -1005,10 +1009,11 @@ describe('belongsToMany with through model', () => {
 
   it('syncs the through model table instead of creating an automatic junction table', async () => {
     const tables = await adapter.ddl.listTables();
+    const userRoleTable = UserRole._resolvedTableName;
 
-    assert.ok(tables.includes(UserRole.tableName));
+    assert.ok(tables.includes(userRoleTable));
     assert.ok(!tables.includes('user_roles'));
-    assert.deepEqual(Object.keys(adapter.schemas.get(UserRole.tableName).columns), ['userId', 'roleId', 'note']);
+    assert.deepEqual(Object.keys(adapter.schemas.get(userRoleTable).columns), ['userId', 'roleId', 'note']);
   });
 
   it('lazy loads belongsToMany through a model table', async () => {

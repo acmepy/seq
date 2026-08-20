@@ -34,8 +34,10 @@ export async function cleanupTestContext(context) {
     if (['MySQLAdapter', 'Oracle11Adapter', 'Oracle12Adapter'].includes(context.adapter?.constructor?.name) && !keepTestTables()) {
       const prefixes = [
         `${testTablePrefix()}_`,
+        `${testTablePrefix().toUpperCase()}_`,
         `seqt_mysql_${process.pid.toString(36)}_`,
-        `seqt_oracle_${process.pid.toString(36)}_`
+        `seqt_oracle_${process.pid.toString(36)}_`,
+        `SEQT_ORACLE_${process.pid.toString(36).toUpperCase()}_`
       ];
       const tables = await context.adapter.ddl.listTables();
       for (const table of tables.filter(name => prefixes.some(prefix => name.startsWith(prefix)))) {

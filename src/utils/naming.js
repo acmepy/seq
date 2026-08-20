@@ -32,6 +32,23 @@ export function initCap(name) {
 }
 
 /**
+ * Truncates a string to a maximum length while preserving both ends.
+ * @param {string} name
+ * @param {number} maxLength
+ * @returns {string}
+ */
+export function truncateMiddle(name, maxLength) {
+  const value = String(name);
+  if (!maxLength || value.length <= maxLength) return value;
+  if (maxLength <= 1) return value.slice(0, maxLength);
+
+  const keep = maxLength - 1;
+  const headLength = Math.ceil(keep / 2);
+  const tailLength = Math.floor(keep / 2);
+  return `${value.slice(0, headLength)}_${value.slice(value.length - tailLength)}`;
+}
+
+/**
  * Applies a naming convention to a name.
  * @param {string} name - The original name
  * @param {string} [convention] - 'camelCase' | 'snake_case' | undefined (no transform)

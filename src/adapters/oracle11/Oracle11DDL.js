@@ -7,10 +7,8 @@ export class Oracle11DDL extends DDLAbstract {
   _oracleSql(sql) { let index = 0; return sql.replaceAll('?', () => `:${++index}`); }
   async _execute(sql, params = []) {
     try { 
-      //console.log('------------------>', sql, params);
       return await this._adapter._withConnection(connection => connection.execute(this._oracleSql(sql), params, { autoCommit: !this._adapter._activeTransaction })); 
     }catch (error) { 
-      console.log('------------------>', sql, params, error);
       throw Oracle11Error.from(error); 
     }
   }

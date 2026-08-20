@@ -14,15 +14,21 @@ describe('DDL Phases', () => {
     return seq;
   }
 
-  function constraintTableName(tableName) {
-    const prefix = seq._adapter.naming?.prefix;
-    if (!prefix) return String(tableName);
-    const token = String(prefix).endsWith('_') ? String(prefix) : `${prefix}_`;
-    return String(tableName).replaceAll(token, '');
+  function physicalTableName(model) {
+    return model._resolvedTableName || model.tableName;
+  }
+
+  function physicalColumnName(model, attrName) {
+    return model._resolvedColumns?.[attrName]
+      || seq._adapter.resolveColumnName(model.rawAttributes[attrName] || {}, attrName);
+  }
+
+  function expectedUniqueName(tableName, columns) {
+    return seq._adapter.uniqueConstraintName(tableName, columns);
   }
 
   function expectedForeignKeyName(sourceTable, targetTable, foreignKeyColumn) {
-    return `fk_${constraintTableName(sourceTable)}_${constraintTableName(targetTable)}_${foreignKeyColumn}`;
+    return seq._adapter.foreignKeyConstraintName(sourceTable, targetTable, foreignKeyColumn);
   }
 
   afterEach(async () => {
@@ -50,8 +56,8 @@ describe('DDL Phases', () => {
       assert.ok(def.columns.email, 'email column exists');
       assert.equal(def.columns.email.unique, undefined, 'unique flag removed from column');
       assert.equal(def.uniqueConstraints.length, 1);
-      assert.deepEqual(def.uniqueConstraints[0].columns, ['email']);
-      assert.equal(def.uniqueConstraints[0].constraintName, `uk_${User.tableName}_email`);
+      assert.deepEqual(def.uniqueConstraints[0].columns, [physicalColumnName(User, 'email')]);
+      assert.equal(def.uniqueConstraints[0].constraintName, expectedUniqueName(physicalTableName(User), [physicalColumnName(User, 'email')]));
     });
 
     it('includes indexes array (empty for now)', async () => {
@@ -87,8 +93,8 @@ describe('DDL Phases', () => {
       const def = seq._buildTableDefinition(User);
       assert.equal(def.uniqueConstraints.length, 2);
       const names = def.uniqueConstraints.map(uk => uk.constraintName);
-      assert.ok(names.includes(`uk_${User.tableName}_email`));
-      assert.ok(names.includes(`uk_${User.tableName}_username`));
+      assert.ok(names.includes(expectedUniqueName(physicalTableName(User), [physicalColumnName(User, 'email')])));
+      assert.ok(names.includes(expectedUniqueName(physicalTableName(User), [physicalColumnName(User, 'username')])));
     });
 
     it('columns retain no unique flag', async () => {
@@ -148,12 +154,12 @@ describe('DDL Phases', () => {
       await initSeq([User]);
       await seq.sync();
 
-      const schema = seq._adapter.schemas.get(User.tableName);
+      const schema = seq._adapter.schemas.get(physicalTableName(User));
       assert.ok(Array.isArray(schema.uniqueConstraints));
       assert.ok(Array.isArray(schema.indexes));
       assert.ok(Array.isArray(schema.foreignKeys));
       assert.equal(schema.uniqueConstraints.length, 1);
-      assert.equal(schema.uniqueConstraints[0].constraintName, `uk_${User.tableName}_email`);
+      assert.equal(schema.uniqueConstraints[0].constraintName, expectedUniqueName(physicalTableName(User), [physicalColumnName(User, 'email')]));
     });
 
     it('foreignKeys stored separately from createTable', async () => {
@@ -179,9 +185,9 @@ describe('DDL Phases', () => {
       await initSeq([User, Task]);
       await seq.sync();
 
-      const schema = seq._adapter.schemas.get(Task.tableName);
+      const schema = seq._adapter.schemas.get(physicalTableName(Task));
       assert.equal(schema.foreignKeys.length, 1);
-      assert.equal(schema.foreignKeys[0].constraintName, expectedForeignKeyName(Task.tableName, User.tableName, 'user_id'));
+      assert.equal(schema.foreignKeys[0].constraintName, expectedForeignKeyName(physicalTableName(Task), physicalTableName(User), schema.foreignKeys[0].columnName));
     });
   });
 
@@ -196,10 +202,13 @@ describe('DDL Phases', () => {
       await initSeq([User]);
       await seq.sync();
 
-      await seq._adapter.ddl.addUniqueConstraint(User.tableName, { columns: ['email'], constraintName: `uk_${User.tableName}_email` });
-      const schema = seq._adapter.schemas.get(User.tableName);
+      const userTable = physicalTableName(User);
+      const emailColumn = physicalColumnName(User, 'email');
+      const constraintName = expectedUniqueName(userTable, [emailColumn]);
+      await seq._adapter.ddl.addUniqueConstraint(userTable, { columns: [emailColumn], constraintName });
+      const schema = seq._adapter.schemas.get(userTable);
       assert.equal(schema.uniqueConstraints.length, 1);
-      assert.equal(schema.uniqueConstraints[0].constraintName, `uk_${User.tableName}_email`);
+      assert.equal(schema.uniqueConstraints[0].constraintName, constraintName);
     });
 
     it('addIndex stores index on schema', async () => {
@@ -212,10 +221,13 @@ describe('DDL Phases', () => {
       await initSeq([User]);
       await seq.sync();
 
-      await seq._adapter.ddl.addIndex(User.tableName, { columns: ['name'], name: `idx_${User.tableName}_name`, unique: false });
-      const schema = seq._adapter.schemas.get(User.tableName);
+      const userTable = physicalTableName(User);
+      const nameColumn = physicalColumnName(User, 'name');
+      const indexName = seq._adapter.uniqueConstraintName(`idx_${userTable}`, [nameColumn]);
+      await seq._adapter.ddl.addIndex(userTable, { columns: [nameColumn], name: indexName, unique: false });
+      const schema = seq._adapter.schemas.get(userTable);
       assert.equal(schema.indexes.length, 1);
-      assert.equal(schema.indexes[0].name, `idx_${User.tableName}_name`);
+      assert.equal(schema.indexes[0].name, indexName);
     });
 
     it('addForeignKey stores fk on schema', async () => {
@@ -238,9 +250,9 @@ describe('DDL Phases', () => {
       await initSeq([User, Task]);
       await seq.sync();
 
-      const schema = seq._adapter.schemas.get(Task.tableName);
+      const schema = seq._adapter.schemas.get(physicalTableName(Task));
       assert.equal(schema.foreignKeys.length, 1);
-      assert.equal(schema.foreignKeys[0].constraintName, expectedForeignKeyName(Task.tableName, User.tableName, 'user_id'));
+      assert.equal(schema.foreignKeys[0].constraintName, expectedForeignKeyName(physicalTableName(Task), physicalTableName(User), schema.foreignKeys[0].columnName));
     });
   });
 
@@ -258,11 +270,11 @@ describe('DDL Phases', () => {
       await initSeq([User]);
       await seq.sync();
 
-      const schema1 = seq._adapter.schemas.get(User.tableName);
+      const schema1 = seq._adapter.schemas.get(physicalTableName(User));
       assert.equal(schema1.uniqueConstraints.length, 0);
 
       const def = seq._buildTableDefinition(User);
-      const changed = await seq._adapter.ddl.alterTable(User.tableName, def);
+      const changed = await seq._adapter.ddl.alterTable(physicalTableName(User), def);
       assert.equal(changed, false);
     });
 

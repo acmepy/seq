@@ -3,6 +3,7 @@ import { Oracle11DDL } from './Oracle11DDL.js';
 import { Oracle11DML } from './Oracle11DML.js';
 import { Oracle11TCL } from './Oracle11TCL.js';
 import { Oracle11Error } from './Oracle11Error.js';
+import { truncateMiddle } from '../../utils/naming.js';
 import util from 'node:util';
 
 let oracleClient = null;
@@ -31,13 +32,15 @@ export class Oracle11Adapter extends BaseAdapter {
   async close() { if (this._activeTransaction) await this.tcl.rollback(this._activeTransaction); if (this._pool) { await this._pool.close(0); this._pool = null; this._log('info', 'desconectado'); } }
   async initialize() { if (!this._pool) await this.connect(); }
   _connection() { return this._activeTransaction?.connection || this._pool; }
+  resolveTableName(modelClass) { return this._normalizeIdentifierName(super.resolveTableName(modelClass)); }
+  resolveColumnName(def, attrName) { return this._normalizeIdentifierName(super.resolveColumnName(def, attrName)); }
+  _normalizeIdentifierName(name) { return truncateMiddle(String(name).replace(/[^A-Za-z0-9_$#]/g, '_'), this.naming.maxLength); }
   async _withConnection(run) {
     if (this._activeTransaction) return run(this._activeTransaction.connection);
     const connection = await this._pool.getConnection();
     try { 
       return await run(connection); 
     } catch(e){
-      console.log('------------------>', e);
       throw Oracle11Error.from(e);
     }finally { 
       await connection.close(); 

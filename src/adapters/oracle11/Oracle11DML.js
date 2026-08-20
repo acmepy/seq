@@ -48,7 +48,8 @@ export class Oracle11DML extends DMLAbstract {
     const record = this._toColumnNames(values, schema);
     this._applyDefaults(record, schema); this._applyTimestamps(record, schema); this._validateRecord(record, schema, model.modelName);
     const pk = schema.autoIncrement;
-    if (pk && record[pk] === undefined && this._usesSequenceForAutoIncrement()) record[pk] = { __oracleSequence: this._sequenceName(tableName) };
+    const generatedPk = pk && (record[pk] === undefined || record[pk] === null) && this._usesSequenceForAutoIncrement();
+    if (generatedPk) record[pk] = { __oracleSequence: this._sequenceName(tableName) };
     const columns = Object.keys(record);
     if (!columns.length) throw new ValidationError('Oracle insert requires at least one column', { code: 'SEQ_ORACLE_EMPTY_INSERT' });
     let bindIndex = 0;
@@ -60,15 +61,68 @@ export class Oracle11DML extends DMLAbstract {
     }).join(', ');
     let sql = `INSERT INTO ${this._q(tableName)} (${columns.map(column => this._q(column)).join(', ')}) VALUES (${valuesSql})`;
     const bindParams = [...params];
-    if (pk && record[pk] === undefined) { sql += ` RETURNING ${this._q(pk)} INTO :${bindParams.length + 1}`; bindParams.push({ dir: this._adapter._client.BIND_OUT, type: this._adapter._client.NUMBER }); }
+    if (generatedPk) { sql += ` RETURNING ${this._q(pk)} INTO :${bindParams.length + 1}`; bindParams.push({ dir: this._adapter._client.BIND_OUT, type: this._adapter._client.NUMBER }); }
+    this._log('trace', sql, bindParams);
     try {
       const result = await this._adapter._withConnection(connection => connection.execute(sql, bindParams, { autoCommit: !this._adapter._activeTransaction }));
-      if (pk && record[pk] === undefined) record[pk] = result.outBinds?.[bindParams.length - 1]?.[0];
+      if (generatedPk) record[pk] = result.outBinds?.[0]?.[0] ?? result.outBinds?.[bindParams.length - 1]?.[0];
     } catch (error) { throw Oracle11Error.from(error); }
     return new model(this._toAttrNames(record, schema), { _isNew: false });
   }
 
+  async update(model, values, options = {}) {
+    this._assertTransaction(options);
+    const { tableName, schema } = this._schema(model);
+    const pkAttr = schema.primaryKeyAttribute;
+    if (!pkAttr || !Object.prototype.hasOwnProperty.call(values, pkAttr)) return super.update(model, values, options);
+
+    const pkCol = schema.attrToColumn[pkAttr] || pkAttr;
+    const newPk = values[pkAttr];
+    const matches = await this.selectAll(model, { where: options.where, attributes: [pkAttr], transaction: options.transaction });
+    const oldPks = matches.map(instance => instance.getDataValue(pkAttr));
+    if (oldPks.length === 0) return [];
+
+    const cascadeFks = [];
+    for (const [childTable, childSchema] of this._adapter.schemas) {
+      for (const fk of childSchema.foreignKeys || []) {
+        if (fk.references?.table === tableName && fk.references?.column === pkCol && fk.onUpdate === 'CASCADE') {
+          cascadeFks.push({ childTable, fk });
+        }
+      }
+    }
+    if (cascadeFks.length === 0) return super.update(model, values, options);
+
+    try {
+      for (const { childTable, fk } of cascadeFks) {
+        await this._execute(`ALTER TABLE ${this._q(childTable)} DISABLE CONSTRAINT ${this._q(fk.constraintName)}`, []);
+      }
+      const updated = await super.update(model, values, options);
+      for (const oldPk of oldPks) {
+        for (const { childTable, fk } of cascadeFks) {
+          await this._execute(`UPDATE ${this._q(childTable)} SET ${this._q(fk.columnName)} = ? WHERE ${this._q(fk.columnName)} = ?`, [newPk, oldPk]);
+        }
+      }
+      return updated;
+    } finally {
+      for (const { childTable, fk } of cascadeFks) {
+        await this._execute(`ALTER TABLE ${this._q(childTable)} ENABLE CONSTRAINT ${this._q(fk.constraintName)}`, []);
+      }
+    }
+  }
+
+  async truncate(model, options = {}) {
+    this._assertTransaction(options);
+    const { tableName } = this._schema(model);
+    await this._adapter.ddl.truncateTable(tableName);
+  }
+
   _serializeValue(value) { if (value instanceof Date) return value; if (value === undefined) return null; if (typeof value === 'boolean') return value ? 1 : 0; if (Array.isArray(value) || (typeof value === 'object' && value !== null)) return JSON.stringify(value); return value; }
+  _mapRows(rows, model, schema, options = {}) {
+    return rows.map(row => new model(this._toAttrNames(row, schema), {
+      _isNew: false,
+      _partial: Array.isArray(options.attributes) && options.attributes.length > 0
+    }));
+  }
   _toAttrNames(record, schema) {
     const result = {}; for (const [key, value] of Object.entries(record)) { const attr = schema.columnToAttr[key] || key; if (key === 'SEQ_ROWNUM') continue; const type = schema.columns[attr]?.type?.constructor?.name; if (['ArrayType', 'ObjectType', 'JSONType'].includes(type) && typeof value === 'string') { try { result[attr] = JSON.parse(value); } catch { result[attr] = value; } } else if (type === 'BooleanType') result[attr] = value === true || value === 1 || value === '1'; else if (type === 'DateType' && typeof value === 'string') result[attr] = new Date(value); else if (type === 'DecimalType' || type === 'NumberType') result[attr] = value == null ? value : Number(value); else result[attr] = value; } return result;
   }

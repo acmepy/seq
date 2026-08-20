@@ -1,4 +1,4 @@
-import { applyConvention, applyCase, initCap } from '../utils/naming.js';
+import { applyConvention, applyCase, initCap, truncateMiddle } from '../utils/naming.js';
 /**
  * Base adapter class. All adapters must extend this.
  * Defines the contract for DDL, DML, DCL and TCL operations.
@@ -127,28 +127,28 @@ export class BaseAdapter {
 
   resolveTableName(modelClass) {
     const name = modelClass.tableName? modelClass.tableName : this.naming.prefix ? `${this.naming.prefix}${initCap(modelClass.modelName)}` : modelClass.modelName;
-    return applyCase(applyConvention(name, this.naming.tables), this.naming.caseStyle).slice(0, this.naming.maxLength);
+    return truncateMiddle(applyCase(applyConvention(name, this.naming.tables), this.naming.caseStyle), this.naming.maxLength);
   }
 
   resolveColumnName(def, attrName) {
     const name = def.field? def.field : this.naming.columns ? initCap(attrName) : attrName;
-    return applyCase(applyConvention(name, this.naming.columns), this.naming.caseStyle).slice(0, this.naming.maxLength);
+    return truncateMiddle(applyCase(applyConvention(name, this.naming.columns), this.naming.caseStyle), this.naming.maxLength);
   }
 
   uniqueConstraintName(tableName, columns) {
-    return applyCase(`uk_${tableName}_${columns.join('_')}`, this.naming.caseStyle).slice(0, this.naming.maxLength);
+    return truncateMiddle(applyCase(`uk_${tableName.replaceAll(this.naming.prefix, '')}_${columns.join('_')}`, this.naming.caseStyle), this.naming.maxLength);
   }
 
   foreignKeyConstraintName(sourceTable, refTable, fkColumn) {
-    return applyCase(`fk_${this._constraintTableName(sourceTable)}_${this._constraintTableName(refTable)}_${fkColumn}`, this.naming.caseStyle).slice(0, this.naming.maxLength);
+    return truncateMiddle(applyCase(`fk_${this._constraintTableName(sourceTable).replaceAll(this.naming.prefix, '')}_${this._constraintTableName(refTable)}_${fkColumn}`, this.naming.caseStyle), this.naming.maxLength);
   }
 
   junctionUniqueConstraintName(throughTable, fkColumn, otherKeyColumn) {
-    return applyCase(`uk_${throughTable}_${fkColumn}_${otherKeyColumn}`, this.naming.caseStyle).slice(0, this.naming.maxLength);;
+    return truncateMiddle(applyCase(`uk_${throughTable.replaceAll(this.naming.prefix, '')}_${fkColumn}_${otherKeyColumn}`, this.naming.caseStyle), this.naming.maxLength);
   }
 
   junctionForeignKeyConstraintName(throughTable, columnName) {
-    return applyCase(`fk_${throughTable}_${columnName}`, this.naming.caseStyle).slice(0, this.naming.maxLength);;
+    return truncateMiddle(applyCase(`fk_${throughTable.replaceAll(this.naming.prefix, '')}_${columnName}`, this.naming.caseStyle), this.naming.maxLength);
   }
 
   buildTableDefinition(modelClass, context) {

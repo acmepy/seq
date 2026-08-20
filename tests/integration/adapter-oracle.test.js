@@ -21,7 +21,8 @@ async function assertOracleAuthentication() {
 async function cleanupOracle({ adapter }) {
   if (process.env.SEQ_ORACLE_KEEP_TABLES === '1') return;
   const tables = await adapter.ddl.listTables();
-  for (const table of tables.filter(item => item.startsWith(prefix))) {
+  const prefixes = [prefix, prefix.toUpperCase(), 'adt', 'ADT'];
+  for (const table of tables.filter(item => prefixes.some(value => item.startsWith(value)))) {
     await adapter.ddl.dropTable(table, { ifExists: true, ignoreForeignKeys: true });
   }
 }

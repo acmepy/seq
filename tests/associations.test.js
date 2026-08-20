@@ -61,8 +61,12 @@ describe('Associations', () => {
     return String(tableName).replaceAll(token, '');
   }
 
+  function physicalTableName(model) {
+    return model._resolvedTableName || model.tableName;
+  }
+
   function expectedForeignKeyName(sourceTable, targetTable, foreignKeyColumn) {
-    return `fk_${constraintTableName(sourceTable)}_${constraintTableName(targetTable)}_${foreignKeyColumn}`;
+    return adapter.foreignKeyConstraintName(sourceTable, targetTable, foreignKeyColumn);
   }
 
   afterEach(async () => {
@@ -247,7 +251,7 @@ describe('Associations', () => {
       await createSeq([_User, _Task]);
       await seq.sync();
 
-      const schema = seq._adapter.schemas.get(_Task.tableName);
+      const schema = seq._adapter.schemas.get(physicalTableName(_Task));
       assert.equal(schema.foreignKeys.length, 1);
       assert.equal(schema.foreignKeys[0].attributeName, 'userId');
       assert.equal(schema.foreignKeys[0].references.model, 'User');
@@ -264,13 +268,13 @@ describe('Associations', () => {
       await createSeq([User, Task, Profile]);
       await seq.sync();
 
-      const taskSchema = seq._adapter.schemas.get(Task.tableName);
+      const taskSchema = seq._adapter.schemas.get(physicalTableName(Task));
       const fk = taskSchema.foreignKeys.find(f => f.attributeName === 'userId');
       assert.ok(fk);
       assert.equal(fk.references.model, 'User');
       assert.equal(fk.references.key, 'id');
 
-      const profileSchema = seq._adapter.schemas.get(Profile.tableName);
+      const profileSchema = seq._adapter.schemas.get(physicalTableName(Profile));
       const pfk = profileSchema.foreignKeys.find(f => f.attributeName === 'userId');
       assert.ok(pfk);
       assert.equal(pfk.references.model, 'User');
@@ -300,11 +304,11 @@ describe('Associations', () => {
       });
       await seq.sync();
 
-      const schema = seq._adapter.schemas.get(_Task.tableName);
+      const schema = seq._adapter.schemas.get(physicalTableName(_Task));
       const fk = schema.foreignKeys.find(f => f.attributeName === 'userId');
       assert.ok(fk);
-      assert.equal(fk.columnName, 'user_id');
-      assert.equal(fk.references.column, 'id');
+      assert.equal(fk.columnName, adapter.resolveColumnName({}, 'userId'));
+      assert.equal(fk.references.column, adapter.resolveColumnName({}, 'id'));
     });
   });
 
@@ -530,9 +534,9 @@ describe('Associations', () => {
       await createSeq([User, Task]);
       await seq.sync();
 
-      const schema = seq._adapter.schemas.get(Task.tableName);
+      const schema = seq._adapter.schemas.get(physicalTableName(Task));
       const fk = schema.foreignKeys.find(f => f.attributeName === 'userId');
-      assert.equal(fk.constraintName, expectedForeignKeyName(Task.tableName, User.tableName, 'user_id'));
+      assert.equal(fk.constraintName, expectedForeignKeyName(physicalTableName(Task), physicalTableName(User), fk.columnName));
     });
 
     it('auto-generates from fk_{source_table}_{target_table} on belongsTo', async () => {
@@ -542,9 +546,9 @@ describe('Associations', () => {
       await createSeq([User, Task]);
       await seq.sync();
 
-      const schema = seq._adapter.schemas.get(Task.tableName);
+      const schema = seq._adapter.schemas.get(physicalTableName(Task));
       const fk = schema.foreignKeys.find(f => f.attributeName === 'userId');
-      assert.equal(fk.constraintName, expectedForeignKeyName(Task.tableName, User.tableName, 'user_id'));
+      assert.equal(fk.constraintName, expectedForeignKeyName(physicalTableName(Task), physicalTableName(User), fk.columnName));
     });
 
     it('auto-generates from fk_{source_table}_{target_table} on hasOne', async () => {
@@ -554,9 +558,9 @@ describe('Associations', () => {
       await createSeq([User, Profile]);
       await seq.sync();
 
-      const schema = seq._adapter.schemas.get(Profile.tableName);
+      const schema = seq._adapter.schemas.get(physicalTableName(Profile));
       const fk = schema.foreignKeys.find(f => f.attributeName === 'userId');
-      assert.equal(fk.constraintName, expectedForeignKeyName(Profile.tableName, User.tableName, 'user_id'));
+      assert.equal(fk.constraintName, expectedForeignKeyName(physicalTableName(Profile), physicalTableName(User), fk.columnName));
     });
 
     it('uses explicit constraintName from references in attributes', async () => {
@@ -579,7 +583,7 @@ describe('Associations', () => {
       await createSeq([_User, _Task]);
       await seq.sync();
 
-      const schema = seq._adapter.schemas.get(_Task.tableName);
+      const schema = seq._adapter.schemas.get(physicalTableName(_Task));
       const fk = schema.foreignKeys.find(f => f.attributeName === 'userId');
       assert.equal(fk.constraintName, 'custom_fk_name');
     });
@@ -604,9 +608,9 @@ describe('Associations', () => {
       await createSeq([_User, _Task]);
       await seq.sync();
 
-      const schema = seq._adapter.schemas.get(_Task.tableName);
+      const schema = seq._adapter.schemas.get(physicalTableName(_Task));
       const fk = schema.foreignKeys.find(f => f.attributeName === 'userId');
-      assert.equal(fk.constraintName, expectedForeignKeyName(_Task.tableName, _User.tableName, 'user_id'));
+      assert.equal(fk.constraintName, expectedForeignKeyName(physicalTableName(_Task), physicalTableName(_User), fk.columnName));
     });
 
     it('omits adapter naming prefix from auto-generated constraint names', async () => {
@@ -631,9 +635,9 @@ describe('Associations', () => {
       });
       await seq.sync();
 
-      const schema = seq._adapter.schemas.get(_Task.tableName);
+      const schema = seq._adapter.schemas.get(physicalTableName(_Task));
       const fk = schema.foreignKeys.find(f => f.attributeName === 'userId');
-      assert.equal(fk.constraintName, 'fk_tasks_users_user_id');
+      assert.equal(fk.constraintName, expectedForeignKeyName(physicalTableName(_Task), physicalTableName(_User), fk.columnName));
     });
 
     it('rejects invalid FK with constraint info in schema', async () => {
@@ -670,7 +674,7 @@ describe('Associations', () => {
       await createSeq([User, Task]);
       await seq.sync();
 
-      const schema = seq._adapter.schemas.get(Task.tableName);
+      const schema = seq._adapter.schemas.get(physicalTableName(Task));
       const fk = schema.foreignKeys.find(f => f.attributeName === 'userId');
       assert.equal(fk.constraintName, 'my_custom_fk');
     });

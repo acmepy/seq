@@ -6,7 +6,7 @@ import { MapAdapter } from '../src/adapters/map/MapAdapter.js';
 import { Seq } from '../src/core/Seq.js';
 import { Model } from '../src/core/Model.js';
 import { DataTypes } from '../src/data-types/index.js';
-import { toSnakeCase, toCamelCase, initCap, applyConvention, applyCase } from '../src/utils/naming.js';
+import { toSnakeCase, toCamelCase, initCap, applyConvention, applyCase, truncateMiddle } from '../src/utils/naming.js';
 import { cleanupTestContext, createTestContext, testTable } from './shared/test-context.js';
 
 describe('Naming Conventions', () => {
@@ -106,6 +106,16 @@ describe('Naming Conventions', () => {
         assert.equal(applyCase('userName', 'upper'), 'USERNAME');
       });
 
+    });
+
+    describe('truncateMiddle', () => {
+      it('limits names while preserving both ends', () => {
+        assert.equal(truncateMiddle('very_long_model_name_limit', 12), 'very_l_limit');
+      });
+
+      it('leaves short names unchanged', () => {
+        assert.equal(truncateMiddle('short', 12), 'short');
+      });
     });
   });
 
@@ -384,7 +394,7 @@ describe('Naming Conventions', () => {
       await seq.init();
 
       const def = seq._buildTableDefinition(VeryLongModelNameForTestingTableNameLimit);
-      assert.equal(def.tableName, 'very_long_mo');
+      assert.equal(def.tableName, 'very_l_limit');
     });
   });
 
@@ -574,7 +584,7 @@ describe('Naming Conventions', () => {
       await seq.init();
 
       const def = seq._buildTableDefinition(Product);
-      assert.equal(def.attrToColumn.veryLongProductDisplayName, 'very_long_prod');
+      assert.equal(def.attrToColumn.veryLongProductDisplayName, 'very_lo_y_name');
     });
   });
 
@@ -598,9 +608,10 @@ describe('Naming Conventions', () => {
       const { adapter, seq } = context;
       open.push(context);
       const result = await seq.sync();
+      const userProfileTable = UserProfile._resolvedTableName;
 
-      assert.deepEqual(result.created, [`${prefix}_user_profile`]);
-      assert.ok(await adapter.ddl.hasTable(`${prefix}_user_profile`));
+      assert.deepEqual(result.created, [userProfileTable]);
+      assert.ok(await adapter.ddl.hasTable(userProfileTable));
     });
 
     it('CRUD works with convention-applied names', async () => {

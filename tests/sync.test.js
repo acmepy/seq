@@ -9,6 +9,10 @@ import { DataTypes } from '../src/data-types/index.js';
 import { SQLiteAdapter } from '../src/adapters/sqlite/SQLiteAdapter.js';
 import { cleanupTestContext, createTestContext, testAdapterName, testTable } from './shared/test-context.js';
 
+function physicalTableName(model) {
+  return model._resolvedTableName || model.tableName;
+}
+
 describe('Seq.sync', () => {
   let seq, adapter;
   let context;
@@ -50,7 +54,7 @@ describe('Seq.sync', () => {
 
   it('creates missing tables', async () => {
     const result = await seq.sync();
-    assert.deepEqual(result.created.sort(), [Product.tableName, User.tableName].sort());
+    assert.deepEqual(result.created.sort(), [physicalTableName(Product), physicalTableName(User)].sort());
     assert.deepEqual(result.existing, []);
   });
 
@@ -58,7 +62,7 @@ describe('Seq.sync', () => {
     await seq.sync();
     const result = await seq.sync();
     assert.deepEqual(result.created, []);
-    assert.deepEqual(result.existing.sort(), [Product.tableName, User.tableName].sort());
+    assert.deepEqual(result.existing.sort(), [physicalTableName(Product), physicalTableName(User)].sort());
   });
 
   it('registers schemas for existing SQLite tables after reopening', async () => {
@@ -127,8 +131,8 @@ describe('Seq.sync', () => {
   it('recreates tables with force: true', async () => {
     await seq.sync();
     const result = await seq.sync({ force: true });
-    assert.deepEqual(result.dropped.sort(), [Product.tableName, User.tableName].sort());
-    assert.deepEqual(result.created.sort(), [Product.tableName, User.tableName].sort());
+    assert.deepEqual(result.dropped.sort(), [physicalTableName(Product), physicalTableName(User)].sort());
+    assert.deepEqual(result.created.sort(), [physicalTableName(Product), physicalTableName(User)].sort());
   });
 
   it('recreates related tables with force: true after truncating data', async () => {
@@ -162,8 +166,8 @@ describe('Seq.sync', () => {
 
       const result = await relatedContext.seq.sync({ force: true });
 
-      assert.deepEqual(result.dropped.sort(), [_Child.tableName, _Parent.tableName].sort());
-      assert.deepEqual(result.created.sort(), [_Child.tableName, _Parent.tableName].sort());
+      assert.deepEqual(result.dropped.sort(), [physicalTableName(_Child), physicalTableName(_Parent)].sort());
+      assert.deepEqual(result.created.sort(), [physicalTableName(_Child), physicalTableName(_Parent)].sort());
     } finally {
       await cleanupTestContext(relatedContext);
     }
@@ -185,6 +189,6 @@ describe('Seq.sync', () => {
     _Extra.seq = seq;
 
     const result = await seq.sync({ alter: true });
-    assert.ok(result.created.includes(_Extra.tableName));
+    assert.ok(result.created.includes(physicalTableName(_Extra)));
   });
 });
