@@ -1,6 +1,6 @@
 {
   "name": "seq",
-  "version": "1.0.7",
+  "version": "1.0.8",
   "description": "seq es un micro orm, modular, flexible y de facil integracion",
   "type": "module",
   "main": "src/index.js",
@@ -53,7 +53,7 @@
   "peerDependencies": {
     "better-sqlite3": "^12.11.1",
     "mysql2": "^3.14.0",
-    "oracledb": "5.5.0"
+    "oracledb": "^5.5.0"
   },
   "peerDependenciesMeta": {
     "better-sqlite3": {
