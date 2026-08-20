@@ -81,7 +81,7 @@ export class Seq {
     }
 
     // Phase 1.5: Resolve table names so DML operations use correct names
-    for (const modelClass of this._modelClasses)  modelClass._resolvedTableName = this._resolveTableName(modelClass);
+    for (const modelClass of this._modelClasses) modelClass._resolvedTableName = this._resolveTableName(modelClass);
 
     // Phase 2: Register models (now that modelName is set)
     for (const modelClass of this._modelClasses) this.registerModel(modelClass);
@@ -321,15 +321,17 @@ export class Seq {
    * @private
    */
   _resolveTableName(modelClass) {
-    if (modelClass._tableNameExplicit) return modelClass.tableName;
-
     const naming = this._adapter.naming || {};
+    if (modelClass._tableNameExplicit) {
+      return this._adapter.resolvePhysicalName(modelClass.tableName, { explicit: true, kind: 'table' });
+    }
+
     const convention = naming.tables;
     const prefix = naming.prefix;
     const caseStyle = naming.caseStyle;
     let name = convention ? applyConvention(modelClass.modelName, convention) : modelClass.modelName;
     if (convention && prefix) name = `${prefix}_${name}`;
-    return applyCase(name, caseStyle);
+    return this._adapter.resolvePhysicalName(applyCase(name, caseStyle), { explicit: false, kind: 'table', convention, prefix: !!prefix });
   }
 
   /**
@@ -341,12 +343,13 @@ export class Seq {
    * @private
    */
   _resolveColumnName(def, attrName) {
-    if (def.field) return def.field;
     const naming = this._adapter.naming || {};
+    if (def.field) return this._adapter.resolvePhysicalName(def.field, { explicit: true, kind: 'column' });
+
     const convention = naming.columns;
     const caseStyle = naming.caseStyle;
     const name = convention ? applyConvention(attrName, convention) : attrName;
-    return applyCase(name, caseStyle);
+    return this._adapter.resolvePhysicalName(applyCase(name, caseStyle), { explicit: false, kind: 'column', convention });
   }
 
   /**

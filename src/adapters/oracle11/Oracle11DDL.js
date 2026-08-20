@@ -6,8 +6,13 @@ export class Oracle11DDL extends DDLAbstract {
   _connection() { return this._adapter._connection(); }
   _oracleSql(sql) { let index = 0; return sql.replaceAll('?', () => `:${++index}`); }
   async _execute(sql, params = []) {
-    try { return await this._adapter._withConnection(connection => connection.execute(this._oracleSql(sql), params, { autoCommit: !this._adapter._activeTransaction })); }
-    catch (error) { throw Oracle11Error.from(error); }
+    try { 
+      //console.log('------------------>', sql, params);
+      return await this._adapter._withConnection(connection => connection.execute(this._oracleSql(sql), params, { autoCommit: !this._adapter._activeTransaction })); 
+    }catch (error) { 
+      console.log('------------------>', sql, params, error);
+      throw Oracle11Error.from(error); 
+    }
   }
   async _executeQueryAll(sql, params = []) { return this._adapter._withConnection(async connection => (await connection.execute(this._oracleSql(sql), params, { outFormat: this._adapter._client.OUT_FORMAT_OBJECT })).rows || []); }
   async _executeGet(sql, params = []) { return (await this._executeQueryAll(sql, params))[0] || null; }
@@ -18,8 +23,8 @@ export class Oracle11DDL extends DDLAbstract {
     for (const [attr, column] of Object.entries(def.columns)) {
       const name = column.field || attr;
       const parts = [this._q(name), this._adapter.mapDataType(column.type)];
-      if (!column.allowNull && !column.primaryKey) parts.push('NOT NULL');
       if (column.defaultValue !== undefined && column.defaultValue !== null && typeof column.defaultValue !== 'function') parts.push(`DEFAULT ${this._formatDefaultValue(column.defaultValue)}`);
+      if (!column.allowNull && !column.primaryKey) parts.push('NOT NULL');
       columns.push(parts.join(' ')); if (column.primaryKey) primaryKeys.push(name);
     }
     if (primaryKeys.length) columns.push(`PRIMARY KEY (${primaryKeys.map(key => this._q(key)).join(', ')})`);
@@ -46,7 +51,8 @@ export class Oracle11DDL extends DDLAbstract {
     const schema = this._adapter.schemas.get(tableName);
     for (const [attr, column] of Object.entries(missingColumns)) {
       const name = column.field || attr; const parts = [this._q(name), this._adapter.mapDataType(column.type)];
-      if (!column.allowNull) parts.push('NOT NULL'); if (column.defaultValue !== undefined && column.defaultValue !== null) parts.push(`DEFAULT ${this._formatDefaultValue(column.defaultValue)}`);
+      if (column.defaultValue !== undefined && column.defaultValue !== null) parts.push(`DEFAULT ${this._formatDefaultValue(column.defaultValue)}`);
+      if (!column.allowNull) parts.push('NOT NULL');
       await this._execute(`ALTER TABLE ${this._q(tableName)} ADD (${parts.join(' ')})`);
       schema.columns[attr] = column; schema.attrToColumn[attr] = name; schema.columnToAttr[name] = attr;
     }

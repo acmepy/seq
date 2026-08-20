@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { DataTypes, Oracle11Adapter, Oracle11Error, Oracle12Adapter, Seq } from '../src/index.js';
+import { DataTypes, Model, Oracle11Adapter, Oracle11Error, Oracle12Adapter, Seq } from '../src/index.js';
 import { ErrorAbstract } from '../src/adapters/abstract/ErrorAbstract.js';
 
 test('Oracle adapters', async t => {
@@ -38,6 +38,39 @@ test('Oracle adapters', async t => {
     assert.equal(adapter.mapDataType(DataTypes.ARRAY()), 'VARCHAR2(4000)');
     assert.equal(adapter.mapDataType(DataTypes.JSON), 'VARCHAR2(4000)');
     assert.equal(adapter.mapDataType(DataTypes.DATE), 'DATE');
+  });
+
+  await t.test('Oracle defaults to snake_case uppercase physical names', () => {
+    const oracle11 = new Oracle11Adapter();
+    const oracle12 = new Oracle12Adapter();
+
+    assert.deepEqual(oracle11.naming, {
+      tables: 'snake_case',
+      columns: 'snake_case',
+      prefix: undefined,
+      caseStyle: 'upper'
+    });
+    assert.equal(oracle12.naming.caseStyle, 'upper');
+  });
+
+  await t.test('Oracle applies uppercase caseStyle to explicit physical names', async () => {
+    class ExplicitUser extends Model {}
+    ExplicitUser.init(
+      {
+        id: { type: DataTypes.INTEGER, primaryKey: true, autoIncrement: true },
+        firstName: { type: DataTypes.STRING(100), field: 'first_name' }
+      },
+      { modelName: 'ExplicitUser', tableName: 'explicit_users', timestamps: false }
+    );
+
+    const adapter = new Oracle11Adapter();
+    const seq = new Seq({ adapter, models: [ExplicitUser], logging: false });
+    ExplicitUser.seq = seq;
+    ExplicitUser._resolvedTableName = seq._resolveTableName(ExplicitUser);
+    const def = seq._buildTableDefinition(ExplicitUser);
+
+    assert.equal(def.tableName, 'EXPLICIT_USERS');
+    assert.equal(def.attrToColumn.firstName, 'FIRST_NAME');
   });
 
   await t.test('Oracle 11 uses ROWNUM pagination and Oracle 12 extends it with OFFSET/FETCH', () => {

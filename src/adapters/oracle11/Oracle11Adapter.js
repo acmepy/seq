@@ -3,17 +3,27 @@ import { Oracle11DDL } from './Oracle11DDL.js';
 import { Oracle11DML } from './Oracle11DML.js';
 import { Oracle11TCL } from './Oracle11TCL.js';
 import { Oracle11Error } from './Oracle11Error.js';
+import util from 'node:util';
 
 let oracleClient = null;
 
 export class Oracle11Adapter extends BaseAdapter {
-  static defaultNaming = { tables: 'snake_case', columns: 'snake_case', prefix: undefined, caseStyle: 'lower' };
+  static defaultNaming = { 
+    tables: 'snake_case', 
+    columns: 'snake_case', 
+    prefix: undefined, 
+    caseStyle: 'upper' 
+  };
   constructor(options = {}) {
     super({ fkStrategy: 'alter', ...options });
     this._pool = null; this._connectionOptions = this._normalizeConnectionOptions(options);
     this.ddl = new Oracle11DDL(this); this.dml = new Oracle11DML(this); this.dcl = null; this.tcl = new Oracle11TCL(this);
   }
-  static async _loadClient() { if (!oracleClient) oracleClient = await import('oracledb'); return oracleClient.default || oracleClient; }
+  static async _loadClient() {
+    if (!util.isDate) util.isDate = value => value instanceof Date;
+    if (!oracleClient) oracleClient = await import('oracledb');
+    return oracleClient.default || oracleClient;
+  }
   async validateDependencies() { await this._getClient(); return true; }
   async connect() { if (this._pool) return; this._client = await this._getClient(); this._pool = await this._client.createPool(this._connectionOptions); this._log('info', 'conectado'); }
   async authenticate() { await this.connect(); await this.dml._executeGet('SELECT 1 AS ok FROM dual'); return true; }
@@ -23,9 +33,17 @@ export class Oracle11Adapter extends BaseAdapter {
   async _withConnection(run) {
     if (this._activeTransaction) return run(this._activeTransaction.connection);
     const connection = await this._pool.getConnection();
-    try { return await run(connection); } finally { await connection.close(); }
+    try { 
+      return await run(connection); 
+    } catch(e){
+      console.log('------------------>', e);
+      throw Oracle11Error.from(e);
+    }finally { 
+      await connection.close(); 
+    }
   }
   sequenceName(tableName) { const prefix = 'seq_'; const safe = String(tableName).replace(/[^A-Za-z0-9_$#]/g, '_'); return `${prefix}${safe}`.slice(0, 30); }
+  resolvePhysicalName(name) { return String(name).toUpperCase(); }
   mapDataType(dataType) {
     const name = dataType?.constructor?.name || String(dataType);
     switch (name) {

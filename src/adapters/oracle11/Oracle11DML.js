@@ -9,8 +9,11 @@ export class Oracle11DML extends DMLAbstract {
   _oracleSql(sql) { let index = 0; return sql.replaceAll('?', () => `:${++index}`); }
   async _executeQueryAll(sql, params = []) {
     this._log('trace', sql, params);
-    try { return await this._adapter._withConnection(async connection => (await connection.execute(this._oracleSql(sql), params, { outFormat: this._adapter._client.OUT_FORMAT_OBJECT })).rows || []); }
-    catch (error) { throw Oracle11Error.from(error); }
+    try { 
+      return await this._adapter._withConnection(async connection => (await connection.execute(this._oracleSql(sql), params, { outFormat: this._adapter._client.OUT_FORMAT_OBJECT })).rows || []); 
+    }catch (error) { 
+      throw Oracle11Error.from(error); 
+    }
   }
   async _executeGet(sql, params = []) { return (await this._executeQueryAll(sql, params))[0] || null; }
   async _execute(sql, params = []) {

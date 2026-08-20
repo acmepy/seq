@@ -123,6 +123,10 @@ export class BaseAdapter {
     return this._naming;
   }
 
+  resolvePhysicalName(name, { explicit = false, convention, prefix = false } = {}) {
+    return name;
+  }
+
   /**
    * Normalizes a value for storage.
    * @param {import('../../types/index.d.ts').AttributeDefinition} attribute - The attribute definition
