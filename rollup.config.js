@@ -1,5 +1,5 @@
 const input = 'src/index.js';
-const external = ['better-sqlite3', 'crypto', 'mysql2', 'mysql2/promise'];
+const external = ['better-sqlite3', 'crypto', 'mysql2', 'mysql2/promise', 'node:util', 'oracledb'];
 
 export default {
   input,

@@ -21,6 +21,21 @@ Oracle11Adapter requiere la dependencia "oracledb". Instalala con: npm install o
     });
   }
 
+  static unsupportedDependencyVersion(version) {
+    const message = `
+-------------------------------------------------------------------------------------------------------------
+
+Oracle11Adapter requiere la dependencia "oracledb" en version menor o igual a 5.5.0. Version instalada: ${version}.
+
+-------------------------------------------------------------------------------------------------------------
+
+`;
+    return new Oracle11Error(message, {
+      code: 'SEQ_ORACLE_UNSUPPORTED_DEPENDENCY_VERSION',
+      details: { dependency: 'oracledb', version, maxVersion: '5.5.0' }
+    });
+  }
+
   static from(error) {
     const oracleCode = error?.code || (error?.errorNum ? `ORA-${String(error.errorNum).padStart(5, '0')}` : undefined);
     if (!['ORA-00001', 'ORA-02291', 'ORA-02292', 'ORA-01400'].includes(oracleCode)) return error;

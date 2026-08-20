@@ -26,15 +26,43 @@ export class Oracle11Adapter extends BaseAdapter {
     if (!oracleClient) oracleClient = await import('oracledb');
     return oracleClient.default || oracleClient;
   }
-  async validateDependencies() { await this._getClient(); return true; }
-  async connect() { if (this._pool) return; this._client = await this._getClient(); this._pool = await this._client.createPool(this._connectionOptions); this._log('info', 'conectado'); }
-  async authenticate() { await this.connect(); await this.dml._executeGet('SELECT 1 AS ok FROM dual'); return true; }
-  async close() { if (this._activeTransaction) await this.tcl.rollback(this._activeTransaction); if (this._pool) { await this._pool.close(0); this._pool = null; this._log('info', 'desconectado'); } }
-  async initialize() { if (!this._pool) await this.connect(); }
-  _connection() { return this._activeTransaction?.connection || this._pool; }
-  resolveTableName(modelClass) { return this._normalizeIdentifierName(super.resolveTableName(modelClass)); }
-  resolveColumnName(def, attrName) { return this._normalizeIdentifierName(super.resolveColumnName(def, attrName)); }
-  _normalizeIdentifierName(name) { return truncateMiddle(String(name).replace(/[^A-Za-z0-9_$#]/g, '_'), this.naming.maxLength); }
+
+  async validateDependencies() {
+    const client = await this._getClient();
+    this._validateClientVersion(client);
+    return true;
+  }
+  
+  async connect() { 
+    if (this._pool) return; 
+    this._client = await this._getClient(); 
+    this._pool = await this._client.createPool(this._connectionOptions); 
+    this._log('info', 'conectado'); 
+  }
+  
+  async authenticate() { 
+    await this.connect(); 
+    await this.dml._executeGet('SELECT 1 AS ok FROM dual'); 
+    return true; 
+  }
+  
+  async close() { 
+    if (this._activeTransaction) await this.tcl.rollback(this._activeTransaction); 
+    if (this._pool) { 
+      await this._pool.close(0); 
+      this._pool = null; 
+      this._log('info', 'desconectado'); 
+    } 
+  }
+  
+  async initialize() { 
+    if (!this._pool) await this.connect(); 
+  }
+  
+  _connection() { 
+    return this._activeTransaction?.connection || this._pool; 
+  }
+  
   async _withConnection(run) {
     if (this._activeTransaction) return run(this._activeTransaction.connection);
     const connection = await this._pool.getConnection();
@@ -63,6 +91,29 @@ export class Oracle11Adapter extends BaseAdapter {
   }
   cloneRecord(record) { return { ...record }; }
   async _getClient() { try { return await this.constructor._loadClient(); } catch (error) { const wrapped = Oracle11Error.missingDependency(error); this._dependencyWarning(wrapped.message); throw wrapped; } }
+  _validateClientVersion(client) {
+    const version = client?.versionString || this._versionNumberToString(client?.version);
+    if (!version || this._compareVersions(version, '5.5.0') <= 0) return;
+    const error = Oracle11Error.unsupportedDependencyVersion(version);
+    this._dependencyWarning(error.message);
+    throw error;
+  }
+  _versionNumberToString(version) {
+    if (!Number.isInteger(version)) return null;
+    const major = Math.floor(version / 10000);
+    const minor = Math.floor((version % 10000) / 100);
+    const patch = version % 100;
+    return `${major}.${minor}.${patch}`;
+  }
+  _compareVersions(left, right) {
+    const a = String(left).split('.').map(value => Number.parseInt(value, 10) || 0);
+    const b = String(right).split('.').map(value => Number.parseInt(value, 10) || 0);
+    for (let index = 0; index < Math.max(a.length, b.length); index++) {
+      const diff = (a[index] || 0) - (b[index] || 0);
+      if (diff !== 0) return diff;
+    }
+    return 0;
+  }
   _dependencyWarning(message) { if (this._seq) this._log('error', message); else console.error(`[Seq] ${message}`); }
   _normalizeConnectionOptions(options) { const { naming, fkStrategy, eager, connectString, user, password, poolMin, poolMax, poolIncrement, ...rest } = options; return { user, password, connectString, poolMin: poolMin ?? 0, poolMax: poolMax ?? 4, poolIncrement: poolIncrement ?? 1, ...rest }; }
 }

@@ -126,13 +126,13 @@ export class BaseAdapter {
   }
 
   resolveTableName(modelClass) {
-    const name = modelClass.tableName? modelClass.tableName : this.naming.prefix ? `${this.naming.prefix}${initCap(modelClass.modelName)}` : modelClass.modelName;
+    const name = (modelClass.tableName? modelClass.tableName : this.naming.prefix ? `${this.naming.prefix}${initCap(modelClass.modelName)}` : modelClass.modelName).replace(/[^A-Za-z0-9_$#]+/g, '_');
     return truncateMiddle(applyCase(applyConvention(name, this.naming.tables), this.naming.caseStyle), this.naming.maxLength);
   }
 
   resolveColumnName(def, attrName) {
     const name = def.field? def.field : this.naming.columns ? initCap(attrName) : attrName;
-    return truncateMiddle(applyCase(applyConvention(name, this.naming.columns), this.naming.caseStyle), this.naming.maxLength);
+    return (truncateMiddle(applyCase(applyConvention(name, this.naming.columns), this.naming.caseStyle), this.naming.maxLength)).replace(/[^A-Za-z0-9_$#]+/g, '_');
   }
 
   uniqueConstraintName(tableName, columns) {

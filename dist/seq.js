@@ -1,4 +1,5 @@
 import crypto from 'crypto';
+import util from 'node:util';
 
 /**
  * Base error class for all Seq ORM errors.
@@ -67,14 +68,15 @@ class ModelRegistry {
       });
     }
     this._models.set(name, modelClass);
-    if (modelClass.tableName) {
-      if (this._tableNames.has(modelClass.tableName)) {
+    const tableName = modelClass._resolvedTableName || modelClass.tableName;
+    if (tableName) {
+      if (this._tableNames.has(tableName)) {
         throw new ModelError(
-          `Table name "${modelClass.tableName}" is already used by model "${this._tableNames.get(modelClass.tableName)}"`,
+          `Table name "${tableName}" is already used by model "${this._tableNames.get(tableName)}"`,
           { code: 'SEQ_MODEL_DUPLICATE_TABLE' }
         );
       }
-      this._tableNames.set(modelClass.tableName, name);
+      this._tableNames.set(tableName, name);
     }
   }
 
@@ -615,20 +617,20 @@ DataTypes._VIRTUAL = new VirtualType();
  * Usage: { [Op.like]: '%ana%' }, { [Op.in]: [1, 2, 3] }
  */
 const Op = {
-  eq:           Symbol('eq'),
-  ne:           Symbol('ne'),
-  gt:           Symbol('gt'),
-  gte:          Symbol('gte'),
-  lt:           Symbol('lt'),
-  lte:          Symbol('lte'),
-  like:         Symbol('like'),
-  notLike:      Symbol('notLike'),
-  in:           Symbol('in'),
-  notIn:        Symbol('notIn'),
-  between:      Symbol('between'),
-  notBetween:   Symbol('notBetween'),
-  and:          Symbol('and'),
-  or:           Symbol('or'),
+  eq:           Symbol.for('seq.Op.eq'),
+  ne:           Symbol.for('seq.Op.ne'),
+  gt:           Symbol.for('seq.Op.gt'),
+  gte:          Symbol.for('seq.Op.gte'),
+  lt:           Symbol.for('seq.Op.lt'),
+  lte:          Symbol.for('seq.Op.lte'),
+  like:         Symbol.for('seq.Op.like'),
+  notLike:      Symbol.for('seq.Op.notLike'),
+  in:           Symbol.for('seq.Op.in'),
+  notIn:        Symbol.for('seq.Op.notIn'),
+  between:      Symbol.for('seq.Op.between'),
+  notBetween:   Symbol.for('seq.Op.notBetween'),
+  and:          Symbol.for('seq.Op.and'),
+  or:           Symbol.for('seq.Op.or'),
 };
 
 /**
@@ -1230,7 +1232,7 @@ class Model {
     }
 
     this.modelName = options.modelName || this.name;
-    this.tableName = options.tableName || this.modelName;
+    this.tableName = options.tableName;
     //this._tableNameExplicit = options.tableName !== undefined;
     this.seq = options.seq || null;
     this.associations = this.associations || {};
@@ -2026,55 +2028,6 @@ class ConfigurationError extends SeqError {
   }
 }
 
-/**
- * Converts a PascalCase or camelCase name to snake_case.
- * @param {string} name
- * @returns {string}
- */
-function toSnakeCase(name) {
-  return name
-    .replace(/([a-z])([A-Z])/g, '$1_$2')
-    .replace(/([A-Z])([A-Z][a-z])/g, '$1_$2')
-    .toLowerCase();
-}
-
-/**
- * Converts a snake_case or PascalCase name to camelCase.
- * @param {string} name
- * @returns {string}
- */
-function toCamelCase(name) {
-  return name
-    .replace(/[-_]+(.)/g, (_, c) => c.toUpperCase())
-    .replace(/^(.)/, (_, c) => c.toLowerCase());
-}
-
-/**
- * Applies a naming convention to a name.
- * @param {string} name - The original name
- * @param {string} [convention] - 'camelCase' | 'snake_case' | undefined (no transform)
- * @returns {string}
- */
-function applyConvention(name, convention) {
-  if (!convention) return name;
-  if (convention === 'snake_case') return toSnakeCase(name);
-  if (convention === 'camelCase') return toCamelCase(name);
-  return name;
-}
-
-/**
- * Applies the adapter's case style to a name.
- * @param {string} name - The name to transform
- * @param {string} [caseStyle] - 'upper' | 'lower' | undefined (no transform)
- * @returns {string}
- */
-function applyCase(name, caseStyle) {
-  if (!caseStyle) return name;
-  if (caseStyle === 'upper') return name.toUpperCase();
-  if (caseStyle === 'lower') return name.toLowerCase();
-  return name;
-}
-
 class CacheAdapter {
   constructor(options = {}) {
     this.options = options;
@@ -2374,7 +2327,7 @@ class Seq {
     }
 
     // Phase 1.5: Resolve table names so DML operations use correct names
-    for (const modelClass of this._modelClasses)  modelClass._resolvedTableName = this._resolveTableName(modelClass);
+    for (const modelClass of this._modelClasses) modelClass._resolvedTableName = this._resolveTableName(modelClass);
 
     // Phase 2: Register models (now that modelName is set)
     for (const modelClass of this._modelClasses) this.registerModel(modelClass);
@@ -2389,6 +2342,7 @@ class Seq {
    * @param {import('../../types/index.d.ts').ModelStatic} modelClass
    */
   registerModel(modelClass) {
+    if (!modelClass._resolvedTableName) modelClass._resolvedTableName = this._resolveTableName(modelClass);
     this._registry.register(modelClass);
   }
 
@@ -2435,6 +2389,7 @@ class Seq {
     for (const model of models) {
       result[model.modelName] = model;
       if (model.tableName && !result[model.tableName]) result[model.tableName] = model;
+      if (model._resolvedTableName && !result[model._resolvedTableName]) result[model._resolvedTableName] = model;
     }
     return result;
   }
@@ -2614,15 +2569,7 @@ class Seq {
    * @private
    */
   _resolveTableName(modelClass) {
-    if (modelClass._tableNameExplicit) return modelClass.tableName;
-
-    const naming = this._adapter.naming || {};
-    const convention = naming.tables;
-    const prefix = naming.prefix;
-    const caseStyle = naming.caseStyle;
-    let name = convention ? applyConvention(modelClass.modelName, convention) : modelClass.modelName;
-    if (convention && prefix) name = `${prefix}_${name}`;
-    return applyCase(name, caseStyle);
+    return this._adapter.resolveTableName(modelClass);
   }
 
   /**
@@ -2634,12 +2581,7 @@ class Seq {
    * @private
    */
   _resolveColumnName(def, attrName) {
-    if (def.field) return def.field;
-    const naming = this._adapter.naming || {};
-    const convention = naming.columns;
-    const caseStyle = naming.caseStyle;
-    const name = convention ? applyConvention(attrName, convention) : attrName;
-    return applyCase(name, caseStyle);
+    return this._adapter.resolveColumnName(def, attrName);
   }
 
   /**
@@ -2649,60 +2591,7 @@ class Seq {
    * @private
    */
   _buildTableDefinition(modelClass) {
-    const attributes = modelClass.rawAttributes || {};
-    const columns = {};
-    const uniqueConstraints = [];
-    const attrToColumn = {};
-    const columnToAttr = {};
-    const virtualAttributes = [];
-
-    const sourceTable = modelClass._resolvedTableName || this._resolveTableName(modelClass);
-
-    for (const [name, def] of Object.entries(attributes)) {
-      if (modelClass._isVirtualAttribute?.(def)) {
-        virtualAttributes.push(name);
-        continue;
-      }
-      const columnName = this._resolveColumnName(def, name);
-      attrToColumn[name] = columnName;
-      columnToAttr[columnName] = name;
-
-      columns[name] = {
-        type: def.type,
-        primaryKey: def.primaryKey || false,
-        autoIncrement: def.autoIncrement || false,
-        allowNull: def.allowNull !== undefined ? def.allowNull : true,
-        defaultValue: def.defaultValue,
-        validate: def.validate,
-        field: columnName
-      };
-
-      if (def.unique)  uniqueConstraints.push({columns: [columnName], constraintName: `uk_${sourceTable}_${columnName}`});
-    }
-
-    const pkAttr = modelClass.primaryKeyAttribute;
-    const aiAttr = modelClass.autoIncrementAttribute;
-
-    const foreignKeys = this._buildForeignKeys(modelClass, attrToColumn);
-
-    return {
-      modelName: modelClass.modelName,
-      tableName: sourceTable,
-      columns,
-      uniqueConstraints,
-      indexes: [],
-      foreignKeys,
-      primaryKey: pkAttr ? attrToColumn[pkAttr] : null,
-      autoIncrement: aiAttr ? attrToColumn[aiAttr] : null,
-      primaryKeyAttribute: pkAttr || null,
-      autoIncrementAttribute: aiAttr || null,
-      timestamps: modelClass.options?.timestamps || false,
-      createdAt: modelClass.options?.createdAt || 'createdAt',
-      updatedAt: modelClass.options?.updatedAt || 'updatedAt',
-      virtualAttributes,
-      attrToColumn,
-      columnToAttr
-    };
+    return this._adapter.buildTableDefinition(modelClass, this._adapterDefinitionContext());
   }
 
   /**
@@ -2712,71 +2601,7 @@ class Seq {
    * @private
    */
   _buildJunctionTableDefinition(assoc) {
-    const source = assoc.source;
-    const target = assoc.target;
-    const through = this._getAssociationThroughTable(assoc);
-    const fkAttr = assoc.foreignKey;
-    const otherKeyAttr = assoc.otherKey;
-
-    const sourcePKAttr = source.primaryKeyAttribute || 'id';
-    const sourcePKDef = source.rawAttributes[sourcePKAttr] || {};
-    const sourcePKType = sourcePKDef.type;
-    const sourcePKCol = this._resolveColumnName(sourcePKDef, sourcePKAttr);
-
-    const targetPKAttr = target.primaryKeyAttribute || 'id';
-    const targetPKDef = target.rawAttributes[targetPKAttr] || {};
-    const targetPKType = targetPKDef.type;
-    const targetPKCol = this._resolveColumnName(targetPKDef, targetPKAttr);
-
-    const sourceTable = source._resolvedTableName || this._resolveTableName(source);
-    const targetTable = target._resolvedTableName || this._resolveTableName(target);
-
-    const fkCol = fkAttr;
-    const otherKeyCol = otherKeyAttr;
-
-    const columns = {
-      [fkAttr]: {type: sourcePKType, primaryKey: false, autoIncrement: false, allowNull: false, field: fkCol},
-      [otherKeyAttr]: {type: targetPKType, primaryKey: false, autoIncrement: false, allowNull: false, field: otherKeyCol}
-    };
-
-    const uniqueConstraints = [{columns: [fkCol, otherKeyCol], constraintName: `uk_${through}_${fkCol}_${otherKeyCol}`}];
-
-    const foreignKeys = [
-      {
-        attributeName: fkAttr,
-        columnName: fkCol,
-        constraintName: `fk_${through}_${fkCol}`,
-        references: { model: source.modelName, table: sourceTable, key: sourcePKAttr, column: sourcePKCol },
-        onDelete: 'CASCADE',
-        onUpdate: 'CASCADE'
-      },
-      {
-        attributeName: otherKeyAttr,
-        columnName: otherKeyCol,
-        constraintName: `fk_${through}_${otherKeyCol}`,
-        references: { model: target.modelName, table: targetTable, key: targetPKAttr, column: targetPKCol },
-        onDelete: 'CASCADE',
-        onUpdate: 'CASCADE'
-      }
-    ];
-
-    return {
-      modelName: null,
-      tableName: through,
-      columns,
-      uniqueConstraints,
-      indexes: [],
-      foreignKeys,
-      primaryKey: null,
-      autoIncrement: null,
-      primaryKeyAttribute: null,
-      autoIncrementAttribute: null,
-      timestamps: false,
-      createdAt: 'createdAt',
-      updatedAt: 'updatedAt',
-      attrToColumn: { [fkAttr]: fkCol, [otherKeyAttr]: otherKeyCol },
-      columnToAttr: { [fkCol]: fkAttr, [otherKeyCol]: otherKeyAttr }
-    };
+    return this._adapter.buildJunctionTableDefinition(assoc, this._adapterDefinitionContext());
   }
 
   /**
@@ -2785,115 +2610,26 @@ class Seq {
    * @private
    */
   _buildJunctionTables() {
-    const junctions = [];
-    const seen = new Set();
-    for (const modelClass of this._registry.all()) {
-      for (const assoc of Object.values(modelClass.associations || {})) {
-        if (assoc.type !== 'belongsToMany') continue;
-        if (assoc.throughModel) continue;
-        const through = this._getAssociationThroughTable(assoc);
-        if (seen.has(through)) continue;
-        seen.add(through);
-        junctions.push(assoc);
-      }
-    }
-    return junctions;
+    return this._adapter.buildJunctionTables(this._registry.all(), this._adapterDefinitionContext());
   }
 
   _getAssociationThroughTable(assoc) {
-    return assoc.throughModel?._resolvedTableName
-      || assoc.throughModel?.tableName
-      || assoc.throughTable
-      || assoc.through;
+    return this._adapter.getAssociationThroughTable(assoc, this._adapterDefinitionContext());
   }
 
   _buildForeignKeys(modelClass, attrToColumn) {
-    const fkMap = new Map();
-    const sourceTable = modelClass._resolvedTableName || this._resolveTableName(modelClass);
-    const autoConstraintName = (refTable, fkCol) => `fk_${this._constraintTableName(sourceTable)}_${this._constraintTableName(refTable)}_${fkCol}`;
-    const upsertFK = (fkCol, entry) => {
-      const existing = fkMap.get(fkCol);
-      if (!existing) {
-        fkMap.set(fkCol, entry);
-      } else {
-        if (entry.onDelete && entry.onDelete !== 'RESTRICT') existing.onDelete = entry.onDelete;
-        if (entry.onUpdate && entry.onUpdate !== 'RESTRICT') existing.onUpdate = entry.onUpdate;
-        if (entry.constraintName) existing.constraintName = entry.constraintName;
-      }
-    };
-
-    for (const [attrName, def] of Object.entries(modelClass.rawAttributes || {})) {
-      if (modelClass._isVirtualAttribute?.(def)) continue;
-      if (def.references) {
-        const refModel = this.getModel(def.references.model);
-        if (!refModel) continue;
-        const refPkAttr = def.references.key || refModel.primaryKeyAttribute || 'id';
-        const refTable = refModel._resolvedTableName || this._resolveTableName(refModel);
-        const refPkCol = this._resolveColumnName(refModel.rawAttributes[refPkAttr] || {}, refPkAttr);
-        const fkCol = attrToColumn[attrName] || attrName;
-        const constraintName = def.references.constraintName || autoConstraintName(refTable, fkCol);
-        upsertFK(fkCol, {
-          attributeName: attrName,
-          columnName: fkCol,
-          constraintName,
-          references: { model: def.references.model, table: refTable, key: refPkAttr, column: refPkCol },
-          onDelete: def.onDelete || 'RESTRICT',
-          onUpdate: def.onUpdate || 'RESTRICT'
-        });
-      }
-    }
-
-    const associations = modelClass.associations || {};
-    for (const assoc of Object.values(associations)) {
-      if (assoc.type === 'belongsTo') {
-        const fkAttr = assoc.foreignKey;
-        const refPkAttr = assoc.target.primaryKeyAttribute || 'id';
-        const refTable = assoc.target._resolvedTableName || this._resolveTableName(assoc.target);
-        const refPkCol = this._resolveColumnName(assoc.target.rawAttributes[refPkAttr] || {}, refPkAttr);
-        const fkCol = attrToColumn[fkAttr] || fkAttr;
-        const constraintName = assoc.constraintName || autoConstraintName(refTable, fkCol);
-        upsertFK(fkCol, {
-          attributeName: fkAttr,
-          columnName: fkCol,
-          constraintName,
-          references: { model: assoc.target.modelName, table: refTable, key: refPkAttr, column: refPkCol },
-          onDelete: assoc.onDelete,
-          onUpdate: assoc.onUpdate
-        });
-      }
-    }
-
-    for (const otherModel of this._registry.all()) {
-      if (otherModel === modelClass) continue;
-      for (const assoc of Object.values(otherModel.associations || {})) {
-        if (assoc.type !== 'hasMany' && assoc.type !== 'hasOne') continue;
-        if (assoc.target !== modelClass) continue;
-        const fkAttr = assoc.foreignKey;
-        if (!modelClass.rawAttributes || !modelClass.rawAttributes[fkAttr]) continue;
-        const refPkAttr = assoc.source.primaryKeyAttribute || 'id';
-        const refTable = assoc.source._resolvedTableName || this._resolveTableName(assoc.source);
-        const refPkCol = this._resolveColumnName(assoc.source.rawAttributes[refPkAttr] || {}, refPkAttr);
-        const fkCol = attrToColumn[fkAttr] || fkAttr;
-        const constraintName = assoc.constraintName || autoConstraintName(refTable, fkCol);
-        upsertFK(fkCol, {
-          attributeName: fkAttr,
-          columnName: fkCol,
-          constraintName,
-          references: { model: assoc.source.modelName, table: refTable, key: refPkAttr, column: refPkCol },
-          onDelete: assoc.onDelete,
-          onUpdate: assoc.onUpdate
-        });
-      }
-    }
-    return Array.from(fkMap.values());
+    return this._adapter.buildForeignKeys(modelClass, attrToColumn, this._adapterDefinitionContext());
   }
 
   _constraintTableName(tableName) {
-    const prefix = this._adapter.naming?.prefix;
-    if (!prefix) return String(tableName);
+    return this._adapter._constraintTableName(tableName);
+  }
 
-    const token = String(prefix).endsWith('_') ? String(prefix) : `${prefix}_`;
-    return String(tableName).replaceAll(token, '');
+  _adapterDefinitionContext() {
+    return {
+      models: this._registry.all(),
+      getModel: name => this.getModel(name)
+    };
   }
 
   /**
@@ -2949,6 +2685,82 @@ class Seq {
 }
 
 /**
+ * Converts a PascalCase or camelCase name to snake_case.
+ * @param {string} name
+ * @returns {string}
+ */
+function toSnakeCase(name) {
+  return name
+    .replace(/([a-z])([A-Z])/g, '$1_$2')
+    .replace(/([A-Z])([A-Z][a-z])/g, '$1_$2')
+    .toLowerCase();
+}
+
+/**
+ * Converts a snake_case or PascalCase name to camelCase.
+ * @param {string} name
+ * @returns {string}
+ */
+function toCamelCase(name) {
+  return name
+    .replace(/[-_]+(.)/g, (_, c) => c.toUpperCase())
+    .replace(/^(.)/, (_, c) => c.toLowerCase());
+}
+
+/**
+ * Converts the first character of a string to uppercase.
+ * @param {string} name
+ * @returns {string}
+ */
+function initCap(name) {
+  if (!name) return name;
+  return name.charAt(0).toUpperCase() + name.slice(1);
+}
+
+/**
+ * Truncates a string to a maximum length while preserving both ends.
+ * @param {string} name
+ * @param {number} maxLength
+ * @returns {string}
+ */
+function truncateMiddle(name, maxLength) {
+  const value = String(name);
+  if (!maxLength || value.length <= maxLength) return value;
+  if (maxLength <= 1) return value.slice(0, maxLength);
+
+  const keep = maxLength - 1;
+  const headLength = Math.ceil(keep / 2);
+  const tailLength = Math.floor(keep / 2);
+  return `${value.slice(0, headLength)}_${value.slice(value.length - tailLength)}`;
+}
+
+/**
+ * Applies a naming convention to a name.
+ * @param {string} name - The original name
+ * @param {string} [convention] - 'camelCase' | 'snake_case' | undefined (no transform)
+ * @returns {string}
+ */
+function applyConvention(name, convention) {
+  if (!convention) return name;
+  if (convention === 'snake_case') return toSnakeCase(name);
+  if (convention === 'camelCase') return toCamelCase(name);
+  return name;
+}
+
+/**
+ * Applies the adapter's case style to a name.
+ * @param {string} name - The name to transform
+ * @param {string} [caseStyle] - 'upper' | 'lower' | undefined (no transform)
+ * @returns {string}
+ */
+function applyCase(name, caseStyle) {
+  if (!caseStyle) return name;
+  if (caseStyle === 'upper') return name.toUpperCase();
+  if (caseStyle === 'lower') return name.toLowerCase();
+  return name;
+}
+
+/**
  * Base adapter class. All adapters must extend this.
  * Defines the contract for DDL, DML, DCL and TCL operations.
  */
@@ -2957,7 +2769,8 @@ class BaseAdapter {
     tables: undefined,
     columns: undefined,
     prefix: undefined,
-    caseStyle: undefined
+    caseStyle: undefined,
+    maxLength: 50
   };
 
   /**
@@ -3071,6 +2884,263 @@ class BaseAdapter {
    */
   get naming() {
     return this._naming;
+  }
+
+  resolveTableName(modelClass) {
+    const name = (modelClass.tableName? modelClass.tableName : this.naming.prefix ? `${this.naming.prefix}${initCap(modelClass.modelName)}` : modelClass.modelName).replace(/[^A-Za-z0-9_$#]+/g, '_');
+    return truncateMiddle(applyCase(applyConvention(name, this.naming.tables), this.naming.caseStyle), this.naming.maxLength);
+  }
+
+  resolveColumnName(def, attrName) {
+    const name = def.field? def.field : this.naming.columns ? initCap(attrName) : attrName;
+    return (truncateMiddle(applyCase(applyConvention(name, this.naming.columns), this.naming.caseStyle), this.naming.maxLength)).replace(/[^A-Za-z0-9_$#]+/g, '_');
+  }
+
+  uniqueConstraintName(tableName, columns) {
+    return truncateMiddle(applyCase(`uk_${tableName.replaceAll(this.naming.prefix, '')}_${columns.join('_')}`, this.naming.caseStyle), this.naming.maxLength);
+  }
+
+  foreignKeyConstraintName(sourceTable, refTable, fkColumn) {
+    return truncateMiddle(applyCase(`fk_${this._constraintTableName(sourceTable).replaceAll(this.naming.prefix, '')}_${this._constraintTableName(refTable)}_${fkColumn}`, this.naming.caseStyle), this.naming.maxLength);
+  }
+
+  junctionUniqueConstraintName(throughTable, fkColumn, otherKeyColumn) {
+    return truncateMiddle(applyCase(`uk_${throughTable.replaceAll(this.naming.prefix, '')}_${fkColumn}_${otherKeyColumn}`, this.naming.caseStyle), this.naming.maxLength);
+  }
+
+  junctionForeignKeyConstraintName(throughTable, columnName) {
+    return truncateMiddle(applyCase(`fk_${throughTable.replaceAll(this.naming.prefix, '')}_${columnName}`, this.naming.caseStyle), this.naming.maxLength);
+  }
+
+  buildTableDefinition(modelClass, context) {
+    const attributes = modelClass.rawAttributes || {};
+    const columns = {};
+    const uniqueConstraints = [];
+    const attrToColumn = {};
+    const columnToAttr = {};
+    const virtualAttributes = [];
+    const sourceTable = modelClass._resolvedTableName || this.resolveTableName(modelClass);
+
+    for (const [name, def] of Object.entries(attributes)) {
+      if (modelClass._isVirtualAttribute?.(def)) {
+        virtualAttributes.push(name);
+        continue;
+      }
+      const columnName = this.resolveColumnName(def, name);
+      attrToColumn[name] = columnName;
+      columnToAttr[columnName] = name;
+
+      columns[name] = {
+        type: def.type,
+        primaryKey: def.primaryKey || false,
+        autoIncrement: def.autoIncrement || false,
+        allowNull: def.allowNull !== undefined ? def.allowNull : true,
+        defaultValue: def.defaultValue,
+        validate: def.validate,
+        field: columnName
+      };
+
+      if (def.unique) uniqueConstraints.push({ columns: [columnName], constraintName: this.uniqueConstraintName(sourceTable, [columnName]) });
+    }
+
+    const pkAttr = modelClass.primaryKeyAttribute;
+    const aiAttr = modelClass.autoIncrementAttribute;
+    const foreignKeys = this.buildForeignKeys(modelClass, attrToColumn, context);
+
+    return {
+      modelName: modelClass.modelName,
+      tableName: sourceTable,
+      columns,
+      uniqueConstraints,
+      indexes: [],
+      foreignKeys,
+      primaryKey: pkAttr ? attrToColumn[pkAttr] : null,
+      autoIncrement: aiAttr ? attrToColumn[aiAttr] : null,
+      primaryKeyAttribute: pkAttr || null,
+      autoIncrementAttribute: aiAttr || null,
+      timestamps: modelClass.options?.timestamps || false,
+      createdAt: modelClass.options?.createdAt || 'createdAt',
+      updatedAt: modelClass.options?.updatedAt || 'updatedAt',
+      virtualAttributes,
+      attrToColumn,
+      columnToAttr
+    };
+  }
+
+  buildJunctionTableDefinition(assoc, context) {
+    const source = assoc.source;
+    const target = assoc.target;
+    const through = this.getAssociationThroughTable(assoc);
+    const fkAttr = assoc.foreignKey;
+    const otherKeyAttr = assoc.otherKey;
+
+    const sourcePKAttr = source.primaryKeyAttribute || 'id';
+    const sourcePKDef = source.rawAttributes[sourcePKAttr] || {};
+    const sourcePKType = sourcePKDef.type;
+    const sourcePKCol = this.resolveColumnName(sourcePKDef, sourcePKAttr);
+
+    const targetPKAttr = target.primaryKeyAttribute || 'id';
+    const targetPKDef = target.rawAttributes[targetPKAttr] || {};
+    const targetPKType = targetPKDef.type;
+    const targetPKCol = this.resolveColumnName(targetPKDef, targetPKAttr);
+
+    const sourceTable = source._resolvedTableName || this.resolveTableName(source);
+    const targetTable = target._resolvedTableName || this.resolveTableName(target);
+
+    const fkCol = fkAttr;
+    const otherKeyCol = otherKeyAttr;
+
+    const columns = {
+      [fkAttr]: {type: sourcePKType, primaryKey: false, autoIncrement: false, allowNull: false, field: fkCol},
+      [otherKeyAttr]: {type: targetPKType, primaryKey: false, autoIncrement: false, allowNull: false, field: otherKeyCol}
+    };
+
+    const uniqueConstraints = [{ columns: [fkCol, otherKeyCol], constraintName: this.junctionUniqueConstraintName(through, fkCol, otherKeyCol) }];
+    const foreignKeys = [
+      {
+        attributeName: fkAttr,
+        columnName: fkCol,
+        constraintName: this.junctionForeignKeyConstraintName(through, fkCol),
+        references: { model: source.modelName, table: sourceTable, key: sourcePKAttr, column: sourcePKCol },
+        onDelete: 'CASCADE',
+        onUpdate: 'CASCADE'
+      },
+      {
+        attributeName: otherKeyAttr,
+        columnName: otherKeyCol,
+        constraintName: this.junctionForeignKeyConstraintName(through, otherKeyCol),
+        references: { model: target.modelName, table: targetTable, key: targetPKAttr, column: targetPKCol },
+        onDelete: 'CASCADE',
+        onUpdate: 'CASCADE'
+      }
+    ];
+
+    return {
+      modelName: null,
+      tableName: through,
+      columns,
+      uniqueConstraints,
+      indexes: [],
+      foreignKeys,
+      primaryKey: null,
+      autoIncrement: null,
+      primaryKeyAttribute: null,
+      autoIncrementAttribute: null,
+      timestamps: false,
+      createdAt: 'createdAt',
+      updatedAt: 'updatedAt',
+      attrToColumn: { [fkAttr]: fkCol, [otherKeyAttr]: otherKeyCol },
+      columnToAttr: { [fkCol]: fkAttr, [otherKeyCol]: otherKeyAttr }
+    };
+  }
+
+  buildJunctionTables(models) {
+    const junctions = [];
+    const seen = new Set();
+    for (const modelClass of models) {
+      for (const assoc of Object.values(modelClass.associations || {})) {
+        if (assoc.type !== 'belongsToMany') continue;
+        if (assoc.throughModel) continue;
+        const through = this.getAssociationThroughTable(assoc);
+        if (seen.has(through)) continue;
+        seen.add(through);
+        junctions.push(assoc);
+      }
+    }
+    return junctions;
+  }
+
+  getAssociationThroughTable(assoc) {
+    return assoc.throughModel?._resolvedTableName
+      || assoc.throughModel?.tableName
+      || assoc.throughTable
+      || assoc.through;
+  }
+
+  buildForeignKeys(modelClass, attrToColumn, context) {
+    const fkMap = new Map();
+    const sourceTable = modelClass._resolvedTableName || this.resolveTableName(modelClass);
+    const upsertFK = (fkCol, entry) => {
+      const existing = fkMap.get(fkCol);
+      if (!existing) {
+        fkMap.set(fkCol, entry);
+      } else {
+        if (entry.onDelete && entry.onDelete !== 'RESTRICT') existing.onDelete = entry.onDelete;
+        if (entry.onUpdate && entry.onUpdate !== 'RESTRICT') existing.onUpdate = entry.onUpdate;
+        if (entry.constraintName) existing.constraintName = entry.constraintName;
+      }
+    };
+
+    for (const [attrName, def] of Object.entries(modelClass.rawAttributes || {})) {
+      if (modelClass._isVirtualAttribute?.(def)) continue;
+      if (def.references) {
+        const refModel = context.getModel(def.references.model);
+        if (!refModel) continue;
+        const refPkAttr = def.references.key || refModel.primaryKeyAttribute || 'id';
+        const refTable = refModel._resolvedTableName || this.resolveTableName(refModel);
+        const refPkCol = this.resolveColumnName(refModel.rawAttributes[refPkAttr] || {}, refPkAttr);
+        const fkCol = attrToColumn[attrName] || attrName;
+        const constraintName = def.references.constraintName || this.foreignKeyConstraintName(sourceTable, refTable, fkCol);
+        upsertFK(fkCol, {
+          attributeName: attrName,
+          columnName: fkCol,
+          constraintName,
+          references: { model: def.references.model, table: refTable, key: refPkAttr, column: refPkCol },
+          onDelete: def.onDelete || 'RESTRICT',
+          onUpdate: def.onUpdate || 'RESTRICT'
+        });
+      }
+    }
+
+    for (const assoc of Object.values(modelClass.associations || {})) {
+      if (assoc.type !== 'belongsTo') continue;
+      const fkAttr = assoc.foreignKey;
+      const refPkAttr = assoc.target.primaryKeyAttribute || 'id';
+      const refTable = assoc.target._resolvedTableName || this.resolveTableName(assoc.target);
+      const refPkCol = this.resolveColumnName(assoc.target.rawAttributes[refPkAttr] || {}, refPkAttr);
+      const fkCol = attrToColumn[fkAttr] || fkAttr;
+      const constraintName = assoc.constraintName || this.foreignKeyConstraintName(sourceTable, refTable, fkCol);
+      upsertFK(fkCol, {
+        attributeName: fkAttr,
+        columnName: fkCol,
+        constraintName,
+        references: { model: assoc.target.modelName, table: refTable, key: refPkAttr, column: refPkCol },
+        onDelete: assoc.onDelete,
+        onUpdate: assoc.onUpdate
+      });
+    }
+
+    for (const otherModel of context.models) {
+      if (otherModel === modelClass) continue;
+      for (const assoc of Object.values(otherModel.associations || {})) {
+        if (assoc.type !== 'hasMany' && assoc.type !== 'hasOne') continue;
+        if (assoc.target !== modelClass) continue;
+        const fkAttr = assoc.foreignKey;
+        if (!modelClass.rawAttributes || !modelClass.rawAttributes[fkAttr]) continue;
+        const refPkAttr = assoc.source.primaryKeyAttribute || 'id';
+        const refTable = assoc.source._resolvedTableName || this.resolveTableName(assoc.source);
+        const refPkCol = this.resolveColumnName(assoc.source.rawAttributes[refPkAttr] || {}, refPkAttr);
+        const fkCol = attrToColumn[fkAttr] || fkAttr;
+        const constraintName = assoc.constraintName || this.foreignKeyConstraintName(sourceTable, refTable, fkCol);
+        upsertFK(fkCol, {
+          attributeName: fkAttr,
+          columnName: fkCol,
+          constraintName,
+          references: { model: assoc.source.modelName, table: refTable, key: refPkAttr, column: refPkCol },
+          onDelete: assoc.onDelete,
+          onUpdate: assoc.onUpdate
+        });
+      }
+    }
+    return Array.from(fkMap.values());
+  }
+
+  _constraintTableName(tableName) {
+    const prefix = this.naming?.prefix;
+    if (!prefix) return String(tableName);
+
+    const token = String(prefix).endsWith('_') ? String(prefix) : `${prefix}_`;
+    return String(tableName).replaceAll(token, '');
   }
 
   /**
@@ -3601,6 +3671,14 @@ class DMLAbstract extends BaseAbstract {
     return alias ? `${this._q(alias)}.${this._q(colName)}` : this._q(colName);
   }
 
+  _tableWithAlias(tableName, alias) {
+    return `${this._q(tableName)}${alias ? ` AS ${this._q(alias)}` : ''}`;
+  }
+
+  _applyLimitOffset(sql, options) {
+    return sql + this._buildLimitOffset(options);
+  }
+
   /**
    * Applies default values to a column-name record.
    * @param {object} colRecord
@@ -3915,7 +3993,7 @@ class DMLAbstract extends BaseAbstract {
         const targetPKAttr = assoc.target.primaryKeyAttribute || 'id';
         const targetPKCol = targetSchema.attrToColumn[targetPKAttr] || targetPKAttr;
 
-        sql += ` ${joinType} ${this._q(throughTable)} AS ${this._q(junctionAlias)} ON ${this._colRef(pkCol, parentAlias)} = ${this._colRef(junctionFKCol, junctionAlias)}`;
+        sql += ` ${joinType} ${this._tableWithAlias(throughTable, junctionAlias)} ON ${this._colRef(pkCol, parentAlias)} = ${this._colRef(junctionFKCol, junctionAlias)}`;
 
         let onClause = `${this._colRef(junctionOtherKeyCol, junctionAlias)} = ${this._colRef(targetPKCol, joinAlias)}`;
         if (inc.where) {
@@ -3923,7 +4001,7 @@ class DMLAbstract extends BaseAbstract {
           onClause += ` AND ${where.conditions.join(' AND ')}`;
           params.push(...where.params);
         }
-        sql += ` ${joinType} ${this._q(targetTable)} AS ${this._q(joinAlias)} ON ${onClause}`;
+        sql += ` ${joinType} ${this._tableWithAlias(targetTable, joinAlias)} ON ${onClause}`;
       } else {
         let onClause;
         if (assoc.type === 'belongsTo') {
@@ -3942,7 +4020,7 @@ class DMLAbstract extends BaseAbstract {
           onClause += ` AND ${where.conditions.join(' AND ')}`;
           params.push(...where.params);
         }
-        sql += ` ${joinType} ${this._q(targetTable)} AS ${this._q(joinAlias)} ON ${onClause}`;
+        sql += ` ${joinType} ${this._tableWithAlias(targetTable, joinAlias)} ON ${onClause}`;
       }
       const nested = this._buildJoinClause(eagerNestedIncludes(inc, globalEager), inc.model, joinAlias, resolveIncludeAliasFn, includeSqlAliases, globalEager);
       sql += nested.sql;
@@ -4089,19 +4167,19 @@ class DMLAbstract extends BaseAbstract {
     if (eagerIncludes.length > 0) {
       eagerIncludeSqlAliases = buildIncludeSqlAliasMap(eagerIncludes, model, this, globalEager);
       const qualifiedSelect = this._buildQualifiedSelect(model, schema, alias, eagerIncludes, eagerIncludeSqlAliases, globalEager);
-      sql = `SELECT ${qualifiedSelect} FROM ${this._q(tableName)}` + (alias ? ` AS ${this._q(alias)}` :``);
+      sql = `SELECT ${qualifiedSelect} FROM ${this._tableWithAlias(tableName, alias)}`;
       const joins = this._buildJoinClause(eagerIncludes, model, alias, resolveIncludeAlias, eagerIncludeSqlAliases, globalEager);
       sql += joins.sql;
       params.push(...joins.params);
     } else {
       const selectList = this._buildSelectList(queryOptions.attributes, schema, alias);
-      sql = `SELECT ${selectList} FROM ${this._q(tableName)}` + (alias ? ` AS ${this._q(alias)}` :``);
+      sql = `SELECT ${selectList} FROM ${this._tableWithAlias(tableName, alias)}`;
     }
     const where = this._buildWhere(queryOptions.where, schema, alias);
     sql += where.sql;
     params.push(...where.params);
     sql += this._buildOrderBy(queryOptions.order, schema, alias);
-    sql += this._buildLimitOffset(queryOptions);
+    sql = this._applyLimitOffset(sql, queryOptions);
     const rows = await this._executeQueryAll(sql, params);
     let instances;
     if (eagerIncludes.length > 0) {
@@ -4129,7 +4207,7 @@ class DMLAbstract extends BaseAbstract {
     this._assertTransaction(options);
     //this._log('DML.count', model.modelName, options);
     const { tableName, schema, alias } = this._schema(model);
-    let sql = `SELECT COUNT(*) as cnt FROM ${this._q(tableName)}` + (alias ? ` AS ${this._q(alias)}` :``);
+    let sql = `SELECT COUNT(*) as cnt FROM ${this._tableWithAlias(tableName, alias)}`;
     const params = [];
     const where = this._buildWhere(options.where, schema, alias);
     sql += where.sql;
@@ -6399,7 +6477,8 @@ class MySQLAdapter extends BaseAdapter {
     tables: 'snake_case',
     columns: 'snake_case',
     prefix: undefined,
-    caseStyle: 'lower'
+    caseStyle: 'lower',
+    maxLength: 64
   };
 
   constructor(options = {}) {
@@ -6522,5 +6601,408 @@ class MySQLAdapter extends BaseAdapter {
   }
 }
 
-export { AdapterError, Association, BaseAdapter, ConfigurationError, DataTypes, ErrorAbstract, MapAdapter, Model, ModelError, ModelRegistry, MySQLAdapter, MySQLError, Op, SQLiteAdapter, SQLiteError, Seq, SeqError, ValidationError };
+class Oracle11Error extends ErrorAbstract {
+  constructor(message, options = {}) {
+    super(message, options);
+    this.name = 'Oracle11Error';
+    this.code = options.code || 'SEQ_ORACLE_ERROR';
+  }
+
+  static missingDependency(cause) {
+    const message = `
+-------------------------------------------------------------------------------------------------------------
+
+Oracle11Adapter requiere la dependencia "oracledb". Instalala con: npm install oracledb
+
+-------------------------------------------------------------------------------------------------------------
+
+`;
+    return new Oracle11Error(message, {
+      code: 'SEQ_ORACLE_MISSING_DEPENDENCY', details: { dependency: 'oracledb' }, cause
+    });
+  }
+
+  static unsupportedDependencyVersion(version) {
+    const message = `
+-------------------------------------------------------------------------------------------------------------
+
+Oracle11Adapter requiere la dependencia "oracledb" en version menor o igual a 5.5.0. Version instalada: ${version}.
+
+-------------------------------------------------------------------------------------------------------------
+
+`;
+    return new Oracle11Error(message, {
+      code: 'SEQ_ORACLE_UNSUPPORTED_DEPENDENCY_VERSION',
+      details: { dependency: 'oracledb', version, maxVersion: '5.5.0' }
+    });
+  }
+
+  static from(error) {
+    const oracleCode = error?.code || (error?.errorNum ? `ORA-${String(error.errorNum).padStart(5, '0')}` : undefined);
+    if (!['ORA-00001', 'ORA-02291', 'ORA-02292', 'ORA-01400'].includes(oracleCode)) return error;
+    const type = oracleCode === 'ORA-00001' ? 'unique' : oracleCode === 'ORA-01400' ? 'notNull' : oracleCode === 'ORA-02291' ? 'foreignKey' : 'referenced';
+    return new Oracle11Error(error.message, {
+      status: 409, code: 'CONFLICT',
+      details: { constraint: { adapter: 'oracle', type }, oracleCode }, cause: error
+    });
+  }
+}
+
+class Oracle11DDL extends DDLAbstract {
+  _connection() { return this._adapter._connection(); }
+  _oracleSql(sql) { let index = 0; return sql.replaceAll('?', () => `:${++index}`); }
+  async _execute(sql, params = []) {
+    try { 
+      return await this._adapter._withConnection(connection => connection.execute(this._oracleSql(sql), params, { autoCommit: !this._adapter._activeTransaction })); 
+    }catch (error) { 
+      throw Oracle11Error.from(error); 
+    }
+  }
+  async _executeQueryAll(sql, params = []) { return this._adapter._withConnection(async connection => (await connection.execute(this._oracleSql(sql), params, { outFormat: this._adapter._client.OUT_FORMAT_OBJECT })).rows || []); }
+  async _executeGet(sql, params = []) { return (await this._executeQueryAll(sql, params))[0] || null; }
+  _usesSequenceForAutoIncrement() { return true; }
+
+  async createTableStructure(def) {
+    const columns = []; const primaryKeys = [];
+    for (const [attr, column] of Object.entries(def.columns)) {
+      const name = column.field || attr;
+      const parts = [this._q(name), this._adapter.mapDataType(column.type)];
+      if (column.defaultValue !== undefined && column.defaultValue !== null && typeof column.defaultValue !== 'function') parts.push(`DEFAULT ${this._formatDefaultValue(column.defaultValue)}`);
+      if (!column.allowNull && !column.primaryKey) parts.push('NOT NULL');
+      columns.push(parts.join(' ')); if (column.primaryKey) primaryKeys.push(name);
+    }
+    if (primaryKeys.length) columns.push(`PRIMARY KEY (${primaryKeys.map(key => this._q(key)).join(', ')})`);
+    await this._execute(`CREATE TABLE ${this._q(def.tableName)} (\n  ${columns.join(',\n  ')}\n)`);
+    if (def.autoIncrement && this._usesSequenceForAutoIncrement()) await this._execute(`CREATE SEQUENCE ${this._q(this._adapter.sequenceName(def.tableName))} START WITH 1 INCREMENT BY 1`);
+  }
+
+  async dropTable(tableName, options = {}) {
+    if (options.ifExists && !(await this.hasTable(tableName))) return;
+    await this._execute(`DROP TABLE ${this._q(tableName)}${options.ignoreForeignKeys !== false ? ' CASCADE CONSTRAINTS' : ''}`);
+    try { await this._execute(`DROP SEQUENCE ${this._q(this._adapter.sequenceName(tableName))}`); } catch (error) { if (!/ORA-02289/.test(error?.message || '')) throw error; }
+    await super.dropTable(tableName, options);
+  }
+  async truncateTable(tableName, options = {}) { if (!options.ifExists || await this.hasTable(tableName)) await this._execute(`TRUNCATE TABLE ${this._q(tableName)}`); }
+  async hasTable(tableName) { return !!await this._executeGet('SELECT TABLE_NAME FROM USER_TABLES WHERE TABLE_NAME = ?', [tableName]); }
+  async listTables() { return (await this._executeQueryAll('SELECT TABLE_NAME FROM USER_TABLES')).map(row => row.TABLE_NAME); }
+  async describeTable(tableName) {
+    if (!(await this.hasTable(tableName))) throw new AdapterError(`Table "${tableName}" does not exist`, { code: 'SEQ_ADAPTER_TABLE_NOT_FOUND' });
+    const rows = await this._executeQueryAll('SELECT COLUMN_NAME, DATA_TYPE, DATA_LENGTH, NULLABLE, DATA_DEFAULT FROM USER_TAB_COLUMNS WHERE TABLE_NAME = ? ORDER BY COLUMN_ID', [tableName]);
+    const primaryKeys = new Set((await this._executeQueryAll('SELECT COLUMN_NAME FROM USER_CONS_COLUMNS WHERE TABLE_NAME = ? AND CONSTRAINT_NAME IN (SELECT CONSTRAINT_NAME FROM USER_CONSTRAINTS WHERE TABLE_NAME = ? AND CONSTRAINT_TYPE = \'P\')', [tableName, tableName])).map(row => row.COLUMN_NAME));
+    return { tableName, columns: rows.map(row => ({ name: row.COLUMN_NAME, type: row.DATA_TYPE, allowNull: row.NULLABLE === 'Y', primaryKey: primaryKeys.has(row.COLUMN_NAME), autoIncrement: false, defaultValue: row.DATA_DEFAULT })) };
+  }
+  async addColumns(tableName, missingColumns) {
+    const schema = this._adapter.schemas.get(tableName);
+    for (const [attr, column] of Object.entries(missingColumns)) {
+      const name = column.field || attr; const parts = [this._q(name), this._adapter.mapDataType(column.type)];
+      if (column.defaultValue !== undefined && column.defaultValue !== null) parts.push(`DEFAULT ${this._formatDefaultValue(column.defaultValue)}`);
+      if (!column.allowNull) parts.push('NOT NULL');
+      await this._execute(`ALTER TABLE ${this._q(tableName)} ADD (${parts.join(' ')})`);
+      schema.columns[attr] = column; schema.attrToColumn[attr] = name; schema.columnToAttr[name] = attr;
+    }
+  }
+  async addUniqueConstraint(tableName, constraint) { await this._execute(`ALTER TABLE ${this._q(tableName)} ADD CONSTRAINT ${this._q(constraint.constraintName)} UNIQUE (${constraint.columns.map(column => this._q(column)).join(', ')})`); this._adapter.schemas.get(tableName).uniqueConstraints.push({ ...constraint }); }
+  async addIndex(tableName, index) { await this._execute(`CREATE ${index.unique ? 'UNIQUE ' : ''}INDEX ${this._q(index.name)} ON ${this._q(tableName)} (${index.columns.map(column => this._q(column)).join(', ')})`); this._adapter.schemas.get(tableName).indexes.push({ ...index }); }
+  async addForeignKey(tableName, fk) {
+    const deleteClause = fk.onDelete === 'CASCADE' || fk.onDelete === 'SET NULL' ? ` ON DELETE ${fk.onDelete}` : '';
+    await this._execute(`ALTER TABLE ${this._q(tableName)} ADD CONSTRAINT ${this._q(fk.constraintName)} FOREIGN KEY (${this._q(fk.columnName)}) REFERENCES ${this._q(fk.references.table)} (${this._q(fk.references.column)})${deleteClause}`);
+    this._adapter.schemas.get(tableName).foreignKeys.push({ ...fk });
+  }
+  _formatDefaultValue(value) { if (value === null) return 'NULL'; if (value instanceof Date) return `TO_DATE('${value.toISOString().slice(0, 19).replace('T', ' ')}', 'YYYY-MM-DD HH24:MI:SS')`; if (typeof value === 'string') return `'${value.replaceAll("'", "''")}'`; if (typeof value === 'boolean') return value ? '1' : '0'; if (typeof value === 'number' && Number.isFinite(value)) return String(value); if (Array.isArray(value) || typeof value === 'object') return `'${JSON.stringify(value).replaceAll("'", "''")}'`; throw new AdapterError('Unsupported Oracle default value', { code: 'SEQ_DDL_INVALID_DEFAULT' }); }
+}
+
+class Oracle11DML extends DMLAbstract {
+  _connection() { return this._adapter._connection(); }
+  _tableWithAlias(tableName, alias) { return `${this._q(tableName)}${alias ? ` ${this._q(alias)}` : ''}`; }
+
+  _oracleSql(sql) { let index = 0; return sql.replaceAll('?', () => `:${++index}`); }
+  async _executeQueryAll(sql, params = []) {
+    this._log('trace', sql, params);
+    try { 
+      return await this._adapter._withConnection(async connection => (await connection.execute(this._oracleSql(sql), params, { outFormat: this._adapter._client.OUT_FORMAT_OBJECT })).rows || []); 
+    }catch (error) { 
+      throw Oracle11Error.from(error); 
+    }
+  }
+  async _executeGet(sql, params = []) { return (await this._executeQueryAll(sql, params))[0] || null; }
+  async _execute(sql, params = []) {
+    this._log('trace', sql, params);
+    try { return await this._adapter._withConnection(async connection => { const result = await connection.execute(this._oracleSql(sql), params, { autoCommit: !this._adapter._activeTransaction }); return { changes: result.rowsAffected || 0 }; }); }
+    catch (error) { throw Oracle11Error.from(error); }
+  }
+
+  _applyLimitOffset(sql, options) {
+    const { limit, offset = 0 } = options;
+    if (limit === undefined && options.offset === undefined) return sql;
+    if (limit !== undefined && (!Number.isInteger(limit) || limit < 1)) throw new ValidationError('limit must be an integer >= 1', { code: 'SEQ_VALIDATION_LIMIT' });
+    if (!Number.isInteger(offset) || offset < 0) throw new ValidationError('offset must be an integer >= 0', { code: 'SEQ_VALIDATION_OFFSET' });
+    if (limit === undefined) return `SELECT * FROM (SELECT seq_page.*, ROWNUM seq_rownum FROM (${sql}) seq_page) WHERE seq_rownum > ${offset}`;
+    return `SELECT * FROM (SELECT seq_page.*, ROWNUM seq_rownum FROM (${sql}) seq_page WHERE ROWNUM <= ${offset + limit}) WHERE seq_rownum > ${offset}`;
+  }
+
+  _usesSequenceForAutoIncrement() { return true; }
+  _sequenceName(tableName) { return this._adapter.sequenceName(tableName); }
+
+  async count(model, options = {}) {
+    this._assertTransaction(options);
+    const { tableName, schema, alias } = this._schema(model);
+    const where = this._buildWhere(options.where, schema, alias);
+    const row = await this._executeGet(`SELECT COUNT(*) AS "cnt" FROM ${this._tableWithAlias(tableName, alias)}${where.sql}`, where.params);
+    return row?.cnt ?? 0;
+  }
+
+  async insert(model, values, options = {}) {
+    this._assertTransaction(options);
+    const { tableName, schema } = this._schema(model);
+    const record = this._toColumnNames(values, schema);
+    this._applyDefaults(record, schema); this._applyTimestamps(record, schema); this._validateRecord(record, schema, model.modelName);
+    const pk = schema.autoIncrement;
+    const generatedPk = pk && (record[pk] === undefined || record[pk] === null) && this._usesSequenceForAutoIncrement();
+    if (generatedPk) record[pk] = { __oracleSequence: this._sequenceName(tableName) };
+    const columns = Object.keys(record);
+    if (!columns.length) throw new ValidationError('Oracle insert requires at least one column', { code: 'SEQ_ORACLE_EMPTY_INSERT' });
+    let bindIndex = 0;
+    const params = [];
+    const valuesSql = columns.map(column => {
+      if (record[column]?.__oracleSequence) return `${this._q(record[column].__oracleSequence)}.NEXTVAL`;
+      params.push(this._serializeValue(record[column]));
+      return `:${++bindIndex}`;
+    }).join(', ');
+    let sql = `INSERT INTO ${this._q(tableName)} (${columns.map(column => this._q(column)).join(', ')}) VALUES (${valuesSql})`;
+    const bindParams = [...params];
+    if (generatedPk) { sql += ` RETURNING ${this._q(pk)} INTO :${bindParams.length + 1}`; bindParams.push({ dir: this._adapter._client.BIND_OUT, type: this._adapter._client.NUMBER }); }
+    this._log('trace', sql, bindParams);
+    try {
+      const result = await this._adapter._withConnection(connection => connection.execute(sql, bindParams, { autoCommit: !this._adapter._activeTransaction }));
+      if (generatedPk) record[pk] = result.outBinds?.[0]?.[0] ?? result.outBinds?.[bindParams.length - 1]?.[0];
+    } catch (error) { throw Oracle11Error.from(error); }
+    return new model(this._toAttrNames(record, schema), { _isNew: false });
+  }
+
+  async update(model, values, options = {}) {
+    this._assertTransaction(options);
+    const { tableName, schema } = this._schema(model);
+    const pkAttr = schema.primaryKeyAttribute;
+    if (!pkAttr || !Object.prototype.hasOwnProperty.call(values, pkAttr)) return super.update(model, values, options);
+
+    const pkCol = schema.attrToColumn[pkAttr] || pkAttr;
+    const newPk = values[pkAttr];
+    const matches = await this.selectAll(model, { where: options.where, attributes: [pkAttr], transaction: options.transaction });
+    const oldPks = matches.map(instance => instance.getDataValue(pkAttr));
+    if (oldPks.length === 0) return [];
+
+    const cascadeFks = [];
+    for (const [childTable, childSchema] of this._adapter.schemas) {
+      for (const fk of childSchema.foreignKeys || []) {
+        if (fk.references?.table === tableName && fk.references?.column === pkCol && fk.onUpdate === 'CASCADE') {
+          cascadeFks.push({ childTable, fk });
+        }
+      }
+    }
+    if (cascadeFks.length === 0) return super.update(model, values, options);
+
+    try {
+      for (const { childTable, fk } of cascadeFks) {
+        await this._execute(`ALTER TABLE ${this._q(childTable)} DISABLE CONSTRAINT ${this._q(fk.constraintName)}`, []);
+      }
+      const updated = await super.update(model, values, options);
+      for (const oldPk of oldPks) {
+        for (const { childTable, fk } of cascadeFks) {
+          await this._execute(`UPDATE ${this._q(childTable)} SET ${this._q(fk.columnName)} = ? WHERE ${this._q(fk.columnName)} = ?`, [newPk, oldPk]);
+        }
+      }
+      return updated;
+    } finally {
+      for (const { childTable, fk } of cascadeFks) {
+        await this._execute(`ALTER TABLE ${this._q(childTable)} ENABLE CONSTRAINT ${this._q(fk.constraintName)}`, []);
+      }
+    }
+  }
+
+  async truncate(model, options = {}) {
+    this._assertTransaction(options);
+    const { tableName } = this._schema(model);
+    await this._adapter.ddl.truncateTable(tableName);
+  }
+
+  _serializeValue(value) { if (value instanceof Date) return value; if (value === undefined) return null; if (typeof value === 'boolean') return value ? 1 : 0; if (Array.isArray(value) || (typeof value === 'object' && value !== null)) return JSON.stringify(value); return value; }
+  _mapRows(rows, model, schema, options = {}) {
+    return rows.map(row => new model(this._toAttrNames(row, schema), {
+      _isNew: false,
+      _partial: Array.isArray(options.attributes) && options.attributes.length > 0
+    }));
+  }
+  _toAttrNames(record, schema) {
+    const result = {}; for (const [key, value] of Object.entries(record)) { const attr = schema.columnToAttr[key] || key; if (key === 'SEQ_ROWNUM') continue; const type = schema.columns[attr]?.type?.constructor?.name; if (['ArrayType', 'ObjectType', 'JSONType'].includes(type) && typeof value === 'string') { try { result[attr] = JSON.parse(value); } catch { result[attr] = value; } } else if (type === 'BooleanType') result[attr] = value === true || value === 1 || value === '1'; else if (type === 'DateType' && typeof value === 'string') result[attr] = new Date(value); else if (type === 'DecimalType' || type === 'NumberType') result[attr] = value == null ? value : Number(value); else result[attr] = value; } return result;
+  }
+}
+
+let transactionId = 0;
+
+class Oracle11TCL extends TCLAbstract {
+  async begin() {
+    if (this._adapter._activeTransaction) throw new AdapterError('Nested or concurrent Oracle transactions are not supported', { code: 'SEQ_ADAPTER_TRANSACTION_CONCURRENT' });
+    await this._adapter.connect();
+    const connection = await this._adapter._pool.getConnection();
+    const transaction = { id: ++transactionId, active: true, adapter: this._adapter, connection };
+    this._adapter._activeTransaction = transaction;
+    return transaction;
+  }
+
+  async commit(transaction) { this._validateTransaction(transaction); try { await transaction.connection.commit(); } finally { this._release(transaction); } }
+  async rollback(transaction) { this._validateTransaction(transaction); try { await transaction.connection.rollback(); } finally { this._release(transaction); } }
+
+  _release(transaction) {
+    transaction.active = false;
+    transaction.connection.close();
+    transaction.connection = null;
+    this._adapter._activeTransaction = null;
+  }
+}
+
+let oracleClient = null;
+
+class Oracle11Adapter extends BaseAdapter {
+  static defaultNaming = { 
+    tables: 'snake_case', 
+    columns: 'snake_case', 
+    prefix: undefined, 
+    caseStyle: 'upper',
+    maxLength: 30
+  };
+  constructor(options = {}) {
+    super({ fkStrategy: 'alter', ...options });
+    this._pool = null; this._connectionOptions = this._normalizeConnectionOptions(options);
+    this.ddl = new Oracle11DDL(this); this.dml = new Oracle11DML(this); this.dcl = null; this.tcl = new Oracle11TCL(this);
+  }
+  static async _loadClient() {
+    if (!util.isDate) util.isDate = value => value instanceof Date;
+    if (!oracleClient) oracleClient = await import('oracledb');
+    return oracleClient.default || oracleClient;
+  }
+
+  async validateDependencies() {
+    const client = await this._getClient();
+    this._validateClientVersion(client);
+    return true;
+  }
+  
+  async connect() { 
+    if (this._pool) return; 
+    this._client = await this._getClient(); 
+    this._pool = await this._client.createPool(this._connectionOptions); 
+    this._log('info', 'conectado'); 
+  }
+  
+  async authenticate() { 
+    await this.connect(); 
+    await this.dml._executeGet('SELECT 1 AS ok FROM dual'); 
+    return true; 
+  }
+  
+  async close() { 
+    if (this._activeTransaction) await this.tcl.rollback(this._activeTransaction); 
+    if (this._pool) { 
+      await this._pool.close(0); 
+      this._pool = null; 
+      this._log('info', 'desconectado'); 
+    } 
+  }
+  
+  async initialize() { 
+    if (!this._pool) await this.connect(); 
+  }
+  
+  _connection() { 
+    return this._activeTransaction?.connection || this._pool; 
+  }
+  
+  async _withConnection(run) {
+    if (this._activeTransaction) return run(this._activeTransaction.connection);
+    const connection = await this._pool.getConnection();
+    try { 
+      return await run(connection); 
+    } catch(e){
+      throw Oracle11Error.from(e);
+    }finally { 
+      await connection.close(); 
+    }
+  }
+  sequenceName(tableName) { const prefix = 'seq_'; const safe = String(tableName).replace(/[^A-Za-z0-9_$#]/g, '_'); return `${prefix}${safe}`.slice(0, 30); }
+
+  mapDataType(dataType) {
+    const name = dataType?.constructor?.name || String(dataType);
+    switch (name) {
+      case 'IntegerType': return 'NUMBER(10)';
+      case 'DecimalType': return `NUMBER(${dataType.options?.precision ?? 10}, ${dataType.options?.scale ?? 2})`;
+      case 'NumberType': return `NUMBER(${dataType.options?.precision ?? 10}, ${dataType.options?.scale ?? 0})`;
+      case 'StringType': return `VARCHAR2(${Math.min(dataType.options?.length ?? 255, 4000)})`;
+      case 'BooleanType': return 'NUMBER(1)';
+      case 'DateType': return 'DATE';
+      case 'ArrayType': case 'ObjectType': case 'JSONType': return 'VARCHAR2(4000)';
+      default: return 'VARCHAR2(4000)';
+    }
+  }
+  cloneRecord(record) { return { ...record }; }
+  async _getClient() { try { return await this.constructor._loadClient(); } catch (error) { const wrapped = Oracle11Error.missingDependency(error); this._dependencyWarning(wrapped.message); throw wrapped; } }
+  _validateClientVersion(client) {
+    const version = client?.versionString || this._versionNumberToString(client?.version);
+    if (!version || this._compareVersions(version, '5.5.0') <= 0) return;
+    const error = Oracle11Error.unsupportedDependencyVersion(version);
+    this._dependencyWarning(error.message);
+    throw error;
+  }
+  _versionNumberToString(version) {
+    if (!Number.isInteger(version)) return null;
+    const major = Math.floor(version / 10000);
+    const minor = Math.floor((version % 10000) / 100);
+    const patch = version % 100;
+    return `${major}.${minor}.${patch}`;
+  }
+  _compareVersions(left, right) {
+    const a = String(left).split('.').map(value => Number.parseInt(value, 10) || 0);
+    const b = String(right).split('.').map(value => Number.parseInt(value, 10) || 0);
+    for (let index = 0; index < Math.max(a.length, b.length); index++) {
+      const diff = (a[index] || 0) - (b[index] || 0);
+      if (diff !== 0) return diff;
+    }
+    return 0;
+  }
+  _dependencyWarning(message) { if (this._seq) this._log('error', message); else console.error(`[Seq] ${message}`); }
+  _normalizeConnectionOptions(options) { const { naming, fkStrategy, eager, connectString, user, password, poolMin, poolMax, poolIncrement, ...rest } = options; return { user, password, connectString, poolMin: poolMin ?? 0, poolMax: poolMax ?? 4, poolIncrement: poolIncrement ?? 1, ...rest }; }
+}
+
+class Oracle12DDL extends Oracle11DDL {
+  _usesSequenceForAutoIncrement() { return false; }
+  async createTableStructure(def) {
+    const columns = []; const primaryKeys = [];
+    for (const [attr, column] of Object.entries(def.columns)) {
+      const name = column.field || attr; const parts = [this._q(name), this._adapter.mapDataType(column.type)];
+      if (column.autoIncrement) parts.push('GENERATED BY DEFAULT AS IDENTITY');
+      if (column.defaultValue !== undefined && column.defaultValue !== null && typeof column.defaultValue !== 'function') parts.push(`DEFAULT ${this._formatDefaultValue(column.defaultValue)}`);
+      if (!column.allowNull && !column.primaryKey) parts.push('NOT NULL');
+      columns.push(parts.join(' ')); if (column.primaryKey) primaryKeys.push(name);
+    }
+    if (primaryKeys.length) columns.push(`PRIMARY KEY (${primaryKeys.map(key => this._q(key)).join(', ')})`);
+    await this._execute(`CREATE TABLE ${this._q(def.tableName)} (\n  ${columns.join(',\n  ')}\n)`);
+  }
+}
+
+class Oracle12DML extends Oracle11DML {
+  _usesSequenceForAutoIncrement() { return false; }
+  _applyLimitOffset(sql, options) {
+    const { limit, offset = 0 } = options;
+    if (limit === undefined && options.offset === undefined) return sql;
+    if (limit !== undefined && (!Number.isInteger(limit) || limit < 1)) throw new ValidationError('limit must be an integer >= 1', { code: 'SEQ_VALIDATION_LIMIT' });
+    if (!Number.isInteger(offset) || offset < 0) throw new ValidationError('offset must be an integer >= 0', { code: 'SEQ_VALIDATION_OFFSET' });
+    if (limit === undefined) return `${sql} OFFSET ${offset} ROWS`;
+    return `${sql} OFFSET ${offset} ROWS FETCH NEXT ${limit} ROWS ONLY`;
+  }
+}
+
+class Oracle12Adapter extends Oracle11Adapter {
+  constructor(options = {}) { super(options); this.ddl = new Oracle12DDL(this); this.dml = new Oracle12DML(this); }
+}
+
+export { AdapterError, Association, BaseAdapter, ConfigurationError, DataTypes, ErrorAbstract, MapAdapter, Model, ModelError, ModelRegistry, MySQLAdapter, MySQLError, Op, Oracle11Adapter, Oracle11Error, Oracle12Adapter, SQLiteAdapter, SQLiteError, Seq, SeqError, ValidationError };
 //# sourceMappingURL=seq.js.map

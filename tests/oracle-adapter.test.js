@@ -32,6 +32,31 @@ test('Oracle adapters', async t => {
     assert.match(errors[0][1], /oracledb/);
   });
 
+  await t.test('rejects oracledb versions newer than 5.5.0', async () => {
+    const originalLoadClient = Oracle11Adapter._loadClient;
+    const errors = [];
+    Oracle11Adapter._loadClient = async () => ({ versionString: '6.0.0' });
+
+    try {
+      const adapter = new Oracle11Adapter();
+      new Seq({ adapter, logging: { info: false, error: (...args) => errors.push(args) } });
+      await assert.rejects(() => adapter.validateDependencies(), error => {
+        assert.ok(error instanceof Oracle11Error);
+        assert.equal(error.code, 'SEQ_ORACLE_UNSUPPORTED_DEPENDENCY_VERSION');
+        assert.equal(error.details.dependency, 'oracledb');
+        assert.equal(error.details.version, '6.0.0');
+        assert.equal(error.details.maxVersion, '5.5.0');
+        return true;
+      });
+    } finally {
+      Oracle11Adapter._loadClient = originalLoadClient;
+    }
+
+    assert.equal(errors.length, 1);
+    assert.equal(errors[0][0], '[Seq]');
+    assert.match(errors[0][1], /5\.5\.0/);
+  });
+
   await t.test('Oracle 11 maps JSON-like values to VARCHAR2 and dates to DATE', () => {
     const adapter = new Oracle11Adapter();
     assert.equal(adapter.mapDataType(DataTypes.OBJECT), 'VARCHAR2(4000)');
