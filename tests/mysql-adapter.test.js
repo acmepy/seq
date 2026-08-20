@@ -65,6 +65,18 @@ describe('MySQL Adapter', () => {
       assert.equal(mysql._quoteIdentifier('we`ird'), '`we``ird`');
     });
 
+    it('uses MySQL naming defaults', () => {
+      const mysql = new MySQLAdapter();
+
+      assert.deepEqual(mysql.naming, {
+        tables: 'snake_case',
+        columns: 'snake_case',
+        prefix: undefined,
+        caseStyle: 'lower',
+        maxLength: 64
+      });
+    });
+
     it('maps Seq data types to MySQL types', () => {
       const mysql = new MySQLAdapter();
 

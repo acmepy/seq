@@ -11,7 +11,8 @@ export class MySQLAdapter extends BaseAdapter {
     tables: 'snake_case',
     columns: 'snake_case',
     prefix: undefined,
-    caseStyle: 'lower'
+    caseStyle: 'lower',
+    maxLength: 64
   };
 
   constructor(options = {}) {
