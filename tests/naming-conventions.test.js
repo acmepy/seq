@@ -6,7 +6,7 @@ import { MapAdapter } from '../src/adapters/map/MapAdapter.js';
 import { Seq } from '../src/core/Seq.js';
 import { Model } from '../src/core/Model.js';
 import { DataTypes } from '../src/data-types/index.js';
-import { toSnakeCase, toCamelCase, applyConvention, applyCase } from '../src/utils/naming.js';
+import { toSnakeCase, toCamelCase, initCap, applyConvention, applyCase } from '../src/utils/naming.js';
 import { cleanupTestContext, createTestContext, testTable } from './shared/test-context.js';
 
 describe('Naming Conventions', () => {
@@ -59,6 +59,20 @@ describe('Naming Conventions', () => {
       });
     });
 
+    describe('initCap', () => {
+      it('converts the first character to uppercase', () => {
+        assert.equal(initCap('user'), 'User');
+        assert.equal(initCap('userName'), 'UserName');
+        assert.equal(initCap('user_name'), 'User_name');
+      });
+
+      it('leaves empty values unchanged', () => {
+        assert.equal(initCap(''), '');
+        assert.equal(initCap(null), null);
+        assert.equal(initCap(undefined), undefined);
+      });
+    });
+
     describe('applyConvention', () => {
       it('returns name unchanged when no convention', () => {
         assert.equal(applyConvention('userName', undefined), 'userName');
@@ -91,6 +105,7 @@ describe('Naming Conventions', () => {
         assert.equal(applyCase('user_name', 'upper'), 'USER_NAME');
         assert.equal(applyCase('userName', 'upper'), 'USERNAME');
       });
+
     });
   });
 
@@ -106,7 +121,8 @@ describe('Naming Conventions', () => {
         tables: 'snake_case',
         columns: 'snake_case',
         prefix: undefined,
-        caseStyle: 'lower'
+        caseStyle: 'lower',
+        maxLength: 50
       });
     });
 
@@ -116,7 +132,8 @@ describe('Naming Conventions', () => {
         tables: 'camelCase',
         columns: 'camelCase',
         prefix: undefined,
-        caseStyle: 'lower'
+        caseStyle: 'lower',
+        maxLength: 50
       });
     });
 
@@ -126,7 +143,8 @@ describe('Naming Conventions', () => {
         tables: undefined,
         columns: undefined,
         prefix: undefined,
-        caseStyle: undefined
+        caseStyle: undefined,
+        maxLength: 50
       });
     });
 
@@ -139,7 +157,8 @@ describe('Naming Conventions', () => {
         tables: 'snake_case',
         columns: 'snake_case',
         prefix: 'app',
-        caseStyle: 'upper'
+        caseStyle: 'upper',
+        maxLength: 50
       });
     });
   });
@@ -344,6 +363,29 @@ describe('Naming Conventions', () => {
       const def = seq._buildTableDefinition(OrderItem);
       assert.equal(def.tableName, 'app_order_item');
     });
+
+    it('limits generated table names to naming maxLength', async () => {
+      class VeryLongModelNameForTestingTableNameLimit extends Model {
+        static define(seq) {
+          this.init({
+            id: { type: DataTypes.INTEGER, primaryKey: true, autoIncrement: true }
+          }, { seq, modelName: 'VeryLongModelNameForTestingTableNameLimit' });
+        }
+      }
+
+      const adapter = new SQLiteAdapter({
+        database: ':memory:',
+        naming: { maxLength: 12 }
+      });
+      const seq = new Seq({
+        adapter,
+        models: [VeryLongModelNameForTestingTableNameLimit]
+      });
+      await seq.init();
+
+      const def = seq._buildTableDefinition(VeryLongModelNameForTestingTableNameLimit);
+      assert.equal(def.tableName, 'very_long_mo');
+    });
   });
 
   describe('Column name conventions', () => {
@@ -509,6 +551,30 @@ describe('Naming Conventions', () => {
 
       const def = seq._buildTableDefinition(Product);
       assert.equal(def.attrToColumn.product_name, 'productname');
+    });
+
+    it('limits generated column names to naming maxLength', async () => {
+      class Product extends Model {
+        static define(seq) {
+          this.init({
+            id: { type: DataTypes.INTEGER, primaryKey: true, autoIncrement: true },
+            veryLongProductDisplayName: { type: DataTypes.STRING(100) }
+          }, { seq, modelName: 'Product' });
+        }
+      }
+
+      const adapter = new SQLiteAdapter({
+        database: ':memory:',
+        naming: { maxLength: 14 }
+      });
+      const seq = new Seq({
+        adapter,
+        models: [Product]
+      });
+      await seq.init();
+
+      const def = seq._buildTableDefinition(Product);
+      assert.equal(def.attrToColumn.veryLongProductDisplayName, 'very_long_prod');
     });
   });
 

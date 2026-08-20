@@ -1,7 +1,6 @@
 import { ModelRegistry } from './ModelRegistry.js';
 import { Model } from './Model.js';
 import { ConfigurationError } from './errors/ConfigurationError.js';
-import { applyConvention, applyCase } from '../utils/naming.js';
 import { Cache } from '../cache/Cache.js';
 
 /**
@@ -96,6 +95,7 @@ export class Seq {
    * @param {import('../../types/index.d.ts').ModelStatic} modelClass
    */
   registerModel(modelClass) {
+    if (!modelClass._resolvedTableName) modelClass._resolvedTableName = this._resolveTableName(modelClass);
     this._registry.register(modelClass);
   }
 
@@ -142,6 +142,7 @@ export class Seq {
     for (const model of models) {
       result[model.modelName] = model;
       if (model.tableName && !result[model.tableName]) result[model.tableName] = model;
+      if (model._resolvedTableName && !result[model._resolvedTableName]) result[model._resolvedTableName] = model;
     }
     return result;
   }
@@ -321,17 +322,7 @@ export class Seq {
    * @private
    */
   _resolveTableName(modelClass) {
-    const naming = this._adapter.naming || {};
-    if (modelClass._tableNameExplicit) {
-      return this._adapter.resolvePhysicalName(modelClass.tableName, { explicit: true, kind: 'table' });
-    }
-
-    const convention = naming.tables;
-    const prefix = naming.prefix;
-    const caseStyle = naming.caseStyle;
-    let name = convention ? applyConvention(modelClass.modelName, convention) : modelClass.modelName;
-    if (convention && prefix) name = `${prefix}_${name}`;
-    return this._adapter.resolvePhysicalName(applyCase(name, caseStyle), { explicit: false, kind: 'table', convention, prefix: !!prefix });
+    return this._adapter.resolveTableName(modelClass);
   }
 
   /**
@@ -343,13 +334,7 @@ export class Seq {
    * @private
    */
   _resolveColumnName(def, attrName) {
-    const naming = this._adapter.naming || {};
-    if (def.field) return this._adapter.resolvePhysicalName(def.field, { explicit: true, kind: 'column' });
-
-    const convention = naming.columns;
-    const caseStyle = naming.caseStyle;
-    const name = convention ? applyConvention(attrName, convention) : attrName;
-    return this._adapter.resolvePhysicalName(applyCase(name, caseStyle), { explicit: false, kind: 'column', convention });
+    return this._adapter.resolveColumnName(def, attrName);
   }
 
   /**
@@ -359,60 +344,7 @@ export class Seq {
    * @private
    */
   _buildTableDefinition(modelClass) {
-    const attributes = modelClass.rawAttributes || {};
-    const columns = {};
-    const uniqueConstraints = [];
-    const attrToColumn = {};
-    const columnToAttr = {};
-    const virtualAttributes = [];
-
-    const sourceTable = modelClass._resolvedTableName || this._resolveTableName(modelClass);
-
-    for (const [name, def] of Object.entries(attributes)) {
-      if (modelClass._isVirtualAttribute?.(def)) {
-        virtualAttributes.push(name);
-        continue;
-      }
-      const columnName = this._resolveColumnName(def, name);
-      attrToColumn[name] = columnName;
-      columnToAttr[columnName] = name;
-
-      columns[name] = {
-        type: def.type,
-        primaryKey: def.primaryKey || false,
-        autoIncrement: def.autoIncrement || false,
-        allowNull: def.allowNull !== undefined ? def.allowNull : true,
-        defaultValue: def.defaultValue,
-        validate: def.validate,
-        field: columnName
-      };
-
-      if (def.unique)  uniqueConstraints.push({columns: [columnName], constraintName: `uk_${sourceTable}_${columnName}`});
-    }
-
-    const pkAttr = modelClass.primaryKeyAttribute;
-    const aiAttr = modelClass.autoIncrementAttribute;
-
-    const foreignKeys = this._buildForeignKeys(modelClass, attrToColumn);
-
-    return {
-      modelName: modelClass.modelName,
-      tableName: sourceTable,
-      columns,
-      uniqueConstraints,
-      indexes: [],
-      foreignKeys,
-      primaryKey: pkAttr ? attrToColumn[pkAttr] : null,
-      autoIncrement: aiAttr ? attrToColumn[aiAttr] : null,
-      primaryKeyAttribute: pkAttr || null,
-      autoIncrementAttribute: aiAttr || null,
-      timestamps: modelClass.options?.timestamps || false,
-      createdAt: modelClass.options?.createdAt || 'createdAt',
-      updatedAt: modelClass.options?.updatedAt || 'updatedAt',
-      virtualAttributes,
-      attrToColumn,
-      columnToAttr
-    };
+    return this._adapter.buildTableDefinition(modelClass, this._adapterDefinitionContext());
   }
 
   /**
@@ -422,71 +354,7 @@ export class Seq {
    * @private
    */
   _buildJunctionTableDefinition(assoc) {
-    const source = assoc.source;
-    const target = assoc.target;
-    const through = this._getAssociationThroughTable(assoc);
-    const fkAttr = assoc.foreignKey;
-    const otherKeyAttr = assoc.otherKey;
-
-    const sourcePKAttr = source.primaryKeyAttribute || 'id';
-    const sourcePKDef = source.rawAttributes[sourcePKAttr] || {};
-    const sourcePKType = sourcePKDef.type;
-    const sourcePKCol = this._resolveColumnName(sourcePKDef, sourcePKAttr);
-
-    const targetPKAttr = target.primaryKeyAttribute || 'id';
-    const targetPKDef = target.rawAttributes[targetPKAttr] || {};
-    const targetPKType = targetPKDef.type;
-    const targetPKCol = this._resolveColumnName(targetPKDef, targetPKAttr);
-
-    const sourceTable = source._resolvedTableName || this._resolveTableName(source);
-    const targetTable = target._resolvedTableName || this._resolveTableName(target);
-
-    const fkCol = fkAttr;
-    const otherKeyCol = otherKeyAttr;
-
-    const columns = {
-      [fkAttr]: {type: sourcePKType, primaryKey: false, autoIncrement: false, allowNull: false, field: fkCol},
-      [otherKeyAttr]: {type: targetPKType, primaryKey: false, autoIncrement: false, allowNull: false, field: otherKeyCol}
-    };
-
-    const uniqueConstraints = [{columns: [fkCol, otherKeyCol], constraintName: `uk_${through}_${fkCol}_${otherKeyCol}`}];
-
-    const foreignKeys = [
-      {
-        attributeName: fkAttr,
-        columnName: fkCol,
-        constraintName: `fk_${through}_${fkCol}`,
-        references: { model: source.modelName, table: sourceTable, key: sourcePKAttr, column: sourcePKCol },
-        onDelete: 'CASCADE',
-        onUpdate: 'CASCADE'
-      },
-      {
-        attributeName: otherKeyAttr,
-        columnName: otherKeyCol,
-        constraintName: `fk_${through}_${otherKeyCol}`,
-        references: { model: target.modelName, table: targetTable, key: targetPKAttr, column: targetPKCol },
-        onDelete: 'CASCADE',
-        onUpdate: 'CASCADE'
-      }
-    ];
-
-    return {
-      modelName: null,
-      tableName: through,
-      columns,
-      uniqueConstraints,
-      indexes: [],
-      foreignKeys,
-      primaryKey: null,
-      autoIncrement: null,
-      primaryKeyAttribute: null,
-      autoIncrementAttribute: null,
-      timestamps: false,
-      createdAt: 'createdAt',
-      updatedAt: 'updatedAt',
-      attrToColumn: { [fkAttr]: fkCol, [otherKeyAttr]: otherKeyCol },
-      columnToAttr: { [fkCol]: fkAttr, [otherKeyCol]: otherKeyAttr }
-    };
+    return this._adapter.buildJunctionTableDefinition(assoc, this._adapterDefinitionContext());
   }
 
   /**
@@ -495,115 +363,26 @@ export class Seq {
    * @private
    */
   _buildJunctionTables() {
-    const junctions = [];
-    const seen = new Set();
-    for (const modelClass of this._registry.all()) {
-      for (const assoc of Object.values(modelClass.associations || {})) {
-        if (assoc.type !== 'belongsToMany') continue;
-        if (assoc.throughModel) continue;
-        const through = this._getAssociationThroughTable(assoc);
-        if (seen.has(through)) continue;
-        seen.add(through);
-        junctions.push(assoc);
-      }
-    }
-    return junctions;
+    return this._adapter.buildJunctionTables(this._registry.all(), this._adapterDefinitionContext());
   }
 
   _getAssociationThroughTable(assoc) {
-    return assoc.throughModel?._resolvedTableName
-      || assoc.throughModel?.tableName
-      || assoc.throughTable
-      || assoc.through;
+    return this._adapter.getAssociationThroughTable(assoc, this._adapterDefinitionContext());
   }
 
   _buildForeignKeys(modelClass, attrToColumn) {
-    const fkMap = new Map();
-    const sourceTable = modelClass._resolvedTableName || this._resolveTableName(modelClass);
-    const autoConstraintName = (refTable, fkCol) => `fk_${this._constraintTableName(sourceTable)}_${this._constraintTableName(refTable)}_${fkCol}`;
-    const upsertFK = (fkCol, entry) => {
-      const existing = fkMap.get(fkCol);
-      if (!existing) {
-        fkMap.set(fkCol, entry);
-      } else {
-        if (entry.onDelete && entry.onDelete !== 'RESTRICT') existing.onDelete = entry.onDelete;
-        if (entry.onUpdate && entry.onUpdate !== 'RESTRICT') existing.onUpdate = entry.onUpdate;
-        if (entry.constraintName) existing.constraintName = entry.constraintName;
-      }
-    };
-
-    for (const [attrName, def] of Object.entries(modelClass.rawAttributes || {})) {
-      if (modelClass._isVirtualAttribute?.(def)) continue;
-      if (def.references) {
-        const refModel = this.getModel(def.references.model);
-        if (!refModel) continue;
-        const refPkAttr = def.references.key || refModel.primaryKeyAttribute || 'id';
-        const refTable = refModel._resolvedTableName || this._resolveTableName(refModel);
-        const refPkCol = this._resolveColumnName(refModel.rawAttributes[refPkAttr] || {}, refPkAttr);
-        const fkCol = attrToColumn[attrName] || attrName;
-        const constraintName = def.references.constraintName || autoConstraintName(refTable, fkCol);
-        upsertFK(fkCol, {
-          attributeName: attrName,
-          columnName: fkCol,
-          constraintName,
-          references: { model: def.references.model, table: refTable, key: refPkAttr, column: refPkCol },
-          onDelete: def.onDelete || 'RESTRICT',
-          onUpdate: def.onUpdate || 'RESTRICT'
-        });
-      }
-    }
-
-    const associations = modelClass.associations || {};
-    for (const assoc of Object.values(associations)) {
-      if (assoc.type === 'belongsTo') {
-        const fkAttr = assoc.foreignKey;
-        const refPkAttr = assoc.target.primaryKeyAttribute || 'id';
-        const refTable = assoc.target._resolvedTableName || this._resolveTableName(assoc.target);
-        const refPkCol = this._resolveColumnName(assoc.target.rawAttributes[refPkAttr] || {}, refPkAttr);
-        const fkCol = attrToColumn[fkAttr] || fkAttr;
-        const constraintName = assoc.constraintName || autoConstraintName(refTable, fkCol);
-        upsertFK(fkCol, {
-          attributeName: fkAttr,
-          columnName: fkCol,
-          constraintName,
-          references: { model: assoc.target.modelName, table: refTable, key: refPkAttr, column: refPkCol },
-          onDelete: assoc.onDelete,
-          onUpdate: assoc.onUpdate
-        });
-      }
-    }
-
-    for (const otherModel of this._registry.all()) {
-      if (otherModel === modelClass) continue;
-      for (const assoc of Object.values(otherModel.associations || {})) {
-        if (assoc.type !== 'hasMany' && assoc.type !== 'hasOne') continue;
-        if (assoc.target !== modelClass) continue;
-        const fkAttr = assoc.foreignKey;
-        if (!modelClass.rawAttributes || !modelClass.rawAttributes[fkAttr]) continue;
-        const refPkAttr = assoc.source.primaryKeyAttribute || 'id';
-        const refTable = assoc.source._resolvedTableName || this._resolveTableName(assoc.source);
-        const refPkCol = this._resolveColumnName(assoc.source.rawAttributes[refPkAttr] || {}, refPkAttr);
-        const fkCol = attrToColumn[fkAttr] || fkAttr;
-        const constraintName = assoc.constraintName || autoConstraintName(refTable, fkCol);
-        upsertFK(fkCol, {
-          attributeName: fkAttr,
-          columnName: fkCol,
-          constraintName,
-          references: { model: assoc.source.modelName, table: refTable, key: refPkAttr, column: refPkCol },
-          onDelete: assoc.onDelete,
-          onUpdate: assoc.onUpdate
-        });
-      }
-    }
-    return Array.from(fkMap.values());
+    return this._adapter.buildForeignKeys(modelClass, attrToColumn, this._adapterDefinitionContext());
   }
 
   _constraintTableName(tableName) {
-    const prefix = this._adapter.naming?.prefix;
-    if (!prefix) return String(tableName);
+    return this._adapter._constraintTableName(tableName);
+  }
 
-    const token = String(prefix).endsWith('_') ? String(prefix) : `${prefix}_`;
-    return String(tableName).replaceAll(token, '');
+  _adapterDefinitionContext() {
+    return {
+      models: this._registry.all(),
+      getModel: name => this.getModel(name)
+    };
   }
 
   /**

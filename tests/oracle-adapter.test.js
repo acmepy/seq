@@ -47,6 +47,7 @@ test('Oracle adapters', async t => {
     assert.deepEqual(oracle11.naming, {
       tables: 'snake_case',
       columns: 'snake_case',
+      maxLength: 30,
       prefix: undefined,
       caseStyle: 'upper'
     });

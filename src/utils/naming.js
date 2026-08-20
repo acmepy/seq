@@ -22,6 +22,16 @@ export function toCamelCase(name) {
 }
 
 /**
+ * Converts the first character of a string to uppercase.
+ * @param {string} name
+ * @returns {string}
+ */
+export function initCap(name) {
+  if (!name) return name;
+  return name.charAt(0).toUpperCase() + name.slice(1);
+}
+
+/**
  * Applies a naming convention to a name.
  * @param {string} name - The original name
  * @param {string} [convention] - 'camelCase' | 'snake_case' | undefined (no transform)

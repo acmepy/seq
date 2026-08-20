@@ -12,7 +12,8 @@ export class Oracle11Adapter extends BaseAdapter {
     tables: 'snake_case', 
     columns: 'snake_case', 
     prefix: undefined, 
-    caseStyle: 'upper' 
+    caseStyle: 'upper',
+    maxLength: 30
   };
   constructor(options = {}) {
     super({ fkStrategy: 'alter', ...options });
@@ -43,7 +44,7 @@ export class Oracle11Adapter extends BaseAdapter {
     }
   }
   sequenceName(tableName) { const prefix = 'seq_'; const safe = String(tableName).replace(/[^A-Za-z0-9_$#]/g, '_'); return `${prefix}${safe}`.slice(0, 30); }
-  resolvePhysicalName(name) { return String(name).toUpperCase(); }
+
   mapDataType(dataType) {
     const name = dataType?.constructor?.name || String(dataType);
     switch (name) {

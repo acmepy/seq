@@ -29,14 +29,15 @@ export class ModelRegistry {
       });
     }
     this._models.set(name, modelClass);
-    if (modelClass.tableName) {
-      if (this._tableNames.has(modelClass.tableName)) {
+    const tableName = modelClass._resolvedTableName || modelClass.tableName;
+    if (tableName) {
+      if (this._tableNames.has(tableName)) {
         throw new ModelError(
-          `Table name "${modelClass.tableName}" is already used by model "${this._tableNames.get(modelClass.tableName)}"`,
+          `Table name "${tableName}" is already used by model "${this._tableNames.get(tableName)}"`,
           { code: 'SEQ_MODEL_DUPLICATE_TABLE' }
         );
       }
-      this._tableNames.set(modelClass.tableName, name);
+      this._tableNames.set(tableName, name);
     }
   }
 

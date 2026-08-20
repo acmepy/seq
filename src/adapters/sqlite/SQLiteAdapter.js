@@ -3,6 +3,7 @@ import { SQLiteDDL } from './SQLiteDDL.js';
 import { SQLiteDML } from './SQLiteDML.js';
 import { SQLiteTCL } from './SQLiteTCL.js';
 import { SQLiteError } from './SQLiteError.js';
+import { applyCase, applyConvention } from '../../utils/naming.js';
 
 let Database = null;
 

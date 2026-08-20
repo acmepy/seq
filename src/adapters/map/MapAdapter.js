@@ -4,6 +4,7 @@ import { MapDML } from './MapDML.js';
 import { MapDCL } from './MapDCL.js';
 import { MapTCL } from './MapTCL.js';
 import { clone } from '../../utils/clone.js';
+import { applyCase, applyConvention } from '../../utils/naming.js';
 
 /**
  * In-memory adapter using Map collections.

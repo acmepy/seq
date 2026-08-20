@@ -98,8 +98,8 @@ export class Model {
     }
 
     this.modelName = options.modelName || this.name;
-    this.tableName = options.tableName || this.modelName;
-    this._tableNameExplicit = options.tableName !== undefined;
+    this.tableName = options.tableName;
+    //this._tableNameExplicit = options.tableName !== undefined;
     this.seq = options.seq || null;
     this.associations = this.associations || {};
     this._hooks = {};
