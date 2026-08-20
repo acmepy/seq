@@ -1,4 +1,5 @@
-import { Seq, SQLiteAdapter } from '../src/index.js';
+import { Seq } from '../src/index.js';
+import { createExampleAdapter } from './adapter.js';
 import { User } from './models/User.js';
 import { Product } from './models/Product.js';
 import { Role } from './models/Role.js';
@@ -9,7 +10,7 @@ User.belongsToMany(Role, { through: UserRole, foreignKey: 'userId', otherKey: 'r
 Role.belongsToMany(User, { through: UserRole, foreignKey: 'roleId', otherKey: 'userId' });
 
 // Setup database in memory
-const adapter = new SQLiteAdapter({ database: ':memory:' });
+const adapter = createExampleAdapter();
 
 // Create seq instance with cache configured
 const seq = new Seq({

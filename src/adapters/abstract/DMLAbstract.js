@@ -66,6 +66,14 @@ export class DMLAbstract extends BaseAbstract {
     return alias ? `${this._q(alias)}.${this._q(colName)}` : this._q(colName);
   }
 
+  _tableWithAlias(tableName, alias) {
+    return `${this._q(tableName)}${alias ? ` AS ${this._q(alias)}` : ''}`;
+  }
+
+  _applyLimitOffset(sql, options) {
+    return sql + this._buildLimitOffset(options);
+  }
+
   /**
    * Applies default values to a column-name record.
    * @param {object} colRecord
@@ -380,7 +388,7 @@ export class DMLAbstract extends BaseAbstract {
         const targetPKAttr = assoc.target.primaryKeyAttribute || 'id';
         const targetPKCol = targetSchema.attrToColumn[targetPKAttr] || targetPKAttr;
 
-        sql += ` ${joinType} ${this._q(throughTable)} AS ${this._q(junctionAlias)} ON ${this._colRef(pkCol, parentAlias)} = ${this._colRef(junctionFKCol, junctionAlias)}`;
+        sql += ` ${joinType} ${this._tableWithAlias(throughTable, junctionAlias)} ON ${this._colRef(pkCol, parentAlias)} = ${this._colRef(junctionFKCol, junctionAlias)}`;
 
         let onClause = `${this._colRef(junctionOtherKeyCol, junctionAlias)} = ${this._colRef(targetPKCol, joinAlias)}`;
         if (inc.where) {
@@ -388,7 +396,7 @@ export class DMLAbstract extends BaseAbstract {
           onClause += ` AND ${where.conditions.join(' AND ')}`;
           params.push(...where.params);
         }
-        sql += ` ${joinType} ${this._q(targetTable)} AS ${this._q(joinAlias)} ON ${onClause}`;
+        sql += ` ${joinType} ${this._tableWithAlias(targetTable, joinAlias)} ON ${onClause}`;
       } else {
         let onClause;
         if (assoc.type === 'belongsTo') {
@@ -407,7 +415,7 @@ export class DMLAbstract extends BaseAbstract {
           onClause += ` AND ${where.conditions.join(' AND ')}`;
           params.push(...where.params);
         }
-        sql += ` ${joinType} ${this._q(targetTable)} AS ${this._q(joinAlias)} ON ${onClause}`;
+        sql += ` ${joinType} ${this._tableWithAlias(targetTable, joinAlias)} ON ${onClause}`;
       }
       const nested = this._buildJoinClause(eagerNestedIncludes(inc, globalEager), inc.model, joinAlias, resolveIncludeAliasFn, includeSqlAliases, globalEager);
       sql += nested.sql;
@@ -554,19 +562,19 @@ export class DMLAbstract extends BaseAbstract {
     if (eagerIncludes.length > 0) {
       eagerIncludeSqlAliases = buildIncludeSqlAliasMap(eagerIncludes, model, this, globalEager);
       const qualifiedSelect = this._buildQualifiedSelect(model, schema, alias, eagerIncludes, eagerIncludeSqlAliases, globalEager);
-      sql = `SELECT ${qualifiedSelect} FROM ${this._q(tableName)}` + (alias ? ` AS ${this._q(alias)}` :``)
+      sql = `SELECT ${qualifiedSelect} FROM ${this._tableWithAlias(tableName, alias)}`
       const joins = this._buildJoinClause(eagerIncludes, model, alias, resolveIncludeAlias, eagerIncludeSqlAliases, globalEager);
       sql += joins.sql;
       params.push(...joins.params);
     } else {
       const selectList = this._buildSelectList(queryOptions.attributes, schema, alias);
-      sql = `SELECT ${selectList} FROM ${this._q(tableName)}` + (alias ? ` AS ${this._q(alias)}` :``)
+      sql = `SELECT ${selectList} FROM ${this._tableWithAlias(tableName, alias)}`
     }
     const where = this._buildWhere(queryOptions.where, schema, alias);
     sql += where.sql;
     params.push(...where.params);
     sql += this._buildOrderBy(queryOptions.order, schema, alias);
-    sql += this._buildLimitOffset(queryOptions);
+    sql = this._applyLimitOffset(sql, queryOptions);
     const rows = await this._executeQueryAll(sql, params);
     let instances;
     if (eagerIncludes.length > 0) {
@@ -594,7 +602,7 @@ export class DMLAbstract extends BaseAbstract {
     this._assertTransaction(options);
     //this._log('DML.count', model.modelName, options);
     const { tableName, schema, alias } = this._schema(model);
-    let sql = `SELECT COUNT(*) as cnt FROM ${this._q(tableName)}` + (alias ? ` AS ${this._q(alias)}` :``)
+    let sql = `SELECT COUNT(*) as cnt FROM ${this._tableWithAlias(tableName, alias)}`
     const params = [];
     const where = this._buildWhere(options.where, schema, alias);
     sql += where.sql;

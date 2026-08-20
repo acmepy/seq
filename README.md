@@ -1,6 +1,6 @@
 # seq
 
-`seq` es un micro ORM modular para Node.js, inspirado en Sequelize y pensado para crecer por adapters. Actualmente incluye un adapter en memoria (`MapAdapter`) y un adapter SQLite basado en `better-sqlite3` (`SQLiteAdapter`).
+`seq` es un micro ORM modular para Node.js, inspirado en Sequelize y pensado para crecer por adapters. Incluye adapters en memoria (`MapAdapter`), SQLite y Oracle 11/12.
 
 El paquete expone modelos, tipos de datos, asociaciones, operadores de consulta, hooks, sincronizacion de schema y transacciones con una API asincrona.
 
@@ -88,6 +88,8 @@ import {
   BaseAdapter,
   MapAdapter,
   SQLiteAdapter,
+  Oracle11Adapter,
+  Oracle12Adapter,
   DataTypes,
   Op,
   SeqError,
@@ -709,6 +711,20 @@ const adapter = new MapAdapter();
 ```
 
 El adapter Map guarda datos en memoria usando `Map`. Es util para pruebas, prototipos y para validar el contrato comun de adapters.
+
+### Oracle11Adapter y Oracle12Adapter
+
+```js
+const adapter = new Oracle12Adapter({
+  user: process.env.ORACLE_USER,
+  password: process.env.ORACLE_PASSWORD,
+  connectString: process.env.ORACLE_CONNECT_STRING
+});
+```
+
+Instala `oracledb` para usar Oracle. Oracle 11 pagina con `ROWNUM` y genera IDs mediante secuencias; Oracle 12 extiende esa implementación con columnas identity y `OFFSET … FETCH`.
+
+Los ejemplos aceptan `SEQ_EXAMPLE_ADAPTER=oracle11` o `oracle12`; por defecto usan SQLite. Las suites de integración se ejecutan con `npm run test:oracle11` y `npm run test:oracle12` usando las variables `ORACLE_USER`, `ORACLE_PASSWORD` y `ORACLE_CONNECT_STRING` de `.env.example`.
 
 ## Errores
 

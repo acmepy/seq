@@ -1,6 +1,6 @@
 {
   "name": "seq",
-  "version": "1.0.3",
+  "version": "1.0.4",
   "description": "seq es un micro orm, modular, flexible y de facil integracion",
   "type": "module",
   "main": "src/index.js",
@@ -19,8 +19,10 @@
   },
   "scripts": {
     "test": "node --test tests/*.test.js",
-    "test:all": "npm run test && npm run test:mysql",
+    "test:all": "npm run test && npm run test:mysql && npm run test:oracle11 && npm run test:oracle12",
     "test:mysql": "node --test tests/integration/mysql-suite.test.js",
+    "test:oracle11": "node --test tests/integration/oracle11-suite.test.js",
+    "test:oracle12": "node --test tests/integration/oracle12-suite.test.js",
     "test:coverage": "node --test --experimental-test-coverage tests/*.test.js",
     "test:watch": "node --test --watch tests/*.test.js",
     "lint": "eslint src tests examples",
@@ -49,13 +51,17 @@
   ],
   "peerDependencies": {
     "better-sqlite3": "^12.11.1",
-    "mysql2": "^3.14.0"
+    "mysql2": "^3.14.0",
+    "oracledb": "^6.10.0"
   },
   "peerDependenciesMeta": {
     "better-sqlite3": {
       "optional": true
     },
     "mysql2": {
+      "optional": true
+    },
+    "oracledb": {
       "optional": true
     }
   },
@@ -64,6 +70,7 @@
     "dotenv": "^17.4.2",
     "eslint": "^10.7.0",
     "mysql2": "^3.14.0",
+    "oracledb": "^7.0.1",
     "prettier": "^3.9.6",
     "rollup": "^4.46.2"
   },

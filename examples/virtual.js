@@ -1,7 +1,8 @@
-import { Seq, SQLiteAdapter } from '../src/index.js';
+import { Seq } from '../src/index.js';
+import { createExampleAdapter } from './adapter.js';
 import { User } from './models/User.js';
 
-const adapter = new SQLiteAdapter({ database: ':memory:' });
+const adapter = createExampleAdapter();
 await adapter.connect();
 
 const seq = new Seq({

@@ -1,4 +1,5 @@
-import { Seq, SQLiteAdapter, Model, DataTypes } from '../src/index.js';
+import { Seq, Model, DataTypes } from '../src/index.js';
+import { createExampleAdapter } from './adapter.js';
 import { User } from './models/User.js';
 import { Task } from './models/Task.js';
 import { Profile } from './models/Profile.js';
@@ -21,7 +22,7 @@ Comment.belongsTo(Task, { foreignKey: 'taskId' });
 User.hasOne(Profile, { foreignKey: 'userId', onDelete: 'CASCADE' });
 Profile.belongsTo(User, { foreignKey: 'userId' });
 
-const adapter = new SQLiteAdapter({ database: ':memory:' });
+const adapter = createExampleAdapter();
 await adapter.connect();
 
 const seq = new Seq({

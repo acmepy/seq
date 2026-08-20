@@ -1,4 +1,5 @@
-import { Seq, SQLiteAdapter } from '../src/index.js';
+import { Seq } from '../src/index.js';
+import { createExampleAdapter } from './adapter.js';
 import { User } from './models/User.js';
 import { Task } from './models/Task.js';
 import { Role } from './models/Role.js';
@@ -11,7 +12,7 @@ Role.belongsToMany(User, { through: 'user_roles', foreignKey: 'roleId', otherKey
 Role.belongsToMany(Permission, { through: 'role_permissions', foreignKey: 'roleId', otherKey: 'permissionId' });
 Permission.belongsToMany(Role, { through: 'role_permissions', foreignKey: 'permissionId', otherKey: 'roleId' });
 
-const adapter = new SQLiteAdapter({ database: ':memory:' });
+const adapter = createExampleAdapter();
 await adapter.connect();
 
 const seq = new Seq({

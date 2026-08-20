@@ -1,8 +1,9 @@
-import { Seq, SQLiteAdapter } from '../src/index.js';
+import { Seq } from '../src/index.js';
+import { createExampleAdapter } from './adapter.js';
 import { User } from './models/User.js';
 import { Product } from './models/Product.js';
 
-const adapter = new SQLiteAdapter({ database: ':memory:' });
+const adapter = createExampleAdapter();
 
 const seq = new Seq({
   adapter,

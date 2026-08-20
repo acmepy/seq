@@ -244,6 +244,27 @@ export class MySQLAdapter extends BaseAdapter {
 
 export class MySQLError extends ErrorAbstract {}
 
+export interface OracleAdapterOptions extends AdapterOptions {
+  user?: string;
+  password?: string;
+  connectString?: string;
+  /** Connection timeout in seconds. */
+  connectTimeout?: number;
+  poolMin?: number;
+  poolMax?: number;
+  poolIncrement?: number;
+}
+
+export class Oracle11Adapter extends BaseAdapter {
+  constructor(options?: OracleAdapterOptions);
+}
+
+export class Oracle12Adapter extends Oracle11Adapter {
+  constructor(options?: OracleAdapterOptions);
+}
+
+export class Oracle11Error extends ErrorAbstract {}
+
 export class MapAdapter extends BaseAdapter {
   constructor(options?: AdapterOptions);
 }
