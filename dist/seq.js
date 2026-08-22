@@ -1625,19 +1625,19 @@ class Model {
   }
 
   /**
-   * Finds a record by primary key or creates it when it does not exist.
+   * Finds a record matching where or creates it when it does not exist.
    * @template {typeof Model} T
    * @this {T}
-   * @param {*} id
+   * @param {object} where
    * @param {object} values
    * @param {import('../../types/index.d.ts').MutationOptions} [options]
    * @returns {Promise<[InstanceType<T>, boolean]>}
    */
-  static async findOrCreate(id, values = {}, options = {}) {
-    const instance = await this.findByPk(id, options);
+  static async findOrCreate(where, values = {}, options = {}) {
+    const instance = await this.findOne({ ...options, where });
     if (instance) return [instance, false];
 
-    return [await this.create({ ...values, [this.primaryKeyAttribute]: id }, options), true];
+    return [await this.create({ ...values, ...where }, options), true];
   }
 
   static _toPlainValue(value) {
