@@ -143,6 +143,7 @@ export class Model<TValues = Record<string, unknown>> {
   static bulkCreate<T extends ModelStatic>(this: T, records?: object[], options?: MutationOptions): Promise<Array<InstanceType<T>>>;
   static upsert<T extends ModelStatic>(this: T, values?: object, options?: UpsertOptions): Promise<[InstanceType<T>, boolean]>;
   static findByPk<T extends ModelStatic>(this: T, id: unknown, options?: QueryOptions): Promise<InstanceType<T> | null>;
+  static findOrCreate<T extends ModelStatic>(this: T, id: unknown, values?: object, options?: QueryOptions & MutationOptions): Promise<[InstanceType<T>, boolean]>;
   static findOne<T extends ModelStatic>(this: T, options?: QueryOptions): Promise<InstanceType<T> | null>;
   static findAll<T extends ModelStatic>(this: T, options?: QueryOptions): Promise<Array<InstanceType<T>>>;
   static count(options?: QueryOptions): Promise<number>;

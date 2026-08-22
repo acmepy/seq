@@ -109,6 +109,26 @@ describe('Model CRUD', () => {
     });
   });
 
+  describe('findOrCreate', () => {
+    it('returns an existing record without creating another one', async () => {
+      const user = await User.create({ name: 'Ana', email: 'ana@test.com' });
+
+      const [found, created] = await User.findOrCreate(user.getDataValue('id'), { name: 'Otra', email: 'otra@test.com' });
+
+      assert.equal(created, false);
+      assert.equal(found.getDataValue('id'), user.getDataValue('id'));
+      assert.equal(await User.count(), 1);
+    });
+
+    it('creates a record with the requested primary key when it does not exist', async () => {
+      const [user, created] = await User.findOrCreate(42, { name: 'Ana', email: 'ana@test.com' });
+
+      assert.equal(created, true);
+      assert.equal(user.getDataValue('id'), 42);
+      assert.equal(user.getDataValue('name'), 'Ana');
+    });
+  });
+
   describe('findOne', () => {
     it('finds one record matching where', async () => {
       await User.create({ name: 'Ana', email: 'a@test.com' });

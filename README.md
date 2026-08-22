@@ -395,6 +395,10 @@ const users = await User.bulkCreate([
 ]);
 
 const byPk = await User.findByPk(1);
+const [user, userCreated] = await User.findOrCreate(1, {
+  name: 'Ana',
+  email: 'ana@example.com'
+});
 const one = await User.findOne({ where: { email: 'ana@example.com' } });
 const all = await User.findAll({ where: { active: true }, limit: 10 });
 const total = await User.count({ where: { active: true } });
@@ -432,6 +436,8 @@ await User.truncate();
 ```
 
 `findAndCountAll()` retorna `{ count, rows }`. `rows` respeta `limit`, `offset` y `order`; `count` devuelve el total de registros que coinciden con el `where` sin paginacion.
+
+`findOrCreate(id, values, options)` busca por llave primaria y, si no existe, crea el registro con ese `id`. Retorna `[instance, created]`.
 
 `upsert()` retorna `[instance, created]`. Para encontrar el registro a actualizar se puede usar `options.where`, `options.conflictFields` o un valor de llave primaria. SQLite usa `ON CONFLICT` cuando el conflicto se puede resolver nativamente; si no, cae al flujo comun del adapter.
 

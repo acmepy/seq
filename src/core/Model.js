@@ -490,6 +490,22 @@ export class Model {
     return this.findOne({ ...options, where });
   }
 
+  /**
+   * Finds a record by primary key or creates it when it does not exist.
+   * @template {typeof Model} T
+   * @this {T}
+   * @param {*} id
+   * @param {object} values
+   * @param {import('../../types/index.d.ts').MutationOptions} [options]
+   * @returns {Promise<[InstanceType<T>, boolean]>}
+   */
+  static async findOrCreate(id, values = {}, options = {}) {
+    const instance = await this.findByPk(id, options);
+    if (instance) return [instance, false];
+
+    return [await this.create({ ...values, [this.primaryKeyAttribute]: id }, options), true];
+  }
+
   static _toPlainValue(value) {
     if (value === null || value === undefined) return value;
     if (Array.isArray(value)) return value.map(item => this._toPlainValue(item));
