@@ -122,7 +122,7 @@ describe('Schema introspection', () => {
   it('introspects Oracle definitions against physical metadata', async () => {
     const adapter = new Oracle11Adapter();
     adapter.ddl._executeQueryAll = async sql => {
-      if (sql.includes('USER_TAB_COLUMNS')) return [{ COLUMN_NAME: 'ID' }, { COLUMN_NAME: 'NAME' }];
+      if (sql.includes('USER_TAB_COLUMNS')) return [{ COLUMN_NAME: 'ID' }, { COLUMN_NAME: 'NAME' }, { COLUMN_NAME: 'CREATED_AT' }];
       if (sql.includes("CONSTRAINT_TYPE = 'U'")) return [{ CONSTRAINT_NAME: 'UQ_USERS_NAME' }];
       if (sql.includes('USER_INDEXES')) return [{ INDEX_NAME: 'IDX_USERS_NAME' }];
       if (sql.includes("CONSTRAINT_TYPE = 'R'")) return [{ CONSTRAINT_NAME: 'FK_USERS_OWNER' }];
@@ -131,22 +131,27 @@ describe('Schema introspection', () => {
 
     const definition = {
       tableName: 'USERS',
+      timestamps: true,
+      createdAt: 'createdAt',
+      updatedAt: 'updatedAt',
       columns: {
         id: { field: 'ID' },
         name: { field: 'NAME' },
-        missing: { field: 'MISSING' }
+        missing: { field: 'MISSING' },
+        createdAt: { field: 'CREATED_AT' },
+        updatedAt: { field: 'UPDATED_AT' }
       },
-      attrToColumn: { id: 'ID', name: 'NAME', missing: 'MISSING' },
-      columnToAttr: { ID: 'id', NAME: 'name', MISSING: 'missing' },
+      attrToColumn: { id: 'ID', name: 'NAME', missing: 'MISSING', createdAt: 'CREATED_AT', updatedAt: 'UPDATED_AT' },
+      columnToAttr: { ID: 'id', NAME: 'name', MISSING: 'missing', CREATED_AT: 'createdAt', UPDATED_AT: 'updatedAt' },
       uniqueConstraints: [{ constraintName: 'UQ_USERS_NAME', columns: ['NAME'] }, { constraintName: 'UQ_USERS_MISSING', columns: ['MISSING'] }],
       indexes: [{ name: 'IDX_USERS_NAME', columns: ['NAME'] }, { name: 'IDX_USERS_MISSING', columns: ['MISSING'] }],
       foreignKeys: [{ constraintName: 'FK_USERS_OWNER' }, { constraintName: 'FK_USERS_MISSING' }]
     };
 
     const schema = await adapter.ddl.introspectDefinition(definition);
-    assert.deepEqual(Object.keys(schema.columns), ['id', 'name']);
-    assert.deepEqual(schema.attrToColumn, { id: 'ID', name: 'NAME' });
-    assert.deepEqual(schema.columnToAttr, { ID: 'id', NAME: 'name' });
+    assert.deepEqual(Object.keys(schema.columns), ['id', 'name', 'createdAt']);
+    assert.deepEqual(schema.attrToColumn, { id: 'ID', name: 'NAME', createdAt: 'CREATED_AT' });
+    assert.deepEqual(schema.columnToAttr, { ID: 'id', NAME: 'name', CREATED_AT: 'createdAt' });
     assert.deepEqual(schema.uniqueConstraints.map(item => item.constraintName), ['UQ_USERS_NAME']);
     assert.deepEqual(schema.indexes.map(item => item.name), ['IDX_USERS_NAME']);
     assert.deepEqual(schema.foreignKeys.map(item => item.constraintName), ['FK_USERS_OWNER']);
@@ -160,7 +165,7 @@ describe('Schema introspection', () => {
       id: { type: DataTypes.INTEGER, primaryKey: true, autoIncrement: true },
       name: { type: DataTypes.STRING },
       added: { type: DataTypes.STRING }
-    }, { modelName: 'User', tableName: 'users', timestamps: false });
+    }, { modelName: 'User', tableName: 'users' });
     const adapter = new SQLiteAdapter();
     await adapter.connect();
     adapter._db.exec('CREATE TABLE users (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT)');
@@ -175,7 +180,10 @@ describe('Schema introspection', () => {
     assert.ok(adapter.schemas.has('users'));
     const result = await seq.sync({ alter: true });
     assert.deepEqual(result.altered, ['users']);
-    assert.ok(adapter._db.pragma('table_info(users)').some(column => column.name === 'added'));
+    const columns = adapter._db.pragma('table_info(users)').map(column => column.name);
+    assert.ok(columns.includes('added'));
+    assert.ok(columns.includes('created_at'));
+    assert.ok(columns.includes('updated_at'));
   });
 });
 
