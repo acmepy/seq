@@ -176,7 +176,7 @@ export class Seq {
     for (const definition of definitions) {
       if (!existing.has(definition.tableName) || this._adapter.schemas.has(definition.tableName)) continue;
       const def = typeof this._adapter.ddl.introspectDefinition === 'function'
-        ? this._adapter.ddl.introspectDefinition(definition)
+        ? await this._adapter.ddl.introspectDefinition(definition)
         : this._adapter.ddl.normalizeDefinition(definition);
       this._adapter.ddl._registerSchema(def, { preserveConstraints: true });
     }

@@ -2439,7 +2439,7 @@ class Seq {
     for (const definition of definitions) {
       if (!existing.has(definition.tableName) || this._adapter.schemas.has(definition.tableName)) continue;
       const def = typeof this._adapter.ddl.introspectDefinition === 'function'
-        ? this._adapter.ddl.introspectDefinition(definition)
+        ? await this._adapter.ddl.introspectDefinition(definition)
         : this._adapter.ddl.normalizeDefinition(definition);
       this._adapter.ddl._registerSchema(def, { preserveConstraints: true });
     }
@@ -6712,6 +6712,48 @@ class Oracle11DDL extends DDLAbstract {
     const rows = await this._executeQueryAll('SELECT COLUMN_NAME, DATA_TYPE, DATA_LENGTH, NULLABLE, DATA_DEFAULT FROM USER_TAB_COLUMNS WHERE TABLE_NAME = ? ORDER BY COLUMN_ID', [tableName]);
     const primaryKeys = new Set((await this._executeQueryAll('SELECT COLUMN_NAME FROM USER_CONS_COLUMNS WHERE TABLE_NAME = ? AND CONSTRAINT_NAME IN (SELECT CONSTRAINT_NAME FROM USER_CONSTRAINTS WHERE TABLE_NAME = ? AND CONSTRAINT_TYPE = \'P\')', [tableName, tableName])).map(row => row.COLUMN_NAME));
     return { tableName, columns: rows.map(row => ({ name: row.COLUMN_NAME, type: row.DATA_TYPE, allowNull: row.NULLABLE === 'Y', primaryKey: primaryKeys.has(row.COLUMN_NAME), autoIncrement: false, defaultValue: row.DATA_DEFAULT })) };
+  }
+  async introspectDefinition(definition) {
+    const def = this.normalizeDefinition(definition);
+    const columnsInfo = await this._executeQueryAll(
+      'SELECT COLUMN_NAME FROM USER_TAB_COLUMNS WHERE TABLE_NAME = ?',
+      [def.tableName]
+    );
+    const physicalColumns = new Set(columnsInfo.map(row => row.COLUMN_NAME));
+    const columns = {};
+    const attrToColumn = {};
+    const columnToAttr = {};
+
+    for (const [attrName, colDef] of Object.entries(def.columns)) {
+      const columnName = colDef.field || def.attrToColumn[attrName] || attrName;
+      if (!physicalColumns.has(columnName)) continue;
+      columns[attrName] = colDef;
+      attrToColumn[attrName] = columnName;
+      columnToAttr[columnName] = attrName;
+    }
+
+    const uniqueRows = await this._executeQueryAll(
+      "SELECT CONSTRAINT_NAME FROM USER_CONSTRAINTS WHERE TABLE_NAME = ? AND CONSTRAINT_TYPE = 'U'",
+      [def.tableName]
+    );
+    const existingUniqueNames = new Set(uniqueRows.map(row => row.CONSTRAINT_NAME));
+    const uniqueConstraints = def.uniqueConstraints.filter(item => existingUniqueNames.has(item.constraintName));
+
+    const indexRows = await this._executeQueryAll(
+      'SELECT INDEX_NAME FROM USER_INDEXES WHERE TABLE_NAME = ?',
+      [def.tableName]
+    );
+    const existingIndexNames = new Set(indexRows.map(row => row.INDEX_NAME));
+    const indexes = def.indexes.filter(item => existingIndexNames.has(item.name));
+
+    const fkRows = await this._executeQueryAll(
+      "SELECT CONSTRAINT_NAME FROM USER_CONSTRAINTS WHERE TABLE_NAME = ? AND CONSTRAINT_TYPE = 'R'",
+      [def.tableName]
+    );
+    const existingFKNames = new Set(fkRows.map(row => row.CONSTRAINT_NAME));
+    const foreignKeys = def.foreignKeys.filter(fk => existingFKNames.has(fk.constraintName));
+
+    return { ...def, columns, attrToColumn, columnToAttr, uniqueConstraints, indexes, foreignKeys };
   }
   async addColumns(tableName, missingColumns) {
     const schema = this._adapter.schemas.get(tableName);

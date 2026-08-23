@@ -1,6 +1,6 @@
 import { afterEach, describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { DataTypes, MapAdapter, Model, Op, Seq, SQLiteAdapter } from '../src/index.js';
+import { DataTypes, MapAdapter, Model, Op, Oracle11Adapter, Seq, SQLiteAdapter } from '../src/index.js';
 import { cleanupTestContext, createTestContext, testAdapterName, testTable } from './shared/test-context.js';
 
 const open = [];
@@ -119,6 +119,39 @@ describe('Map atomicity', () => {
 });
 
 describe('Schema introspection', () => {
+  it('introspects Oracle definitions against physical metadata', async () => {
+    const adapter = new Oracle11Adapter();
+    adapter.ddl._executeQueryAll = async sql => {
+      if (sql.includes('USER_TAB_COLUMNS')) return [{ COLUMN_NAME: 'ID' }, { COLUMN_NAME: 'NAME' }];
+      if (sql.includes("CONSTRAINT_TYPE = 'U'")) return [{ CONSTRAINT_NAME: 'UQ_USERS_NAME' }];
+      if (sql.includes('USER_INDEXES')) return [{ INDEX_NAME: 'IDX_USERS_NAME' }];
+      if (sql.includes("CONSTRAINT_TYPE = 'R'")) return [{ CONSTRAINT_NAME: 'FK_USERS_OWNER' }];
+      throw new Error(`Unexpected query: ${sql}`);
+    };
+
+    const definition = {
+      tableName: 'USERS',
+      columns: {
+        id: { field: 'ID' },
+        name: { field: 'NAME' },
+        missing: { field: 'MISSING' }
+      },
+      attrToColumn: { id: 'ID', name: 'NAME', missing: 'MISSING' },
+      columnToAttr: { ID: 'id', NAME: 'name', MISSING: 'missing' },
+      uniqueConstraints: [{ constraintName: 'UQ_USERS_NAME', columns: ['NAME'] }, { constraintName: 'UQ_USERS_MISSING', columns: ['MISSING'] }],
+      indexes: [{ name: 'IDX_USERS_NAME', columns: ['NAME'] }, { name: 'IDX_USERS_MISSING', columns: ['MISSING'] }],
+      foreignKeys: [{ constraintName: 'FK_USERS_OWNER' }, { constraintName: 'FK_USERS_MISSING' }]
+    };
+
+    const schema = await adapter.ddl.introspectDefinition(definition);
+    assert.deepEqual(Object.keys(schema.columns), ['id', 'name']);
+    assert.deepEqual(schema.attrToColumn, { id: 'ID', name: 'NAME' });
+    assert.deepEqual(schema.columnToAttr, { ID: 'id', NAME: 'name' });
+    assert.deepEqual(schema.uniqueConstraints.map(item => item.constraintName), ['UQ_USERS_NAME']);
+    assert.deepEqual(schema.indexes.map(item => item.name), ['IDX_USERS_NAME']);
+    assert.deepEqual(schema.foreignKeys.map(item => item.constraintName), ['FK_USERS_OWNER']);
+  });
+
   it('adds a physically missing column after reopening', async () => {
     if (testAdapterName() !== 'sqlite') return;
 
@@ -131,9 +164,15 @@ describe('Schema introspection', () => {
     const adapter = new SQLiteAdapter();
     await adapter.connect();
     adapter._db.exec('CREATE TABLE users (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT)');
+    const introspectDefinition = adapter.ddl.introspectDefinition.bind(adapter.ddl);
+    adapter.ddl.introspectDefinition = async definition => {
+      await Promise.resolve();
+      return introspectDefinition(definition);
+    };
     const seq = new Seq({ adapter, models: [User], logging: false });
     await seq.init();
     open.push({ seq, adapter, models: [User] });
+    assert.ok(adapter.schemas.has('users'));
     const result = await seq.sync({ alter: true });
     assert.deepEqual(result.altered, ['users']);
     assert.ok(adapter._db.pragma('table_info(users)').some(column => column.name === 'added'));
