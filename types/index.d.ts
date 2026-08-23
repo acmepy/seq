@@ -111,10 +111,17 @@ export interface BuildOptions {
   _partial?: boolean;
 }
 
+export interface Logger {
+  info?: Function | false;
+  trace?: Function | false;
+  warn?: Function | false;
+  error?: Function | false;
+}
+
 export interface SeqOptions {
   adapter: BaseAdapter;
   models?: ModelStatic[];
-  logging?: boolean | Record<string, Function | false>;
+  logging?: boolean | Logger;
   define?: ModelOptions;
 }
 

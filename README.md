@@ -205,7 +205,7 @@ const seq = new Seq({
 });
 ```
 
-`logging: true` activa los defaults. Para personalizar handlers se debe pasar un objeto por niveles (`info`, `trace`, `warn`, `error`); cada nivel acepta una funcion o `false`.
+`logging: true` activa los defaults. Tambien se puede pasar directamente una instancia de logger con los metodos `info`, `trace`, `warn` y `error`; `seq` conserva automaticamente su contexto. Para personalizar handlers individuales se puede pasar un objeto por niveles, donde cada nivel acepta una funcion o `false`.
 
 La clave `warn` usa la misma convencion que `console.warn` y loggers como `com.acmepy.logger-js`, cuyos metodos reciben primero el origen del mensaje y luego los datos:
 
@@ -221,12 +221,7 @@ createLogger({
 const seq = new Seq({
   adapter,
   models: [User],
-  logging: {
-    info: logger.info.bind(logger),
-    trace: logger.trace.bind(logger),
-    warn: logger.warn.bind(logger),
-    error: logger.error.bind(logger)
-  }
+  logging: logger
 });
 ```
 

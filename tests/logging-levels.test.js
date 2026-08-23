@@ -87,6 +87,49 @@ describe('Logging levels', () => {
     ]);
   });
 
+  it('accepts a logger instance directly and preserves its context', () => {
+    const logger = {
+      calls: [],
+      info(...args) {
+        this.calls.push(['info', ...args]);
+      },
+      trace(...args) {
+        this.calls.push(['trace', ...args]);
+      },
+      warn(...args) {
+        this.calls.push(['warn', ...args]);
+      },
+      error(...args) {
+        this.calls.push(['error', ...args]);
+      }
+    };
+    const seq = new Seq({ adapter: new MapAdapter(), logging: logger });
+
+    seq._log('trace', 'sql');
+
+    assert.deepEqual(logger.calls, [['trace', '[Seq]', 'sql']]);
+  });
+
+  it('accepts console handlers in a per-level configuration', () => {
+    const originalDebug = console.debug;
+    const calls = [];
+    console.debug = function (...args) {
+      calls.push({ target: this, args });
+    };
+
+    try {
+      const seq = new Seq({
+        adapter: new MapAdapter(),
+        logging: { info: console.log, trace: console.debug, warn: console.warn, error: console.error }
+      });
+      seq._log('trace', 'sql');
+    } finally {
+      console.debug = originalDebug;
+    }
+
+    assert.deepEqual(calls, [{ target: console, args: ['[Seq]', 'sql'] }]);
+  });
+
   it('stringifies object and array payloads without quotes', () => {
     const calls = [];
     const seq = new Seq({

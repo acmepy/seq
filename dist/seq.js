@@ -2665,7 +2665,13 @@ class Seq {
     if (logging === undefined || logging === true) return { ...defaults };
     if (logging === false || logging === null) return disabled;
     if (typeof logging === 'object') {
-      return {...defaults, ...logging, warn: logging.warn ?? defaults.warn, trace: logging.trace ?? defaults.trace};
+      return Object.fromEntries(
+        Object.entries(defaults).map(([level, defaultHandler]) => {
+          const handler = logging[level] ?? defaultHandler;
+          const consoleHandler = Object.values(console).includes(handler);
+          return [level, typeof handler === 'function' ? handler.bind(consoleHandler ? console : logging) : handler];
+        })
+      );
     }
     return disabled;
   }
