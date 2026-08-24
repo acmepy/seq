@@ -2910,13 +2910,18 @@ class BaseAdapter {
 
   resolveTableName(modelClass) {
     const name = (modelClass.tableName? modelClass.tableName : this.naming.prefix ? `${this.naming.prefix}${initCap(modelClass.modelName)}` : modelClass.modelName).replace(/[^A-Za-z0-9_$#]+/g, '_');
-    return truncateMiddle(applyCase(applyConvention(name, this.naming.tables), this.naming.caseStyle), this.naming.maxLength);
+    const convention = modelClass.tableName ? null : this.naming.tables;
+    return truncateMiddle(applyCase(applyConvention(name, convention), this._caseStyle(convention)), this.naming.maxLength);
   }
 
   resolveColumnName(def, attrName) {
     const name = def.field || (this.naming.columns ? initCap(attrName) : attrName);
     const convention = def.field ? null : this.naming.columns;
-    return (truncateMiddle(applyCase(applyConvention(name, convention), this.naming.caseStyle), this.naming.maxLength)).replace(/[^A-Za-z0-9_$#]+/g, '_');
+    return (truncateMiddle(applyCase(applyConvention(name, convention), this._caseStyle(convention)), this.naming.maxLength)).replace(/[^A-Za-z0-9_$#]+/g, '_');
+  }
+
+  _caseStyle(convention) {
+    return convention === 'snake_case' ? this.naming.caseStyle : null;
   }
 
   uniqueConstraintName(tableName, columns) {

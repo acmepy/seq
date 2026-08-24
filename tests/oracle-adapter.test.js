@@ -79,7 +79,7 @@ test('Oracle adapters', async t => {
     assert.equal(oracle12.naming.caseStyle, 'upper');
   });
 
-  await t.test('Oracle applies uppercase caseStyle to explicit physical names', async () => {
+  await t.test('Oracle preserves explicit physical names', async () => {
     class ExplicitUser extends Model {}
     ExplicitUser.init(
       {
@@ -95,8 +95,8 @@ test('Oracle adapters', async t => {
     ExplicitUser._resolvedTableName = seq._resolveTableName(ExplicitUser);
     const def = seq._buildTableDefinition(ExplicitUser);
 
-    assert.equal(def.tableName, 'EXPLICIT_USERS');
-    assert.equal(def.attrToColumn.firstName, 'FIRST_NAME');
+    assert.equal(def.tableName, 'explicit_users');
+    assert.equal(def.attrToColumn.firstName, 'first_name');
   });
 
   await t.test('logs database execution errors through Seq before throwing', async () => {

@@ -1,6 +1,6 @@
 {
   "name": "seq",
-  "version": "1.1.7",
+  "version": "1.1.8",
   "description": "seq es un micro orm, modular, flexible y de facil integracion",
   "type": "module",
   "main": "src/index.js",
@@ -29,7 +29,7 @@
     "lint": "eslint src tests examples",
     "format": "prettier --write src tests examples types README.md package.json",
     "prebuild": "node -e \"require('fs').rmSync('dist',{recursive:true,force:true})\"",
-    "build": "rollup -c",
+    "build": "npm run test && rollup -c",
     "dev": "rollup -c -w",
     "prepack": "npm run build",
     "example:basic": "node examples/basic.js",

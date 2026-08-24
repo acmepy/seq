@@ -219,12 +219,12 @@ describe('Naming Conventions', () => {
       assert.equal(def.tableName, 'app_user');
     });
 
-    it('applies lower caseStyle from naming to table names', async () => {
-      class Order extends Model {
+    it('preserves camelCase table names when caseStyle is configured', async () => {
+      class OrderItem extends Model {
         static define(seq) {
           this.init({
             id: { type: DataTypes.INTEGER, primaryKey: true, autoIncrement: true }
-          }, { seq, modelName: 'Order' });
+          }, { seq, modelName: 'OrderItem' });
         }
       }
 
@@ -234,12 +234,12 @@ describe('Naming Conventions', () => {
       });
       const seq = new Seq({
         adapter,
-        models: [Order]
+        models: [OrderItem]
       });
       await seq.init();
 
-      const def = seq._buildTableDefinition(Order);
-      assert.equal(def.tableName, 'order');
+      const def = seq._buildTableDefinition(OrderItem);
+      assert.equal(def.tableName, 'orderItem');
     });
 
     it('applies upper caseStyle from naming to table names', async () => {
@@ -308,7 +308,7 @@ describe('Naming Conventions', () => {
       assert.equal(def.tableName, 'MixedCaseTable');
     });
 
-    it('uses MapAdapter camelCase lower defaults for table names', async () => {
+    it('uses MapAdapter camelCase defaults for table names', async () => {
       class UserProfile extends Model {
         static define(seq) {
           this.init({
@@ -325,7 +325,7 @@ describe('Naming Conventions', () => {
       await seq.init();
 
       const def = seq._buildTableDefinition(UserProfile);
-      assert.equal(def.tableName, 'userprofile');
+      assert.equal(def.tableName, 'userProfile');
     });
 
     it('respects explicit tableName - no convention applied', async () => {
@@ -445,7 +445,7 @@ describe('Naming Conventions', () => {
       assert.equal(def.attrToColumn.productName, 'custom_name');
     });
 
-    it('applies lower caseStyle from naming to column names', async () => {
+    it('preserves camelCase column names when caseStyle is configured', async () => {
       class User extends Model {
         static define(seq) {
           this.init({
@@ -467,8 +467,8 @@ describe('Naming Conventions', () => {
       await seq.init();
 
       const def = seq._buildTableDefinition(User);
-      assert.equal(def.attrToColumn.firstName, 'firstname');
-      assert.equal(def.attrToColumn.lastName, 'lastname');
+      assert.equal(def.attrToColumn.firstName, 'firstName');
+      assert.equal(def.attrToColumn.lastName, 'lastName');
     });
 
     it('applies upper caseStyle from naming to column names', async () => {
@@ -542,7 +542,7 @@ describe('Naming Conventions', () => {
       assert.equal(def.attrToColumn.productName, 'productName');
     });
 
-    it('uses MapAdapter camelCase lower defaults for column names', async () => {
+    it('uses MapAdapter camelCase defaults for column names', async () => {
       class Product extends Model {
         static define(seq) {
           this.init({
@@ -560,7 +560,7 @@ describe('Naming Conventions', () => {
       await seq.init();
 
       const def = seq._buildTableDefinition(Product);
-      assert.equal(def.attrToColumn.product_name, 'productname');
+      assert.equal(def.attrToColumn.product_name, 'productName');
     });
 
     it('limits generated column names to naming maxLength', async () => {
