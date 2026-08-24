@@ -11,10 +11,8 @@ export class SQLiteDML extends DMLAbstract {
     return this._adapter._db;
   }
 
-  _throwLoggedError(error) {
-    const sqliteError = SQLiteError.from(error);
-    this._log('error', sqliteError.message);
-    throw sqliteError;
+  _toError(error) {
+    return SQLiteError.from(error);
   }
 
   // ---------------------------------------------------------------------------
@@ -22,30 +20,33 @@ export class SQLiteDML extends DMLAbstract {
   // ---------------------------------------------------------------------------
 
   async _executeQueryAll(sql, params) {
-    this._log('trace', sql, params);
-    try {
-      return this._db().prepare(sql).all(...params);
-    } catch (error) {
-      this._throwLoggedError(error);
-    }
+    return this._measureSql(sql, params, () => {
+      try {
+        return this._db().prepare(sql).all(...params);
+      } catch (error) {
+        throw this._toError(error);
+      }
+    });
   }
 
   async _executeGet(sql, params) {
-    this._log('trace', sql, params);
-    try {
-      return this._db().prepare(sql).get(...params);
-    } catch (error) {
-      this._throwLoggedError(error);
-    }
+    return this._measureSql(sql, params, () => {
+      try {
+        return this._db().prepare(sql).get(...params);
+      } catch (error) {
+        throw this._toError(error);
+      }
+    });
   }
 
   _execute(sql, params = []) {
-    this._log('trace', sql, params);
-    try {
-      return this._db().prepare(sql).run(...params);
-    } catch (error) {
-      this._throwLoggedError(error);
-    }
+    return this._measureSql(sql, params, () => {
+      try {
+        return this._db().prepare(sql).run(...params);
+      } catch (error) {
+        throw this._toError(error);
+      }
+    });
   }
 
   _mapRows(rows, model, schema, options = {}) {

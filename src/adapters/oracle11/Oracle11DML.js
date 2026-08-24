@@ -5,20 +5,30 @@ import { Oracle11Error } from './Oracle11Error.js';
 export class Oracle11DML extends DMLAbstract {
   _connection() { return this._adapter._connection(); }
   _tableWithAlias(tableName, alias) { return `${this._q(tableName)}${alias ? ` ${this._q(alias)}` : ''}`; }
-  _throwLoggedError(error) { const oracleError = Oracle11Error.from(error); this._log('error', oracleError.message); throw oracleError; }
+  _toError(error) { return Oracle11Error.from(error); }
 
   _oracleSql(sql) { let index = 0; return sql.replaceAll('?', () => `:${++index}`); }
   async _executeQueryAll(sql, params = []) {
-    this._log('trace', sql, params);
-    try { 
-      return await this._adapter._withConnection(async connection => (await connection.execute(this._oracleSql(sql), params, { outFormat: this._adapter._client.OUT_FORMAT_OBJECT })).rows || []); 
-    }catch (error) { this._throwLoggedError(error); }
+    return this._measureSql(sql, params, async () => {
+      try {
+        return await this._adapter._withConnection(async connection => (await connection.execute(this._oracleSql(sql), params, { outFormat: this._adapter._client.OUT_FORMAT_OBJECT })).rows || []);
+      } catch (error) {
+        throw this._toError(error);
+      }
+    });
   }
   async _executeGet(sql, params = []) { return (await this._executeQueryAll(sql, params))[0] || null; }
   async _execute(sql, params = []) {
-    this._log('trace', sql, params);
-    try { return await this._adapter._withConnection(async connection => { const result = await connection.execute(this._oracleSql(sql), params, { autoCommit: !this._adapter._activeTransaction }); return { changes: result.rowsAffected || 0 }; }); }
-    catch (error) { this._throwLoggedError(error); }
+    return this._measureSql(sql, params, async () => {
+      try {
+        return await this._adapter._withConnection(async connection => {
+          const result = await connection.execute(this._oracleSql(sql), params, { autoCommit: !this._adapter._activeTransaction });
+          return { changes: result.rowsAffected || 0 };
+        });
+      } catch (error) {
+        throw this._toError(error);
+      }
+    });
   }
 
   _applyLimitOffset(sql, options) {
@@ -61,11 +71,14 @@ export class Oracle11DML extends DMLAbstract {
     let sql = `INSERT INTO ${this._q(tableName)} (${columns.map(column => this._q(column)).join(', ')}) VALUES (${valuesSql})`;
     const bindParams = [...params];
     if (generatedPk) { sql += ` RETURNING ${this._q(pk)} INTO :${bindParams.length + 1}`; bindParams.push({ dir: this._adapter._client.BIND_OUT, type: this._adapter._client.NUMBER }); }
-    this._log('trace', sql, bindParams);
-    try {
-      const result = await this._adapter._withConnection(connection => connection.execute(sql, bindParams, { autoCommit: !this._adapter._activeTransaction }));
-      if (generatedPk) record[pk] = result.outBinds?.[0]?.[0] ?? result.outBinds?.[bindParams.length - 1]?.[0];
-    } catch (error) { this._throwLoggedError(error); }
+    const result = await this._measureSql(sql, bindParams, async () => {
+      try {
+        return await this._adapter._withConnection(connection => connection.execute(sql, bindParams, { autoCommit: !this._adapter._activeTransaction }));
+      } catch (error) {
+        throw this._toError(error);
+      }
+    });
+    if (generatedPk) record[pk] = result.outBinds?.[0]?.[0] ?? result.outBinds?.[bindParams.length - 1]?.[0];
     return new model(this._toAttrNames(record, schema), { _isNew: false });
   }
 

@@ -125,7 +125,10 @@ describe('MySQL Adapter', () => {
         return true;
       });
 
-      assert.deepEqual(errors, [['[Seq]', "Column 'token' cannot be null"]]);
+      assert.equal(errors.length, 1);
+      assert.equal(errors[0][1], 'INSERT INTO `sessions` () VALUES ()');
+      assert.match(errors[0][3], /type:sql/);
+      assert.match(errors[0][3], /Column token cannot be null/);
     });
 
     it('is exported from the public entrypoint', async () => {

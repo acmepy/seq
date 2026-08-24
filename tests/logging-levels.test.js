@@ -181,4 +181,74 @@ describe('Logging levels', () => {
     assert.ok(calls.some(args => args[1]?.startsWith?.('SELECT')));
     assert.ok(calls.every(args => !String(args[2] || '').includes('sql:')));
   });
+
+  it('logs SQL and model-operation durations through the active adapter', async () => {
+    const trace = [];
+    const errors = [];
+
+    class TimedUser extends Model {}
+    TimedUser.init(
+      { id: { type: DataTypes.INTEGER, primaryKey: true, autoIncrement: true }, name: { type: DataTypes.STRING(100), allowNull: false, unique: true } },
+      { modelName: 'TimedUser', tableName: testTable('timed_users'), timestamps: false }
+    );
+
+    const context = await createTestContext({
+      models: [TimedUser],
+      logging: { info: false, trace: (...args) => trace.push(args), warn: false, error: (...args) => errors.push(args) },
+      slowQueryMs: Number.MAX_VALUE,
+      slowOperationMs: Number.MAX_VALUE
+    });
+
+    try {
+      await context.seq.sync();
+      trace.length = 0;
+      await TimedUser.create({ name: 'Ana' });
+
+      const sqlLog = trace.find(args => args[1]?.startsWith?.('INSERT INTO'));
+      assert.ok(sqlLog, 'expected INSERT SQL trace');
+      assert.match(sqlLog[3], /type:sql/);
+      assert.match(sqlLog[3], /sqlDurationMs:/);
+
+      const operationLog = trace.find(args => args[1] === 'TimedUser.create');
+      assert.ok(operationLog, 'expected create operation trace');
+      assert.match(operationLog[2], /type:model-operation/);
+      assert.match(operationLog[2], /operation:create/);
+      assert.match(operationLog[2], /model:TimedUser/);
+      assert.match(operationLog[2], /operationDurationMs:/);
+
+      await assert.rejects(() => TimedUser.create({ name: 'Ana' }));
+      assert.ok(errors.some(args => args[1]?.startsWith?.('INSERT INTO') && /type:sql/.test(args[3]) && /error:/.test(args[3])));
+      assert.ok(errors.some(args => args[1] === 'TimedUser.create' && /type:model-operation/.test(args[2]) && /error:/.test(args[2])));
+    } finally {
+      await cleanupTestContext(context);
+    }
+  });
+
+  it('promotes slow SQL and model operations to warn', async () => {
+    const warn = [];
+
+    class SlowUser extends Model {}
+    SlowUser.init(
+      { id: { type: DataTypes.INTEGER, primaryKey: true, autoIncrement: true }, name: { type: DataTypes.STRING(100), allowNull: false } },
+      { modelName: 'SlowUser', tableName: testTable('slow_users'), timestamps: false }
+    );
+
+    const context = await createTestContext({
+      models: [SlowUser],
+      logging: { info: false, trace: false, warn: (...args) => warn.push(args), error: false },
+      slowQueryMs: 0,
+      slowOperationMs: 0
+    });
+
+    try {
+      await context.seq.sync();
+      warn.length = 0;
+      await SlowUser.create({ name: 'Ana' });
+
+      assert.ok(warn.some(args => args[1]?.startsWith?.('INSERT INTO') && /type:sql/.test(args[3])));
+      assert.ok(warn.some(args => args[1] === 'SlowUser.create' && /type:model-operation/.test(args[2])));
+    } finally {
+      await cleanupTestContext(context);
+    }
+  });
 });

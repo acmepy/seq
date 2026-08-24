@@ -115,7 +115,9 @@ test('Oracle adapters', async t => {
       return true;
     });
 
-    assert.deepEqual(errors, [['[Seq]', 'ORA-01400: cannot insert NULL into ("SESSIONS"."TOKEN")']]);
+    assert.equal(errors.length, 1);
+    assert.equal(errors[0][1], 'INSERT INTO "SESSIONS" ("TOKEN") VALUES (?)');
+    assert.match(errors[0][3], /ORA-01400/);
   });
 
   await t.test('Oracle 11 uses ROWNUM pagination and Oracle 12 extends it with OFFSET/FETCH', () => {

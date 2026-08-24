@@ -184,7 +184,8 @@ export class DDLAbstract extends BaseAbstract {
         const value = typeof colDef.defaultValue === 'function' ? colDef.defaultValue() : colDef.defaultValue;
         constraints.push(`DEFAULT ${this._formatDefaultValue(value)}`);
       }
-      this._adapter._db.prepare(`ALTER TABLE ${this._q(tableName)} ADD COLUMN ${this._q(columnName)} ${colType}${constraints.length ? ` ${constraints.join(' ')}` : ''}`).run();
+      const sql = `ALTER TABLE ${this._q(tableName)} ADD COLUMN ${this._q(columnName)} ${colType}${constraints.length ? ` ${constraints.join(' ')}` : ''}`;
+      this._measureSql(sql, [], () => this._adapter._db.prepare(sql).run());
       schema.columns[name] = colDef;
       schema.attrToColumn[name] = columnName;
       schema.columnToAttr[columnName] = name;
@@ -213,7 +214,7 @@ export class DDLAbstract extends BaseAbstract {
     const schema = this._adapter.schemas.get(tableName);
     const cols = constraint.columns.map(c => this._q(c)).join(', ');
     const sql = `CREATE UNIQUE INDEX ${this._q(constraint.constraintName)} ON ${this._q(tableName)} (${cols})`;
-    this._adapter._db.prepare(sql).run();
+    this._measureSql(sql, [], () => this._adapter._db.prepare(sql).run());
     schema.uniqueConstraints.push({ ...constraint });
   }
 
@@ -228,7 +229,7 @@ export class DDLAbstract extends BaseAbstract {
     const cols = index.columns.map(c => this._q(c)).join(', ');
     const unique = index.unique ? 'UNIQUE ' : '';
     const sql = `CREATE ${unique}INDEX ${this._q(index.name)} ON ${this._q(tableName)} (${cols})`;
-    this._adapter._db.prepare(sql).run();
+    this._measureSql(sql, [], () => this._adapter._db.prepare(sql).run());
     schema.indexes.push({ ...index });
   }
 
@@ -241,7 +242,7 @@ export class DDLAbstract extends BaseAbstract {
     //this._log('DDL.addForeignKey', tableName, fk.constraintName);
     if (this._adapter.fkStrategy === 'alter'){
       const sql = `ALTER TABLE ${this._q(tableName)} ADD CONSTRAINT ${this._q(fk.constraintName)} FOREIGN KEY (${this._q(fk.columnName)}) REFERENCES ${this._q(fk.references.table)} (${this._q(fk.references.column)}) ON DELETE ${fk.onDelete || 'RESTRICT'} ON UPDATE ${fk.onUpdate || 'RESTRICT'}`;
-      this._adapter._db.prepare(sql).run();
+      this._measureSql(sql, [], () => this._adapter._db.prepare(sql).run());
     }
     const schema = this._adapter.schemas.get(tableName);
     schema.foreignKeys.push({ ...fk });

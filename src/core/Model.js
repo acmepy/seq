@@ -250,6 +250,32 @@ export class Model {
     this.seq?._log(...args);
   }
 
+  static async _measureOperation(operation, execute) {
+    const startedAt = performance.now();
+    try {
+      const result = await execute();
+      const operationDurationMs = performance.now() - startedAt;
+      const level = this.seq?._isSlowOperation(operationDurationMs) ? 'warn' : 'trace';
+      this._log(level, `${this.modelName}.${operation}`, {
+        type: 'model-operation',
+        operation,
+        model: this.modelName,
+        operationDurationMs
+      });
+      return result;
+    } catch (error) {
+      const operationDurationMs = performance.now() - startedAt;
+      this._log('error', `${this.modelName}.${operation}`, {
+        type: 'model-operation',
+        operation,
+        model: this.modelName,
+        operationDurationMs,
+        error: { name: error.name, message: error.message, code: error.code }
+      });
+      throw error;
+    }
+  }
+
   /**
    * Registers a model hook.
    * @param {string} name
@@ -893,4 +919,33 @@ export class Model {
     await Ctor.destroy({ ...options, where, hooks: false });
     if (options.hooks !== false) await Ctor._runHooks('afterDestroy', this, options);
   }
+}
+
+const measuredStaticOperations = [
+  'create', 'bulkCreate', 'upsert', 'findByPk', 'findOrCreate', 'findOne',
+  'findAll', 'count', 'findAndCountAll', 'update', 'destroy', 'truncate'
+];
+
+for (const operation of measuredStaticOperations) {
+  const original = Model[operation];
+  Object.defineProperty(Model, operation, {
+    configurable: true,
+    writable: true,
+    value: function (...args) {
+      return this._measureOperation(operation, () => original.apply(this, args));
+    }
+  });
+}
+
+const measuredInstanceOperations = ['save', 'update', 'destroy'];
+
+for (const operation of measuredInstanceOperations) {
+  const original = Model.prototype[operation];
+  Object.defineProperty(Model.prototype, operation, {
+    configurable: true,
+    writable: true,
+    value: function (...args) {
+      return this.constructor._measureOperation(`instance.${operation}`, () => original.apply(this, args));
+    }
+  });
 }

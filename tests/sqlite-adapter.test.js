@@ -358,7 +358,8 @@ describe('SQLite Adapter', () => {
 
       assert.equal(errors.length, 1);
       assert.equal(errors[0][0], '[Seq]');
-      assert.match(errors[0][1], /NOT NULL constraint failed/);
+      assert.equal(errors[0][1], 'INSERT INTO users (name) VALUES (?)');
+      assert.match(errors[0][3], /NOT NULL constraint failed/);
     });
   });
 

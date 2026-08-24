@@ -6,13 +6,23 @@ export class Oracle11DDL extends DDLAbstract {
   _connection() { return this._adapter._connection(); }
   _oracleSql(sql) { let index = 0; return sql.replaceAll('?', () => `:${++index}`); }
   async _execute(sql, params = []) {
-    try { 
-      return await this._adapter._withConnection(connection => connection.execute(this._oracleSql(sql), params, { autoCommit: !this._adapter._activeTransaction })); 
-    }catch (error) { 
-      throw Oracle11Error.from(error); 
-    }
+    return this._measureSql(sql, params, async () => {
+      try {
+        return await this._adapter._withConnection(connection => connection.execute(this._oracleSql(sql), params, { autoCommit: !this._adapter._activeTransaction }));
+      } catch (error) {
+        throw Oracle11Error.from(error);
+      }
+    });
   }
-  async _executeQueryAll(sql, params = []) { return this._adapter._withConnection(async connection => (await connection.execute(this._oracleSql(sql), params, { outFormat: this._adapter._client.OUT_FORMAT_OBJECT })).rows || []); }
+  async _executeQueryAll(sql, params = []) {
+    return this._measureSql(sql, params, async () => {
+      try {
+        return await this._adapter._withConnection(async connection => (await connection.execute(this._oracleSql(sql), params, { outFormat: this._adapter._client.OUT_FORMAT_OBJECT })).rows || []);
+      } catch (error) {
+        throw Oracle11Error.from(error);
+      }
+    });
+  }
   async _executeGet(sql, params = []) { return (await this._executeQueryAll(sql, params))[0] || null; }
   _usesSequenceForAutoIncrement() { return true; }
 

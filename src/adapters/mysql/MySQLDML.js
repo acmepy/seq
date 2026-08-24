@@ -12,15 +12,14 @@ export class MySQLDML extends DMLAbstract {
   }
 
   async _executeQueryAll(sql, params = []) {
-    this._log('trace', sql, params);
-    try {
-      const [rows] = await this._connection().execute(sql, params);
-      return rows;
-    } catch (error) {
-      const mysqlError = MySQLError.from(error);
-      this._log('error', mysqlError.message);
-      throw mysqlError;
-    }
+    return this._measureSql(sql, params, async () => {
+      try {
+        const [rows] = await this._connection().execute(sql, params);
+        return rows;
+      } catch (error) {
+        throw MySQLError.from(error);
+      }
+    });
   }
 
   async _executeGet(sql, params = []) {
@@ -29,18 +28,17 @@ export class MySQLDML extends DMLAbstract {
   }
 
   async _execute(sql, params = []) {
-    this._log('trace', sql, params);
-    try {
-      const [result] = await this._connection().execute(sql, params);
-      return {
-        changes: result.affectedRows || 0,
-        lastInsertRowid: result.insertId || 0
-      };
-    } catch (error) {
-      const mysqlError = MySQLError.from(error);
-      this._log('error', mysqlError.message);
-      throw mysqlError;
-    }
+    return this._measureSql(sql, params, async () => {
+      try {
+        const [result] = await this._connection().execute(sql, params);
+        return {
+          changes: result.affectedRows || 0,
+          lastInsertRowid: result.insertId || 0
+        };
+      } catch (error) {
+        throw MySQLError.from(error);
+      }
+    });
   }
 
   _buildLimitOffset(options) {

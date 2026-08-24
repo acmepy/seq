@@ -11,8 +11,7 @@ export class SQLiteDDL extends DDLAbstract {
   }
 
   async _execute(sql, params = []) {
-    this._log('trace', sql.replaceAll('\n  ', ' '), params);
-    this._db().prepare(sql).run(...params);
+    return this._measureSql(sql.replaceAll('\n  ', ' '), params, () => this._db().prepare(sql).run(...params));
   }
 
   async createTableStructure(def) {
@@ -69,19 +68,22 @@ export class SQLiteDDL extends DDLAbstract {
   }
 
   async hasTable(tableName) {
-    const row = this._db().prepare("SELECT name FROM sqlite_master WHERE type='table' AND name=?").get(tableName);
+    const sql = "SELECT name FROM sqlite_master WHERE type='table' AND name=?";
+    const row = this._measureSql(sql, [tableName], () => this._db().prepare(sql).get(tableName));
     return !!row;
   }
 
   async describeTable(tableName) {
     if (!(await this.hasTable(tableName))) throw new AdapterError(`Table "${tableName}" does not exist`, { code: 'SEQ_ADAPTER_TABLE_NOT_FOUND' });
-    const rows = this._db().prepare(`PRAGMA table_info(${this._q(tableName)})`).all();
+    const sql = `PRAGMA table_info(${this._q(tableName)})`;
+    const rows = this._measureSql(sql, [], () => this._db().prepare(sql).all());
     return { tableName, columns: rows.map(row => ({ name: row.name, type: row.type, allowNull: !row.notnull, primaryKey: !!row.pk, defaultValue: row.dflt_value })) };
   }
 
   introspectDefinition(definition) {
     const def = this.normalizeDefinition(definition);
-    const tableInfo = this._db().prepare(`PRAGMA table_info(${this._q(def.tableName)})`).all();
+    const tableInfoSql = `PRAGMA table_info(${this._q(def.tableName)})`;
+    const tableInfo = this._measureSql(tableInfoSql, [], () => this._db().prepare(tableInfoSql).all());
     const physicalColumnNames = tableInfo.map(row => row.name);
     const physicalColumns = new Map(physicalColumnNames.map(name => [name.toLowerCase(), name]));
     const columns = {};
@@ -100,12 +102,14 @@ export class SQLiteDDL extends DDLAbstract {
       columnToAttr[physicalColumnName] = attrName;
     }
 
-    const indexRows = this._db().prepare(`PRAGMA index_list(${this._q(def.tableName)})`).all();
+    const indexSql = `PRAGMA index_list(${this._q(def.tableName)})`;
+    const indexRows = this._measureSql(indexSql, [], () => this._db().prepare(indexSql).all());
     const existingIndexNames = new Set(indexRows.map(row => row.name));
     const uniqueConstraints = def.uniqueConstraints.filter(item => existingIndexNames.has(item.constraintName));
     const indexes = def.indexes.filter(item => existingIndexNames.has(item.name));
 
-    const physicalFKs = this._db().prepare(`PRAGMA foreign_key_list(${this._q(def.tableName)})`).all();
+    const foreignKeySql = `PRAGMA foreign_key_list(${this._q(def.tableName)})`;
+    const physicalFKs = this._measureSql(foreignKeySql, [], () => this._db().prepare(foreignKeySql).all());
     const foreignKeys = def.foreignKeys.filter(fk => physicalFKs.some(row =>
       row.from === fk.columnName && row.table === fk.references.table && row.to === fk.references.column
     ));
@@ -114,7 +118,8 @@ export class SQLiteDDL extends DDLAbstract {
   }
 
   async listTables() {
-    const rows = this._db().prepare("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'").all();
+    const sql = "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'";
+    const rows = this._measureSql(sql, [], () => this._db().prepare(sql).all());
     return rows.map(r => r.name);
   }
 

@@ -12,13 +12,14 @@ export class MySQLDDL extends DDLAbstract {
   }
 
   async _execute(sql, params = []) {
-    this._log('trace', sql.replaceAll('\n  ', ' '), params);
-    try {
-      const [result] = await this._connection().execute(sql, params);
-      return result;
-    } catch (error) {
-      throw MySQLError.from(error);
-    }
+    return this._measureSql(sql.replaceAll('\n  ', ' '), params, async () => {
+      try {
+        const [result] = await this._connection().execute(sql, params);
+        return result;
+      } catch (error) {
+        throw MySQLError.from(error);
+      }
+    });
   }
 
   async createTableStructure(def) {
@@ -201,9 +202,14 @@ export class MySQLDDL extends DDLAbstract {
   }
 
   async _executeQueryAll(sql, params = []) {
-    this._log('trace', sql, params);
-    const [rows] = await this._connection().execute(sql, params);
-    return rows;
+    return this._measureSql(sql, params, async () => {
+      try {
+        const [rows] = await this._connection().execute(sql, params);
+        return rows;
+      } catch (error) {
+        throw MySQLError.from(error);
+      }
+    });
   }
 
   async _executeGet(sql, params = []) {

@@ -15,6 +15,8 @@ export class Seq {
     this._adapter = options.adapter;
     this._adapter._seq = this;
     this._logging = this._normalizeLogging(options.logging);
+    this._slowQueryMs = this._normalizeSlowThreshold(options.slowQueryMs, 'slowQueryMs');
+    this._slowOperationMs = this._normalizeSlowThreshold(options.slowOperationMs, 'slowOperationMs');
     this._define = options.define || {};
     this._registry = new ModelRegistry();
     this._initialized = false;
@@ -29,6 +31,22 @@ export class Seq {
    */
   get adapter() {
     return this._adapter;
+  }
+
+  _normalizeSlowThreshold(value, name) {
+    if (value === undefined) return 1000;
+    if (typeof value !== 'number' || !Number.isFinite(value) || value < 0) {
+      throw new ConfigurationError(`${name} must be a non-negative finite number`, { code: 'SEQ_INVALID_SLOW_THRESHOLD' });
+    }
+    return value;
+  }
+
+  _isSlowQuery(durationMs) {
+    return durationMs >= this._slowQueryMs;
+  }
+
+  _isSlowOperation(durationMs) {
+    return durationMs >= this._slowOperationMs;
   }
 
   /**

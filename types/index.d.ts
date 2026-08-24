@@ -122,6 +122,10 @@ export interface SeqOptions {
   adapter: BaseAdapter;
   models?: ModelStatic[];
   logging?: boolean | Logger;
+  /** Milliseconds after which a SQL log is emitted as warn instead of trace. Defaults to 1000. */
+  slowQueryMs?: number;
+  /** Milliseconds after which a model-operation log is emitted as warn instead of trace. Defaults to 1000. */
+  slowOperationMs?: number;
   define?: ModelOptions;
 }
 
