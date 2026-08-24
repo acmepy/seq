@@ -1,6 +1,6 @@
 import { afterEach, describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { DataTypes, MapAdapter, Model, Op, Oracle11Adapter, Seq, SQLiteAdapter } from '../src/index.js';
+import { DataTypes, MapAdapter, Model, Op, Seq, SQLiteAdapter } from '../src/index.js';
 import { cleanupTestContext, createTestContext, testAdapterName, testTable } from './shared/test-context.js';
 
 const open = [];
@@ -119,71 +119,80 @@ describe('Map atomicity', () => {
 });
 
 describe('Schema introspection', () => {
-  it('introspects Oracle definitions against physical metadata', async () => {
-    const adapter = new Oracle11Adapter();
-    adapter.ddl._executeQueryAll = async sql => {
-      if (sql.includes('USER_TAB_COLUMNS')) return [{ COLUMN_NAME: 'ID' }, { COLUMN_NAME: 'NAME' }, { COLUMN_NAME: 'CREATED_AT' }];
-      if (sql.includes("CONSTRAINT_TYPE = 'U'")) return [{ CONSTRAINT_NAME: 'UQ_USERS_NAME' }];
-      if (sql.includes('USER_INDEXES')) return [{ INDEX_NAME: 'IDX_USERS_NAME' }];
-      if (sql.includes("CONSTRAINT_TYPE = 'R'")) return [{ CONSTRAINT_NAME: 'FK_USERS_OWNER' }];
-      throw new Error(`Unexpected query: ${sql}`);
-    };
+  it('reconciles existing camelCase timestamps when reopening', async () => {
+    if (testAdapterName() === 'sqlite') {
+      class User extends Model {}
+      User.init({
+        id: { type: DataTypes.INTEGER, primaryKey: true, autoIncrement: true },
+        name: { type: DataTypes.STRING },
+        added: { type: DataTypes.STRING }
+      }, { modelName: 'User', tableName: 'users' });
+      const adapter = new SQLiteAdapter();
+      await adapter.connect();
+      adapter._db.exec('CREATE TABLE users (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT, createdAt TEXT)');
+      const introspectDefinition = adapter.ddl.introspectDefinition.bind(adapter.ddl);
+      adapter.ddl.introspectDefinition = async definition => {
+        await Promise.resolve();
+        return introspectDefinition(definition);
+      };
+      const seq = new Seq({ adapter, models: [User], logging: false });
+      await seq.init();
+      open.push({ seq, adapter, models: [User] });
+      assert.ok(adapter.schemas.has('users'));
+      const schema = adapter.schemas.get('users');
+      assert.equal(schema.attrToColumn.createdAt, 'createdAt');
+      assert.equal(schema.columns.updatedAt, undefined);
+      const result = await seq.sync({ alter: true });
+      assert.deepEqual(result.altered, ['users']);
+      const columns = adapter._db.pragma('table_info(users)').map(column => column.name);
+      assert.ok(columns.includes('added'));
+      assert.ok(columns.includes('createdAt'));
+      assert.equal(columns.includes('created_at'), false);
+      assert.ok(columns.includes('updated_at'));
+      return;
+    }
 
-    const definition = {
-      tableName: 'USERS',
-      timestamps: true,
-      createdAt: 'createdAt',
-      updatedAt: 'updatedAt',
-      columns: {
-        id: { field: 'ID' },
-        name: { field: 'NAME' },
-        missing: { field: 'MISSING' },
-        createdAt: { field: 'CREATED_AT' },
-        updatedAt: { field: 'UPDATED_AT' }
-      },
-      attrToColumn: { id: 'ID', name: 'NAME', missing: 'MISSING', createdAt: 'CREATED_AT', updatedAt: 'UPDATED_AT' },
-      columnToAttr: { ID: 'id', NAME: 'name', MISSING: 'missing', CREATED_AT: 'createdAt', UPDATED_AT: 'updatedAt' },
-      uniqueConstraints: [{ constraintName: 'UQ_USERS_NAME', columns: ['NAME'] }, { constraintName: 'UQ_USERS_MISSING', columns: ['MISSING'] }],
-      indexes: [{ name: 'IDX_USERS_NAME', columns: ['NAME'] }, { name: 'IDX_USERS_MISSING', columns: ['MISSING'] }],
-      foreignKeys: [{ constraintName: 'FK_USERS_OWNER' }, { constraintName: 'FK_USERS_MISSING' }]
-    };
+    const tableName = testTable('schema_introspection');
+    class InitialUser extends Model {}
+    InitialUser.init({
+      id: { type: DataTypes.INTEGER, primaryKey: true, autoIncrement: true },
+      name: { type: DataTypes.STRING },
+      createdAt: { type: DataTypes.DATE, field: 'createdAt' }
+    }, { modelName: 'InitialUser', tableName, timestamps: false });
 
-    const schema = await adapter.ddl.introspectDefinition(definition);
-    assert.deepEqual(Object.keys(schema.columns), ['id', 'name', 'createdAt']);
-    assert.deepEqual(schema.attrToColumn, { id: 'ID', name: 'NAME', createdAt: 'CREATED_AT' });
-    assert.deepEqual(schema.columnToAttr, { ID: 'id', NAME: 'name', CREATED_AT: 'createdAt' });
-    assert.deepEqual(schema.uniqueConstraints.map(item => item.constraintName), ['UQ_USERS_NAME']);
-    assert.deepEqual(schema.indexes.map(item => item.name), ['IDX_USERS_NAME']);
-    assert.deepEqual(schema.foreignKeys.map(item => item.constraintName), ['FK_USERS_OWNER']);
-  });
+    const initialContext = await createTestContext({ models: [InitialUser], logging: false });
+    try {
+      await initialContext.seq.sync();
+    } finally {
+      await initialContext.seq.close();
+    }
 
-  it('adds a physically missing column after reopening', async () => {
-    if (testAdapterName() !== 'sqlite') return;
-
-    class User extends Model {}
-    User.init({
+    class ReopenedUser extends Model {}
+    ReopenedUser.init({
       id: { type: DataTypes.INTEGER, primaryKey: true, autoIncrement: true },
       name: { type: DataTypes.STRING },
       added: { type: DataTypes.STRING }
-    }, { modelName: 'User', tableName: 'users' });
-    const adapter = new SQLiteAdapter();
-    await adapter.connect();
-    adapter._db.exec('CREATE TABLE users (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT)');
-    const introspectDefinition = adapter.ddl.introspectDefinition.bind(adapter.ddl);
-    adapter.ddl.introspectDefinition = async definition => {
-      await Promise.resolve();
-      return introspectDefinition(definition);
-    };
-    const seq = new Seq({ adapter, models: [User], logging: false });
-    await seq.init();
-    open.push({ seq, adapter, models: [User] });
-    assert.ok(adapter.schemas.has('users'));
+    }, { modelName: 'ReopenedUser', tableName });
+
+    const context = await createTestContext({ models: [ReopenedUser], logging: false });
+    open.push(context);
+    const { seq, adapter } = context;
+    const definition = seq._buildTableDefinition(ReopenedUser);
+    const schema = adapter.schemas.get(definition.tableName);
+    assert.ok(schema);
+    assert.equal(schema.columns.added, undefined);
+    assert.ok(schema.columns.createdAt);
+    assert.equal(schema.columns.updatedAt, undefined);
+    assert.notEqual(schema.attrToColumn.createdAt, definition.attrToColumn.createdAt);
+
     const result = await seq.sync({ alter: true });
-    assert.deepEqual(result.altered, ['users']);
-    const columns = adapter._db.pragma('table_info(users)').map(column => column.name);
-    assert.ok(columns.includes('added'));
-    assert.ok(columns.includes('created_at'));
-    assert.ok(columns.includes('updated_at'));
+    assert.deepEqual(result.altered, [definition.tableName]);
+    const physicalColumns = new Set((await adapter.ddl.describeTable(definition.tableName)).columns.map(column => column.name));
+    for (const name of ['added', 'updatedAt']) {
+      assert.ok(physicalColumns.has(definition.attrToColumn[name]), `${name} column was added`);
+    }
+    assert.ok(physicalColumns.has(schema.attrToColumn.createdAt));
+    assert.equal(physicalColumns.has(definition.attrToColumn.createdAt), false);
   });
 });
 

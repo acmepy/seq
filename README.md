@@ -856,6 +856,9 @@ Codigos comunes:
 
 ```bash
 npm test
+npm run test:mysql
+npm run test:oracle11
+npm run test:oracle12
 npm run test:watch
 npm run test:coverage
 npm run lint
@@ -871,6 +874,10 @@ npm run examples
 ```
 
 `npm run examples` ejecuta la cadena completa de ejemplos.
+
+### Pruebas entre adaptadores
+
+Las pruebas de comportamiento común deben ejecutarse con todos los adaptadores SQL: SQLite mediante `npm test`, MySQL mediante `npm run test:mysql`, y Oracle mediante `npm run test:oracle11` y `npm run test:oracle12`. Estas pruebas deben usar el adaptador activo de la suite; las pruebas exclusivas de un motor se reservan para sintaxis SQL o capacidades propias de ese motor.
 
 ## Estructura
 

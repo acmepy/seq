@@ -5,6 +5,7 @@ process.env.SEQ_TEST_ADAPTER = 'mysql';
 await import('./adapter-mysql.test.js');
 await import('../data-types.test.js');
 await import('../associations.test.js');
+await import('../cache.test.js');
 await import('../ddl-phases.test.js');
 await import('../hardening.test.js');
 await import('../hooks.test.js');

@@ -7,6 +7,7 @@ if (!['oracle11', 'oracle12'].includes(process.env.SEQ_TEST_ADAPTER)) {
 await import('./adapter-oracle.test.js');
 await import('../data-types.test.js');
 await import('../associations.test.js');
+await import('../cache.test.js');
 await import('../ddl-phases.test.js');
 await import('../hardening.test.js');
 await import('../hooks.test.js');

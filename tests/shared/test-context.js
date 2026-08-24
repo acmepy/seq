@@ -20,9 +20,9 @@ export function quoteTestIdentifier(name) {
     : `"${name.replaceAll('"', '""')}"`;
 }
 
-export async function createTestContext({ models = [], logging = false, adapterOptions = {} } = {}) {
+export async function createTestContext({ models = [], logging = false, adapterOptions = {}, ...seqOptions } = {}) {
   const adapter = createTestAdapter(adapterOptions);
-  const seq = new Seq({ adapter, models, logging });
+  const seq = new Seq({ adapter, models, logging, ...seqOptions });
   await seq.init();
   return { adapter, seq, models };
 }

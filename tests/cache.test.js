@@ -1,22 +1,37 @@
 import { test, describe, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert';
-import { Seq } from '../src/core/Seq.js';
 import { Model } from '../src/core/Model.js';
 import { DataTypes } from '../src/data-types/index.js';
-import { MapCacheAdapter } from '../src/cache/adapters/MapCacheAdapter.js';
-import { MapAdapter } from '../src/adapters/map/MapAdapter.js';
-
-class User extends Model {}
+import { cleanupTestContext, createTestContext, testTable } from './shared/test-context.js';
 
 describe('Cache System Integration', () => {
   let seq;
+  let context;
+  let User;
   let cacheMisses = 0;
   
   beforeEach(async () => {
     cacheMisses = 0;
 
-    // Use a custom memory adapter or existing one to track queries
-    const adapter = new MapAdapter();
+    class CacheUser extends Model {}
+    CacheUser.init({
+      id: { type: DataTypes.INTEGER, primaryKey: true, autoIncrement: true },
+      name: { type: DataTypes.STRING },
+      active: { type: DataTypes.BOOLEAN }
+    }, { modelName: 'users', tableName: testTable('cache_users'), timestamps: false });
+    User = CacheUser;
+
+    context = await createTestContext({
+      models: [User],
+      logging: false,
+      cache: {
+        ttl: 60000,
+        users: { ttl: 5000 },
+        roles: false
+      }
+    });
+    seq = context.seq;
+    const adapter = context.adapter;
     const originalSelectAll = adapter.dml.selectAll.bind(adapter.dml);
     adapter.dml.selectAll = async (...args) => {
       cacheMisses++;
@@ -29,28 +44,14 @@ describe('Cache System Integration', () => {
       return originalCount(...args);
     };
 
-    seq = new Seq({
-      adapter,
-      cache: {
-        ttl: 60000,
-        users: { ttl: 5000 },
-        roles: false
-      },
-      models: [User]
-    });
-
-    User.init({
-      id: { type: DataTypes.INTEGER, primaryKey: true, autoIncrement: true },
-      name: { type: DataTypes.STRING },
-      active: { type: DataTypes.BOOLEAN }
-    }, { seq, modelName: 'users' });
-
-    await seq.init();
     await seq.sync({ force: true });
   });
 
   afterEach(async () => {
-    await seq.close();
+    await cleanupTestContext(context);
+    context = null;
+    seq = null;
+    User = null;
   });
 
   test('findAll cache hit', async () => {
@@ -122,7 +123,7 @@ describe('Cache System Integration', () => {
     class Role extends Model {}
     Role.init({
       id: { type: DataTypes.INTEGER, primaryKey: true }
-    }, { seq, modelName: 'roles' });
+    }, { seq, modelName: 'roles', tableName: testTable('cache_roles'), timestamps: false });
     seq.registerModel(Role);
     await seq.sync();
 
@@ -143,24 +144,29 @@ describe('Cache System Integration', () => {
 
     // Create invalidates
     await User.create({ name: 'Frank' });
+    let missesBeforeRead = cacheMisses;
     await User.findAll();
-    assert.strictEqual(cacheMisses, 2); // Miss, invalidated
+    assert.strictEqual(cacheMisses, missesBeforeRead + 1); // Miss, invalidated
 
     // Update invalidates
+    const missesAfterRead = cacheMisses;
     await User.findAll();
-    assert.strictEqual(cacheMisses, 2); // Hit
+    assert.strictEqual(cacheMisses, missesAfterRead); // Hit
     
     await User.update({ name: 'Frank2' }, { where: { name: 'Frank' } });
+    missesBeforeRead = cacheMisses;
     await User.findAll();
-    assert.strictEqual(cacheMisses, 3); // Miss, invalidated
+    assert.strictEqual(cacheMisses, missesBeforeRead + 1); // Miss, invalidated
 
     // Destroy invalidates
+    const missesAfterUpdateRead = cacheMisses;
     await User.findAll();
-    assert.strictEqual(cacheMisses, 3); // Hit
+    assert.strictEqual(cacheMisses, missesAfterUpdateRead); // Hit
     
     await User.destroy({ where: { name: 'Eve' } });
+    missesBeforeRead = cacheMisses;
     await User.findAll();
-    assert.strictEqual(cacheMisses, 4); // Miss, invalidated
+    assert.strictEqual(cacheMisses, missesBeforeRead + 1); // Miss, invalidated
   });
 
   test('stable hash independent of property order', async () => {

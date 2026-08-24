@@ -651,5 +651,29 @@ describe('Naming Conventions', () => {
       const all = await OrderItem.findAll();
       assert.equal(all.length, 1);
     });
+
+    it('maps convention-applied columns against the active adapter', async () => {
+      class UserProfile extends Model {
+        static define(seq) {
+          this.init({
+            id: { type: DataTypes.INTEGER, primaryKey: true, autoIncrement: true },
+            displayName: { type: DataTypes.STRING(100) }
+          }, { seq, modelName: 'UserProfile', tableName: testTable('naming_columns'), timestamps: false });
+        }
+      }
+
+      const context = await createTestContext({ models: [UserProfile] });
+      const { adapter, seq } = context;
+      open.push(context);
+      await seq.sync();
+
+      const definition = seq._buildTableDefinition(UserProfile);
+      const physicalColumns = new Set((await adapter.ddl.describeTable(definition.tableName)).columns.map(column => column.name));
+      assert.ok(physicalColumns.has(definition.attrToColumn.displayName));
+
+      await UserProfile.create({ displayName: 'Ana' });
+      const record = await UserProfile.findByPk(1);
+      assert.equal(record.getDataValue('displayName'), 'Ana');
+    });
   });
 });

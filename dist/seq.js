@@ -5550,16 +5550,22 @@ class SQLiteDDL extends DDLAbstract {
   introspectDefinition(definition) {
     const def = this.normalizeDefinition(definition);
     const tableInfo = this._db().prepare(`PRAGMA table_info(${this._q(def.tableName)})`).all();
-    const physicalColumns = new Set(tableInfo.map(row => row.name));
+    const physicalColumnNames = tableInfo.map(row => row.name);
+    const physicalColumns = new Map(physicalColumnNames.map(name => [name.toLowerCase(), name]));
     const columns = {};
     const attrToColumn = {};
     const columnToAttr = {};
     for (const [attrName, colDef] of Object.entries(def.columns)) {
       const columnName = colDef.field || def.attrToColumn[attrName] || attrName;
-      if (!physicalColumns.has(columnName)) continue;
-      columns[attrName] = colDef;
-      attrToColumn[attrName] = columnName;
-      columnToAttr[columnName] = attrName;
+      let physicalColumnName = physicalColumns.get(columnName.toLowerCase());
+      if (!physicalColumnName && def.timestamps && (attrName === def.createdAt || attrName === def.updatedAt)) {
+        const normalizedTimestampName = columnName.replaceAll('_', '').toLowerCase();
+        physicalColumnName = physicalColumnNames.find(name => name.replaceAll('_', '').toLowerCase() === normalizedTimestampName);
+      }
+      if (!physicalColumnName) continue;
+      columns[attrName] = { ...colDef, field: physicalColumnName };
+      attrToColumn[attrName] = physicalColumnName;
+      columnToAttr[physicalColumnName] = attrName;
     }
 
     const indexRows = this._db().prepare(`PRAGMA index_list(${this._q(def.tableName)})`).all();
@@ -6186,17 +6192,23 @@ class MySQLDDL extends DDLAbstract {
        WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ?`,
       [def.tableName]
     );
-    const physicalColumns = new Set(columnsInfo.map(row => row.COLUMN_NAME));
+    const physicalColumnNames = columnsInfo.map(row => row.COLUMN_NAME);
+    const physicalColumns = new Map(physicalColumnNames.map(name => [name.toLowerCase(), name]));
     const columns = {};
     const attrToColumn = {};
     const columnToAttr = {};
 
     for (const [attrName, colDef] of Object.entries(def.columns)) {
       const columnName = colDef.field || def.attrToColumn[attrName] || attrName;
-      if (!physicalColumns.has(columnName)) continue;
-      columns[attrName] = colDef;
-      attrToColumn[attrName] = columnName;
-      columnToAttr[columnName] = attrName;
+      let physicalColumnName = physicalColumns.get(columnName.toLowerCase());
+      if (!physicalColumnName && def.timestamps && (attrName === def.createdAt || attrName === def.updatedAt)) {
+        const normalizedTimestampName = columnName.replaceAll('_', '').toLowerCase();
+        physicalColumnName = physicalColumnNames.find(name => name.replaceAll('_', '').toLowerCase() === normalizedTimestampName);
+      }
+      if (!physicalColumnName) continue;
+      columns[attrName] = { ...colDef, field: physicalColumnName };
+      attrToColumn[attrName] = physicalColumnName;
+      columnToAttr[physicalColumnName] = attrName;
     }
 
     const indexRows = await this._executeQueryAll(
@@ -6719,17 +6731,23 @@ class Oracle11DDL extends DDLAbstract {
       'SELECT COLUMN_NAME FROM USER_TAB_COLUMNS WHERE TABLE_NAME = ?',
       [def.tableName]
     );
-    const physicalColumns = new Set(columnsInfo.map(row => row.COLUMN_NAME));
+    const physicalColumnNames = columnsInfo.map(row => row.COLUMN_NAME);
+    const physicalColumns = new Map(physicalColumnNames.map(name => [name.toLowerCase(), name]));
     const columns = {};
     const attrToColumn = {};
     const columnToAttr = {};
 
     for (const [attrName, colDef] of Object.entries(def.columns)) {
       const columnName = colDef.field || def.attrToColumn[attrName] || attrName;
-      if (!physicalColumns.has(columnName)) continue;
-      columns[attrName] = colDef;
-      attrToColumn[attrName] = columnName;
-      columnToAttr[columnName] = attrName;
+      let physicalColumnName = physicalColumns.get(columnName.toLowerCase());
+      if (!physicalColumnName && def.timestamps && (attrName === def.createdAt || attrName === def.updatedAt)) {
+        const normalizedTimestampName = columnName.replaceAll('_', '').toLowerCase();
+        physicalColumnName = physicalColumnNames.find(name => name.replaceAll('_', '').toLowerCase() === normalizedTimestampName);
+      }
+      if (!physicalColumnName) continue;
+      columns[attrName] = { ...colDef, field: physicalColumnName };
+      attrToColumn[attrName] = physicalColumnName;
+      columnToAttr[physicalColumnName] = attrName;
     }
 
     const uniqueRows = await this._executeQueryAll(
