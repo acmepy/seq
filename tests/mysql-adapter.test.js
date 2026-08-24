@@ -106,6 +106,28 @@ describe('MySQL Adapter', () => {
       assert.equal(user.getDataValue('balance'), 0);
     });
 
+    it('logs database execution errors through Seq before throwing', async () => {
+      const errors = [];
+      const mysql = new MySQLAdapter();
+      new Seq({
+        adapter: mysql,
+        logging: { info: false, error: (...args) => errors.push(args) }
+      });
+      mysql._pool = {
+        async execute() {
+          throw Object.assign(new Error("Column 'token' cannot be null"), { code: 'ER_BAD_NULL_ERROR' });
+        }
+      };
+
+      await assert.rejects(() => mysql.dml._execute('INSERT INTO `sessions` () VALUES ()'), error => {
+        assert.equal(error.name, 'MySQLError');
+        assert.equal(error.message, "Column 'token' cannot be null");
+        return true;
+      });
+
+      assert.deepEqual(errors, [['[Seq]', "Column 'token' cannot be null"]]);
+    });
+
     it('is exported from the public entrypoint', async () => {
       const mod = await import('../src/index.js');
 

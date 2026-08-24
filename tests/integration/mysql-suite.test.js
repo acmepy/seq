@@ -3,6 +3,7 @@ import 'dotenv/config';
 process.env.SEQ_TEST_ADAPTER = 'mysql';
 
 await import('./adapter-mysql.test.js');
+await import('../mysql-adapter.test.js');
 await import('../data-types.test.js');
 await import('../associations.test.js');
 await import('../cache.test.js');

@@ -346,6 +346,20 @@ describe('SQLite Adapter', () => {
         );
       });
     });
+
+    it('logs database execution errors through Seq before throwing', async () => {
+      const errors = [];
+      await withConstraintAdapter(async sqlite => {
+        new Seq({ adapter: sqlite, logging: { info: false, error: (...args) => errors.push(args) } });
+        sqlite.dml._execute('CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT NOT NULL)');
+
+        assert.throws(() => sqlite.dml._execute('INSERT INTO users (name) VALUES (?)', [null]));
+      });
+
+      assert.equal(errors.length, 1);
+      assert.equal(errors[0][0], '[Seq]');
+      assert.match(errors[0][1], /NOT NULL constraint failed/);
+    });
   });
 
   describe('DDL', () => {

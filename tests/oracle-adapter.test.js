@@ -99,6 +99,25 @@ test('Oracle adapters', async t => {
     assert.equal(def.attrToColumn.firstName, 'FIRST_NAME');
   });
 
+  await t.test('logs database execution errors through Seq before throwing', async () => {
+    const errors = [];
+    const adapter = new Oracle11Adapter();
+    new Seq({ adapter, logging: { info: false, error: (...args) => errors.push(args) } });
+    adapter._withConnection = async run => run({
+      async execute() {
+        throw Object.assign(new Error('ORA-01400: cannot insert NULL into ("SESSIONS"."TOKEN")'), { code: 'ORA-01400' });
+      }
+    });
+
+    await assert.rejects(() => adapter.dml._execute('INSERT INTO "SESSIONS" ("TOKEN") VALUES (?)', [null]), error => {
+      assert.equal(error.name, 'Oracle11Error');
+      assert.match(error.message, /ORA-01400/);
+      return true;
+    });
+
+    assert.deepEqual(errors, [['[Seq]', 'ORA-01400: cannot insert NULL into ("SESSIONS"."TOKEN")']]);
+  });
+
   await t.test('Oracle 11 uses ROWNUM pagination and Oracle 12 extends it with OFFSET/FETCH', () => {
     const oracle11 = new Oracle11Adapter();
     const oracle12 = new Oracle12Adapter();

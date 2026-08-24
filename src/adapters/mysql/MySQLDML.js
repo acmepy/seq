@@ -17,7 +17,9 @@ export class MySQLDML extends DMLAbstract {
       const [rows] = await this._connection().execute(sql, params);
       return rows;
     } catch (error) {
-      throw MySQLError.from(error);
+      const mysqlError = MySQLError.from(error);
+      this._log('error', mysqlError.message);
+      throw mysqlError;
     }
   }
 
@@ -35,7 +37,9 @@ export class MySQLDML extends DMLAbstract {
         lastInsertRowid: result.insertId || 0
       };
     } catch (error) {
-      throw MySQLError.from(error);
+      const mysqlError = MySQLError.from(error);
+      this._log('error', mysqlError.message);
+      throw mysqlError;
     }
   }
 

@@ -11,18 +11,32 @@ export class SQLiteDML extends DMLAbstract {
     return this._adapter._db;
   }
 
+  _throwLoggedError(error) {
+    const sqliteError = SQLiteError.from(error);
+    this._log('error', sqliteError.message);
+    throw sqliteError;
+  }
+
   // ---------------------------------------------------------------------------
   // Execution hooks — SQLite-specific
   // ---------------------------------------------------------------------------
 
   async _executeQueryAll(sql, params) {
     this._log('trace', sql, params);
-    return this._db().prepare(sql).all(...params);
+    try {
+      return this._db().prepare(sql).all(...params);
+    } catch (error) {
+      this._throwLoggedError(error);
+    }
   }
 
   async _executeGet(sql, params) {
     this._log('trace', sql, params);
-    return this._db().prepare(sql).get(...params);
+    try {
+      return this._db().prepare(sql).get(...params);
+    } catch (error) {
+      this._throwLoggedError(error);
+    }
   }
 
   _execute(sql, params = []) {
@@ -30,7 +44,7 @@ export class SQLiteDML extends DMLAbstract {
     try {
       return this._db().prepare(sql).run(...params);
     } catch (error) {
-      throw SQLiteError.from(error);
+      this._throwLoggedError(error);
     }
   }
 

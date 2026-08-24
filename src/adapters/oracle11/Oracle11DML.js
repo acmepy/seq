@@ -5,21 +5,20 @@ import { Oracle11Error } from './Oracle11Error.js';
 export class Oracle11DML extends DMLAbstract {
   _connection() { return this._adapter._connection(); }
   _tableWithAlias(tableName, alias) { return `${this._q(tableName)}${alias ? ` ${this._q(alias)}` : ''}`; }
+  _throwLoggedError(error) { const oracleError = Oracle11Error.from(error); this._log('error', oracleError.message); throw oracleError; }
 
   _oracleSql(sql) { let index = 0; return sql.replaceAll('?', () => `:${++index}`); }
   async _executeQueryAll(sql, params = []) {
     this._log('trace', sql, params);
     try { 
       return await this._adapter._withConnection(async connection => (await connection.execute(this._oracleSql(sql), params, { outFormat: this._adapter._client.OUT_FORMAT_OBJECT })).rows || []); 
-    }catch (error) { 
-      throw Oracle11Error.from(error); 
-    }
+    }catch (error) { this._throwLoggedError(error); }
   }
   async _executeGet(sql, params = []) { return (await this._executeQueryAll(sql, params))[0] || null; }
   async _execute(sql, params = []) {
     this._log('trace', sql, params);
     try { return await this._adapter._withConnection(async connection => { const result = await connection.execute(this._oracleSql(sql), params, { autoCommit: !this._adapter._activeTransaction }); return { changes: result.rowsAffected || 0 }; }); }
-    catch (error) { throw Oracle11Error.from(error); }
+    catch (error) { this._throwLoggedError(error); }
   }
 
   _applyLimitOffset(sql, options) {
@@ -66,7 +65,7 @@ export class Oracle11DML extends DMLAbstract {
     try {
       const result = await this._adapter._withConnection(connection => connection.execute(sql, bindParams, { autoCommit: !this._adapter._activeTransaction }));
       if (generatedPk) record[pk] = result.outBinds?.[0]?.[0] ?? result.outBinds?.[bindParams.length - 1]?.[0];
-    } catch (error) { throw Oracle11Error.from(error); }
+    } catch (error) { this._throwLoggedError(error); }
     return new model(this._toAttrNames(record, schema), { _isNew: false });
   }
 
