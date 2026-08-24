@@ -131,8 +131,9 @@ export class BaseAdapter {
   }
 
   resolveColumnName(def, attrName) {
-    const name = def.field? def.field : this.naming.columns ? initCap(attrName) : attrName;
-    return (truncateMiddle(applyCase(applyConvention(name, this.naming.columns), this.naming.caseStyle), this.naming.maxLength)).replace(/[^A-Za-z0-9_$#]+/g, '_');
+    const name = def.field || (this.naming.columns ? initCap(attrName) : attrName);
+    const convention = def.field ? null : this.naming.columns;
+    return (truncateMiddle(applyCase(applyConvention(name, convention), this.naming.caseStyle), this.naming.maxLength)).replace(/[^A-Za-z0-9_$#]+/g, '_');
   }
 
   uniqueConstraintName(tableName, columns) {

@@ -194,6 +194,62 @@ describe('Schema introspection', () => {
     assert.ok(physicalColumns.has(schema.attrToColumn.createdAt));
     assert.equal(physicalColumns.has(definition.attrToColumn.createdAt), false);
   });
+
+  it('adds missing timestamp columns when reopening', async () => {
+    if (testAdapterName() === 'sqlite') {
+      class User extends Model {}
+      User.init({
+        id: { type: DataTypes.INTEGER, primaryKey: true, autoIncrement: true },
+        name: { type: DataTypes.STRING }
+      }, { modelName: 'User', tableName: 'users_missing_timestamps' });
+      const adapter = new SQLiteAdapter();
+      await adapter.connect();
+      adapter._db.exec('CREATE TABLE users_missing_timestamps (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT)');
+      const seq = new Seq({ adapter, models: [User], logging: false });
+      await seq.init();
+      open.push({ seq, adapter, models: [User] });
+      const result = await seq.sync({ alter: true });
+      assert.deepEqual(result.altered, ['users_missing_timestamps']);
+      const columns = adapter._db.pragma('table_info(users_missing_timestamps)').map(column => column.name);
+      assert.ok(columns.includes('created_at'));
+      assert.ok(columns.includes('updated_at'));
+      return;
+    }
+
+    const tableName = testTable('missing_timestamps');
+    class InitialUser extends Model {}
+    InitialUser.init({
+      id: { type: DataTypes.INTEGER, primaryKey: true, autoIncrement: true },
+      name: { type: DataTypes.STRING }
+    }, { modelName: 'InitialUser', tableName, timestamps: false });
+
+    const initialContext = await createTestContext({ models: [InitialUser], logging: false });
+    try {
+      await initialContext.seq.sync();
+    } finally {
+      await initialContext.seq.close();
+    }
+
+    class ReopenedUser extends Model {}
+    ReopenedUser.init({
+      id: { type: DataTypes.INTEGER, primaryKey: true, autoIncrement: true },
+      name: { type: DataTypes.STRING }
+    }, { modelName: 'ReopenedUser', tableName });
+
+    const context = await createTestContext({ models: [ReopenedUser], logging: false });
+    open.push(context);
+    const { seq, adapter } = context;
+    const definition = seq._buildTableDefinition(ReopenedUser);
+    const schema = adapter.schemas.get(definition.tableName);
+    assert.equal(schema.columns.createdAt, undefined);
+    assert.equal(schema.columns.updatedAt, undefined);
+
+    const result = await seq.sync({ alter: true });
+    assert.deepEqual(result.altered, [definition.tableName]);
+    const physicalColumns = new Set((await adapter.ddl.describeTable(definition.tableName)).columns.map(column => column.name));
+    assert.ok(physicalColumns.has(definition.attrToColumn.createdAt));
+    assert.ok(physicalColumns.has(definition.attrToColumn.updatedAt));
+  });
 });
 
 describe('Includes and data types', () => {
