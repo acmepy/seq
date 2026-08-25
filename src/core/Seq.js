@@ -226,6 +226,22 @@ export class Seq {
    * @returns {Promise<import('../../types/index.d.ts').SyncResult>}
    */
   async sync(options = {}) {
+    let tableName = null;
+    try {
+      return await this._sync(options, (name) => { tableName = name; });
+    } catch (error) {
+      this._log('error', 'Sync failed', {
+        operation: 'sync',
+        tableName,
+        force: options.force === true,
+        alter: options.alter === true,
+        error: logError(error)
+      });
+      throw error;
+    }
+  }
+
+  async _sync(options, setTableName) {
     const { force = false, alter = false } = options;
     const result = { created: [], existing: [], altered: [], dropped: [] };
     const existingTables = new Set(await this._adapter.ddl.listTables());
@@ -239,10 +255,12 @@ export class Seq {
     if (force) {
       for (const definition of [...orderedDefinitions].reverse()) {
         if (!existingTables.has(definition.tableName)) continue;
+        setTableName(definition.tableName);
         await this._adapter.ddl.dropTable(definition.tableName);
         result.dropped.push(definition.tableName);
       }
       for (const definition of orderedDefinitions) {
+        setTableName(definition.tableName);
         await this._adapter.ddl.createTable(definition);
         result.created.push(definition.tableName);
       }
@@ -252,6 +270,7 @@ export class Seq {
 
     for (const definition of orderedDefinitions) {
       const tableName = definition.tableName;
+      setTableName(tableName);
 
       if (existingTables.has(tableName)) {
         if (alter) {
@@ -459,4 +478,14 @@ export class Seq {
     const target = typeof logger === 'function' ? this._logging : undefined;
     if (typeof logger === 'function') logger.call(target, '[Seq]', ...payload.map(value => this._formatLogValue(value)));
   }
+}
+
+function logError(error) {
+  return {
+    name: error?.name || 'Error',
+    message: error?.message || String(error),
+    code: error?.code ?? null,
+    details: error?.details ?? null,
+    stack: error?.stack ?? null
+  };
 }

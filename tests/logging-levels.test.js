@@ -182,6 +182,41 @@ describe('Logging levels', () => {
     assert.ok(calls.every(args => !String(args[2] || '').includes('sql:')));
   });
 
+  it('normalizes multiline SQL into one log line', async () => {
+    const calls = [];
+    const seq = new Seq({
+      adapter: new MapAdapter(),
+      logging: { info: false, trace: (...args) => calls.push(args), warn: false, error: false }
+    });
+
+    seq.adapter.ddl._measureSql('SELECT column\n  FROM users\n  WHERE id = ?', [1], () => undefined);
+
+    assert.equal(calls[0][1], 'SELECT column FROM users WHERE id = ?');
+  });
+
+  it('logs sync failures before rethrowing them', async () => {
+    const calls = [];
+    const adapter = new MapAdapter();
+    const failure = Object.assign(new Error('Cannot add required column'), {
+      code: 'SEQ_DDL_REQUIRED_COLUMN_NEEDS_DEFAULT',
+      details: { tableName: 'audit', field: 'xml' }
+    });
+    adapter.ddl.listTables = async () => {
+      throw failure;
+    };
+    const seq = new Seq({
+      adapter,
+      logging: { info: false, trace: false, warn: false, error: (...args) => calls.push(args) }
+    });
+
+    await assert.rejects(() => seq.sync(), (error) => error === failure);
+
+    assert.equal(calls.length, 1);
+    assert.equal(calls[0][1], 'Sync failed');
+    assert.match(calls[0][2], /SEQ_DDL_REQUIRED_COLUMN_NEEDS_DEFAULT/);
+    assert.match(calls[0][2], /Cannot add required column/);
+  });
+
   it('logs SQL and model-operation durations through the active adapter', async () => {
     const trace = [];
     const errors = [];

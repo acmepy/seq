@@ -1384,6 +1384,32 @@ class Model {
     this.seq?._log(...args);
   }
 
+  static async _measureOperation(operation, execute) {
+    const startedAt = performance.now();
+    try {
+      const result = await execute();
+      const operationDurationMs = performance.now() - startedAt;
+      const level = this.seq?._isSlowOperation(operationDurationMs) ? 'warn' : 'trace';
+      this._log(level, `${this.modelName}.${operation}`, {
+        type: 'model-operation',
+        operation,
+        model: this.modelName,
+        operationDurationMs
+      });
+      return result;
+    } catch (error) {
+      const operationDurationMs = performance.now() - startedAt;
+      this._log('error', `${this.modelName}.${operation}`, {
+        type: 'model-operation',
+        operation,
+        model: this.modelName,
+        operationDurationMs,
+        error: { name: error.name, message: error.message, code: error.code }
+      });
+      throw error;
+    }
+  }
+
   /**
    * Registers a model hook.
    * @param {string} name
@@ -2029,6 +2055,35 @@ class Model {
   }
 }
 
+const measuredStaticOperations = [
+  'create', 'bulkCreate', 'upsert', 'findByPk', 'findOrCreate', 'findOne',
+  'findAll', 'count', 'findAndCountAll', 'update', 'destroy', 'truncate'
+];
+
+for (const operation of measuredStaticOperations) {
+  const original = Model[operation];
+  Object.defineProperty(Model, operation, {
+    configurable: true,
+    writable: true,
+    value: function (...args) {
+      return this._measureOperation(operation, () => original.apply(this, args));
+    }
+  });
+}
+
+const measuredInstanceOperations = ['save', 'update', 'destroy'];
+
+for (const operation of measuredInstanceOperations) {
+  const original = Model.prototype[operation];
+  Object.defineProperty(Model.prototype, operation, {
+    configurable: true,
+    writable: true,
+    value: function (...args) {
+      return this.constructor._measureOperation(`instance.${operation}`, () => original.apply(this, args));
+    }
+  });
+}
+
 /**
  * Error thrown for configuration issues in Seq ORM.
  */
@@ -2278,6 +2333,8 @@ class Seq {
     this._adapter = options.adapter;
     this._adapter._seq = this;
     this._logging = this._normalizeLogging(options.logging);
+    this._slowQueryMs = this._normalizeSlowThreshold(options.slowQueryMs, 'slowQueryMs');
+    this._slowOperationMs = this._normalizeSlowThreshold(options.slowOperationMs, 'slowOperationMs');
     this._define = options.define || {};
     this._registry = new ModelRegistry();
     this._initialized = false;
@@ -2292,6 +2349,22 @@ class Seq {
    */
   get adapter() {
     return this._adapter;
+  }
+
+  _normalizeSlowThreshold(value, name) {
+    if (value === undefined) return 1000;
+    if (typeof value !== 'number' || !Number.isFinite(value) || value < 0) {
+      throw new ConfigurationError(`${name} must be a non-negative finite number`, { code: 'SEQ_INVALID_SLOW_THRESHOLD' });
+    }
+    return value;
+  }
+
+  _isSlowQuery(durationMs) {
+    return durationMs >= this._slowQueryMs;
+  }
+
+  _isSlowOperation(durationMs) {
+    return durationMs >= this._slowOperationMs;
   }
 
   /**
@@ -2471,6 +2544,22 @@ class Seq {
    * @returns {Promise<import('../../types/index.d.ts').SyncResult>}
    */
   async sync(options = {}) {
+    let tableName = null;
+    try {
+      return await this._sync(options, (name) => { tableName = name; });
+    } catch (error) {
+      this._log('error', 'Sync failed', {
+        operation: 'sync',
+        tableName,
+        force: options.force === true,
+        alter: options.alter === true,
+        error: logError(error)
+      });
+      throw error;
+    }
+  }
+
+  async _sync(options, setTableName) {
     const { force = false, alter = false } = options;
     const result = { created: [], existing: [], altered: [], dropped: [] };
     const existingTables = new Set(await this._adapter.ddl.listTables());
@@ -2484,10 +2573,12 @@ class Seq {
     if (force) {
       for (const definition of [...orderedDefinitions].reverse()) {
         if (!existingTables.has(definition.tableName)) continue;
+        setTableName(definition.tableName);
         await this._adapter.ddl.dropTable(definition.tableName);
         result.dropped.push(definition.tableName);
       }
       for (const definition of orderedDefinitions) {
+        setTableName(definition.tableName);
         await this._adapter.ddl.createTable(definition);
         result.created.push(definition.tableName);
       }
@@ -2497,6 +2588,7 @@ class Seq {
 
     for (const definition of orderedDefinitions) {
       const tableName = definition.tableName;
+      setTableName(tableName);
 
       if (existingTables.has(tableName)) {
         if (alter) {
@@ -2704,6 +2796,16 @@ class Seq {
     const target = typeof logger === 'function' ? this._logging : undefined;
     if (typeof logger === 'function') logger.call(target, '[Seq]', ...payload.map(value => this._formatLogValue(value)));
   }
+}
+
+function logError(error) {
+  return {
+    name: error?.name || 'Error',
+    message: error?.message || String(error),
+    code: error?.code ?? null,
+    details: error?.details ?? null,
+    stack: error?.stack ?? null
+  };
 }
 
 /**
@@ -3223,6 +3325,42 @@ class BaseAbstract {
   _log(...args) {
     this._adapter?._log(...args);
   }
+
+  /**
+   * Executes a SQL callback and logs its duration. The SQL and parameters stay
+   * as the first two log values for compatibility with existing log handlers.
+   * @param {string} sql
+   * @param {*[]} params
+   * @param {Function} execute
+   * @returns {*}
+   */
+  _measureSql(sql, params = [], execute) {
+    const loggedSql = sql.replace(/\s+/g, ' ').trim();
+    const startedAt = performance.now();
+    const finish = (level, error) => {
+      const sqlDurationMs = performance.now() - startedAt;
+      this._log(level, loggedSql, params, {
+        type: 'sql',
+        sqlDurationMs,
+        error: error ? { name: error.name, message: error.message, code: error.code } : undefined
+      });
+    };
+    const success = result => {
+      finish(this._adapter?._seq?._isSlowQuery(performance.now() - startedAt) ? 'warn' : 'trace');
+      return result;
+    };
+    const failure = error => {
+      finish('error', error);
+      throw error;
+    };
+
+    try {
+      const result = execute();
+      return result && typeof result.then === 'function' ? result.then(success, failure) : success(result);
+    } catch (error) {
+      return failure(error);
+    }
+  }
 }
 
 /**
@@ -3408,7 +3546,8 @@ class DDLAbstract extends BaseAbstract {
         const value = typeof colDef.defaultValue === 'function' ? colDef.defaultValue() : colDef.defaultValue;
         constraints.push(`DEFAULT ${this._formatDefaultValue(value)}`);
       }
-      this._adapter._db.prepare(`ALTER TABLE ${this._q(tableName)} ADD COLUMN ${this._q(columnName)} ${colType}${constraints.length ? ` ${constraints.join(' ')}` : ''}`).run();
+      const sql = `ALTER TABLE ${this._q(tableName)} ADD COLUMN ${this._q(columnName)} ${colType}${constraints.length ? ` ${constraints.join(' ')}` : ''}`;
+      this._measureSql(sql, [], () => this._adapter._db.prepare(sql).run());
       schema.columns[name] = colDef;
       schema.attrToColumn[name] = columnName;
       schema.columnToAttr[columnName] = name;
@@ -3437,7 +3576,7 @@ class DDLAbstract extends BaseAbstract {
     const schema = this._adapter.schemas.get(tableName);
     const cols = constraint.columns.map(c => this._q(c)).join(', ');
     const sql = `CREATE UNIQUE INDEX ${this._q(constraint.constraintName)} ON ${this._q(tableName)} (${cols})`;
-    this._adapter._db.prepare(sql).run();
+    this._measureSql(sql, [], () => this._adapter._db.prepare(sql).run());
     schema.uniqueConstraints.push({ ...constraint });
   }
 
@@ -3452,7 +3591,7 @@ class DDLAbstract extends BaseAbstract {
     const cols = index.columns.map(c => this._q(c)).join(', ');
     const unique = index.unique ? 'UNIQUE ' : '';
     const sql = `CREATE ${unique}INDEX ${this._q(index.name)} ON ${this._q(tableName)} (${cols})`;
-    this._adapter._db.prepare(sql).run();
+    this._measureSql(sql, [], () => this._adapter._db.prepare(sql).run());
     schema.indexes.push({ ...index });
   }
 
@@ -3465,7 +3604,7 @@ class DDLAbstract extends BaseAbstract {
     //this._log('DDL.addForeignKey', tableName, fk.constraintName);
     if (this._adapter.fkStrategy === 'alter'){
       const sql = `ALTER TABLE ${this._q(tableName)} ADD CONSTRAINT ${this._q(fk.constraintName)} FOREIGN KEY (${this._q(fk.columnName)}) REFERENCES ${this._q(fk.references.table)} (${this._q(fk.references.column)}) ON DELETE ${fk.onDelete || 'RESTRICT'} ON UPDATE ${fk.onUpdate || 'RESTRICT'}`;
-      this._adapter._db.prepare(sql).run();
+      this._measureSql(sql, [], () => this._adapter._db.prepare(sql).run());
     }
     const schema = this._adapter.schemas.get(tableName);
     schema.foreignKeys.push({ ...fk });
@@ -5485,8 +5624,7 @@ class SQLiteDDL extends DDLAbstract {
   }
 
   async _execute(sql, params = []) {
-    this._log('trace', sql.replaceAll('\n  ', ' '), params);
-    this._db().prepare(sql).run(...params);
+    return this._measureSql(sql.replaceAll('\n  ', ' '), params, () => this._db().prepare(sql).run(...params));
   }
 
   async createTableStructure(def) {
@@ -5543,19 +5681,22 @@ class SQLiteDDL extends DDLAbstract {
   }
 
   async hasTable(tableName) {
-    const row = this._db().prepare("SELECT name FROM sqlite_master WHERE type='table' AND name=?").get(tableName);
+    const sql = "SELECT name FROM sqlite_master WHERE type='table' AND name=?";
+    const row = this._measureSql(sql, [tableName], () => this._db().prepare(sql).get(tableName));
     return !!row;
   }
 
   async describeTable(tableName) {
     if (!(await this.hasTable(tableName))) throw new AdapterError(`Table "${tableName}" does not exist`, { code: 'SEQ_ADAPTER_TABLE_NOT_FOUND' });
-    const rows = this._db().prepare(`PRAGMA table_info(${this._q(tableName)})`).all();
+    const sql = `PRAGMA table_info(${this._q(tableName)})`;
+    const rows = this._measureSql(sql, [], () => this._db().prepare(sql).all());
     return { tableName, columns: rows.map(row => ({ name: row.name, type: row.type, allowNull: !row.notnull, primaryKey: !!row.pk, defaultValue: row.dflt_value })) };
   }
 
   introspectDefinition(definition) {
     const def = this.normalizeDefinition(definition);
-    const tableInfo = this._db().prepare(`PRAGMA table_info(${this._q(def.tableName)})`).all();
+    const tableInfoSql = `PRAGMA table_info(${this._q(def.tableName)})`;
+    const tableInfo = this._measureSql(tableInfoSql, [], () => this._db().prepare(tableInfoSql).all());
     const physicalColumnNames = tableInfo.map(row => row.name);
     const physicalColumns = new Map(physicalColumnNames.map(name => [name.toLowerCase(), name]));
     const columns = {};
@@ -5574,12 +5715,14 @@ class SQLiteDDL extends DDLAbstract {
       columnToAttr[physicalColumnName] = attrName;
     }
 
-    const indexRows = this._db().prepare(`PRAGMA index_list(${this._q(def.tableName)})`).all();
+    const indexSql = `PRAGMA index_list(${this._q(def.tableName)})`;
+    const indexRows = this._measureSql(indexSql, [], () => this._db().prepare(indexSql).all());
     const existingIndexNames = new Set(indexRows.map(row => row.name));
     const uniqueConstraints = def.uniqueConstraints.filter(item => existingIndexNames.has(item.constraintName));
     const indexes = def.indexes.filter(item => existingIndexNames.has(item.name));
 
-    const physicalFKs = this._db().prepare(`PRAGMA foreign_key_list(${this._q(def.tableName)})`).all();
+    const foreignKeySql = `PRAGMA foreign_key_list(${this._q(def.tableName)})`;
+    const physicalFKs = this._measureSql(foreignKeySql, [], () => this._db().prepare(foreignKeySql).all());
     const foreignKeys = def.foreignKeys.filter(fk => physicalFKs.some(row =>
       row.from === fk.columnName && row.table === fk.references.table && row.to === fk.references.column
     ));
@@ -5588,7 +5731,8 @@ class SQLiteDDL extends DDLAbstract {
   }
 
   async listTables() {
-    const rows = this._db().prepare("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'").all();
+    const sql = "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'";
+    const rows = this._measureSql(sql, [], () => this._db().prepare(sql).all());
     return rows.map(r => r.name);
   }
 
@@ -5692,10 +5836,8 @@ class SQLiteDML extends DMLAbstract {
     return this._adapter._db;
   }
 
-  _throwLoggedError(error) {
-    const sqliteError = SQLiteError.from(error);
-    this._log('error', sqliteError.message);
-    throw sqliteError;
+  _toError(error) {
+    return SQLiteError.from(error);
   }
 
   // ---------------------------------------------------------------------------
@@ -5703,30 +5845,33 @@ class SQLiteDML extends DMLAbstract {
   // ---------------------------------------------------------------------------
 
   async _executeQueryAll(sql, params) {
-    this._log('trace', sql, params);
-    try {
-      return this._db().prepare(sql).all(...params);
-    } catch (error) {
-      this._throwLoggedError(error);
-    }
+    return this._measureSql(sql, params, () => {
+      try {
+        return this._db().prepare(sql).all(...params);
+      } catch (error) {
+        throw this._toError(error);
+      }
+    });
   }
 
   async _executeGet(sql, params) {
-    this._log('trace', sql, params);
-    try {
-      return this._db().prepare(sql).get(...params);
-    } catch (error) {
-      this._throwLoggedError(error);
-    }
+    return this._measureSql(sql, params, () => {
+      try {
+        return this._db().prepare(sql).get(...params);
+      } catch (error) {
+        throw this._toError(error);
+      }
+    });
   }
 
   _execute(sql, params = []) {
-    this._log('trace', sql, params);
-    try {
-      return this._db().prepare(sql).run(...params);
-    } catch (error) {
-      this._throwLoggedError(error);
-    }
+    return this._measureSql(sql, params, () => {
+      try {
+        return this._db().prepare(sql).run(...params);
+      } catch (error) {
+        throw this._toError(error);
+      }
+    });
   }
 
   _mapRows(rows, model, schema, options = {}) {
@@ -5896,8 +6041,7 @@ class SQLiteTCL extends TCLAbstract {
   }
 
   async _execute(sql, params = []) {
-    this._log('trace', sql, params);
-    this._db().prepare(sql).run(...params);
+    return this._measureSql(sql, params, () => this._db().prepare(sql).run(...params));
   }
 
   async begin(options = {}) {
@@ -6119,13 +6263,14 @@ class MySQLDDL extends DDLAbstract {
   }
 
   async _execute(sql, params = []) {
-    this._log('trace', sql.replaceAll('\n  ', ' '), params);
-    try {
-      const [result] = await this._connection().execute(sql, params);
-      return result;
-    } catch (error) {
-      throw MySQLError.from(error);
-    }
+    return this._measureSql(sql.replaceAll('\n  ', ' '), params, async () => {
+      try {
+        const [result] = await this._connection().execute(sql, params);
+        return result;
+      } catch (error) {
+        throw MySQLError.from(error);
+      }
+    });
   }
 
   async createTableStructure(def) {
@@ -6308,9 +6453,14 @@ class MySQLDDL extends DDLAbstract {
   }
 
   async _executeQueryAll(sql, params = []) {
-    this._log('trace', sql, params);
-    const [rows] = await this._connection().execute(sql, params);
-    return rows;
+    return this._measureSql(sql, params, async () => {
+      try {
+        const [rows] = await this._connection().execute(sql, params);
+        return rows;
+      } catch (error) {
+        throw MySQLError.from(error);
+      }
+    });
   }
 
   async _executeGet(sql, params = []) {
@@ -6345,15 +6495,14 @@ class MySQLDML extends DMLAbstract {
   }
 
   async _executeQueryAll(sql, params = []) {
-    this._log('trace', sql, params);
-    try {
-      const [rows] = await this._connection().execute(sql, params);
-      return rows;
-    } catch (error) {
-      const mysqlError = MySQLError.from(error);
-      this._log('error', mysqlError.message);
-      throw mysqlError;
-    }
+    return this._measureSql(sql, params, async () => {
+      try {
+        const [rows] = await this._connection().execute(sql, params);
+        return rows;
+      } catch (error) {
+        throw MySQLError.from(error);
+      }
+    });
   }
 
   async _executeGet(sql, params = []) {
@@ -6362,18 +6511,17 @@ class MySQLDML extends DMLAbstract {
   }
 
   async _execute(sql, params = []) {
-    this._log('trace', sql, params);
-    try {
-      const [result] = await this._connection().execute(sql, params);
-      return {
-        changes: result.affectedRows || 0,
-        lastInsertRowid: result.insertId || 0
-      };
-    } catch (error) {
-      const mysqlError = MySQLError.from(error);
-      this._log('error', mysqlError.message);
-      throw mysqlError;
-    }
+    return this._measureSql(sql, params, async () => {
+      try {
+        const [result] = await this._connection().execute(sql, params);
+        return {
+          changes: result.affectedRows || 0,
+          lastInsertRowid: result.insertId || 0
+        };
+      } catch (error) {
+        throw MySQLError.from(error);
+      }
+    });
   }
 
   _buildLimitOffset(options) {
@@ -6710,13 +6858,23 @@ class Oracle11DDL extends DDLAbstract {
   _connection() { return this._adapter._connection(); }
   _oracleSql(sql) { let index = 0; return sql.replaceAll('?', () => `:${++index}`); }
   async _execute(sql, params = []) {
-    try { 
-      return await this._adapter._withConnection(connection => connection.execute(this._oracleSql(sql), params, { autoCommit: !this._adapter._activeTransaction })); 
-    }catch (error) { 
-      throw Oracle11Error.from(error); 
-    }
+    return this._measureSql(sql, params, async () => {
+      try {
+        return await this._adapter._withConnection(connection => connection.execute(this._oracleSql(sql), params, { autoCommit: !this._adapter._activeTransaction }));
+      } catch (error) {
+        throw Oracle11Error.from(error);
+      }
+    });
   }
-  async _executeQueryAll(sql, params = []) { return this._adapter._withConnection(async connection => (await connection.execute(this._oracleSql(sql), params, { outFormat: this._adapter._client.OUT_FORMAT_OBJECT })).rows || []); }
+  async _executeQueryAll(sql, params = []) {
+    return this._measureSql(sql, params, async () => {
+      try {
+        return await this._adapter._withConnection(async connection => (await connection.execute(this._oracleSql(sql), params, { outFormat: this._adapter._client.OUT_FORMAT_OBJECT })).rows || []);
+      } catch (error) {
+        throw Oracle11Error.from(error);
+      }
+    });
+  }
   async _executeGet(sql, params = []) { return (await this._executeQueryAll(sql, params))[0] || null; }
   _usesSequenceForAutoIncrement() { return true; }
 
@@ -6820,20 +6978,30 @@ class Oracle11DDL extends DDLAbstract {
 class Oracle11DML extends DMLAbstract {
   _connection() { return this._adapter._connection(); }
   _tableWithAlias(tableName, alias) { return `${this._q(tableName)}${alias ? ` ${this._q(alias)}` : ''}`; }
-  _throwLoggedError(error) { const oracleError = Oracle11Error.from(error); this._log('error', oracleError.message); throw oracleError; }
+  _toError(error) { return Oracle11Error.from(error); }
 
   _oracleSql(sql) { let index = 0; return sql.replaceAll('?', () => `:${++index}`); }
   async _executeQueryAll(sql, params = []) {
-    this._log('trace', sql, params);
-    try { 
-      return await this._adapter._withConnection(async connection => (await connection.execute(this._oracleSql(sql), params, { outFormat: this._adapter._client.OUT_FORMAT_OBJECT })).rows || []); 
-    }catch (error) { this._throwLoggedError(error); }
+    return this._measureSql(sql, params, async () => {
+      try {
+        return await this._adapter._withConnection(async connection => (await connection.execute(this._oracleSql(sql), params, { outFormat: this._adapter._client.OUT_FORMAT_OBJECT })).rows || []);
+      } catch (error) {
+        throw this._toError(error);
+      }
+    });
   }
   async _executeGet(sql, params = []) { return (await this._executeQueryAll(sql, params))[0] || null; }
   async _execute(sql, params = []) {
-    this._log('trace', sql, params);
-    try { return await this._adapter._withConnection(async connection => { const result = await connection.execute(this._oracleSql(sql), params, { autoCommit: !this._adapter._activeTransaction }); return { changes: result.rowsAffected || 0 }; }); }
-    catch (error) { this._throwLoggedError(error); }
+    return this._measureSql(sql, params, async () => {
+      try {
+        return await this._adapter._withConnection(async connection => {
+          const result = await connection.execute(this._oracleSql(sql), params, { autoCommit: !this._adapter._activeTransaction });
+          return { changes: result.rowsAffected || 0 };
+        });
+      } catch (error) {
+        throw this._toError(error);
+      }
+    });
   }
 
   _applyLimitOffset(sql, options) {
@@ -6876,11 +7044,14 @@ class Oracle11DML extends DMLAbstract {
     let sql = `INSERT INTO ${this._q(tableName)} (${columns.map(column => this._q(column)).join(', ')}) VALUES (${valuesSql})`;
     const bindParams = [...params];
     if (generatedPk) { sql += ` RETURNING ${this._q(pk)} INTO :${bindParams.length + 1}`; bindParams.push({ dir: this._adapter._client.BIND_OUT, type: this._adapter._client.NUMBER }); }
-    this._log('trace', sql, bindParams);
-    try {
-      const result = await this._adapter._withConnection(connection => connection.execute(sql, bindParams, { autoCommit: !this._adapter._activeTransaction }));
-      if (generatedPk) record[pk] = result.outBinds?.[0]?.[0] ?? result.outBinds?.[bindParams.length - 1]?.[0];
-    } catch (error) { this._throwLoggedError(error); }
+    const result = await this._measureSql(sql, bindParams, async () => {
+      try {
+        return await this._adapter._withConnection(connection => connection.execute(sql, bindParams, { autoCommit: !this._adapter._activeTransaction }));
+      } catch (error) {
+        throw this._toError(error);
+      }
+    });
+    if (generatedPk) record[pk] = result.outBinds?.[0]?.[0] ?? result.outBinds?.[bindParams.length - 1]?.[0];
     return new model(this._toAttrNames(record, schema), { _isNew: false });
   }
 

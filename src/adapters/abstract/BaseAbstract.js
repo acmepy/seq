@@ -19,10 +19,11 @@ export class BaseAbstract {
    * @returns {*}
    */
   _measureSql(sql, params = [], execute) {
+    const loggedSql = sql.replace(/\s+/g, ' ').trim();
     const startedAt = performance.now();
     const finish = (level, error) => {
       const sqlDurationMs = performance.now() - startedAt;
-      this._log(level, sql, params, {
+      this._log(level, loggedSql, params, {
         type: 'sql',
         sqlDurationMs,
         error: error ? { name: error.name, message: error.message, code: error.code } : undefined
