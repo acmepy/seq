@@ -119,6 +119,43 @@ describe('Map atomicity', () => {
 });
 
 describe('Schema introspection', () => {
+  it('adds a createdAt index when altering an existing table', async () => {
+    class Audit extends Model {}
+    Audit.init(
+      {
+        id: { type: DataTypes.INTEGER, primaryKey: true, autoIncrement: true },
+        txId: { type: DataTypes.STRING(50), allowNull: false },
+        clientIp: { type: DataTypes.STRING(50), allowNull: false },
+        userId: { type: DataTypes.STRING(20) },
+        tableName: { type: DataTypes.STRING(50), allowNull: false },
+        rowId: { type: DataTypes.STRING(50), allowNull: false },
+        action: { type: DataTypes.STRING(20), allowNull: false },
+        old: { type: DataTypes.JSON },
+        new: { type: DataTypes.JSON }
+      },
+      { modelName: 'audit', tableName: testTable('audit'), timestamps: true }
+    );
+
+    const context = await createTestContext({ models: [Audit], logging: false });
+    open.push(context);
+    const { seq, adapter } = context;
+    await seq.sync();
+
+    Audit.options.indexes = [{ name: 'idx_audit_created_at', columns: ['createdAt'] }];
+    const definition = seq._buildTableDefinition(Audit);
+    const result = await seq.sync({ alter: true });
+
+    assert.deepEqual(result.altered, [definition.tableName]);
+    assert.deepEqual(definition.indexes, [{
+      name: 'idx_audit_created_at',
+      columns: [definition.attrToColumn.createdAt],
+      unique: false
+    }]);
+
+    const physicalDefinition = await adapter.ddl.introspectDefinition(definition);
+    assert.deepEqual(physicalDefinition.indexes, definition.indexes);
+  });
+
   it('reconciles existing camelCase timestamps when reopening', async () => {
     if (testAdapterName() === 'sqlite') {
       class User extends Model {}

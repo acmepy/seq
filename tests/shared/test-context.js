@@ -95,7 +95,11 @@ export function mysqlTestOptions() {
     password: process.env.MYSQL_PASSWORD || '',
     database: process.env.MYSQL_DATABASE,
     connectTimeout: readPositiveIntegerEnv('MYSQL_CONNECT_TIMEOUT', 10000),
-    connectionLimit: 2,
+    connectionLimit: readPositiveIntegerEnv('MYSQL_CONNECTION_LIMIT', 10),
+    maxIdle: readPositiveIntegerEnv('MYSQL_MAX_IDLE', 10),
+    idleTimeout: readPositiveIntegerEnv('MYSQL_IDLE_TIMEOUT', 60000),
+    waitTimeout: readPositiveIntegerEnv('MYSQL_WAIT_TIMEOUT', 300),
+    interactiveTimeout: readPositiveIntegerEnv('MYSQL_INTERACTIVE_TIMEOUT', 300),
     naming: { prefix: testTablePrefix() }
   };
 }

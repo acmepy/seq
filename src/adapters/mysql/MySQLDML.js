@@ -14,7 +14,7 @@ export class MySQLDML extends DMLAbstract {
   async _executeQueryAll(sql, params = []) {
     return this._measureSql(sql, params, async () => {
       try {
-        const [rows] = await this._connection().execute(sql, params);
+        const [rows] = await this._adapter._withConnection(connection => connection.execute(sql, params));
         return rows;
       } catch (error) {
         throw MySQLError.from(error);
@@ -30,7 +30,7 @@ export class MySQLDML extends DMLAbstract {
   async _execute(sql, params = []) {
     return this._measureSql(sql, params, async () => {
       try {
-        const [result] = await this._connection().execute(sql, params);
+        const [result] = await this._adapter._withConnection(connection => connection.execute(sql, params));
         return {
           changes: result.affectedRows || 0,
           lastInsertRowid: result.insertId || 0

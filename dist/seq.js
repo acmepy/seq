@@ -3076,13 +3076,18 @@ class BaseAdapter {
     const pkAttr = modelClass.primaryKeyAttribute;
     const aiAttr = modelClass.autoIncrementAttribute;
     const foreignKeys = this.buildForeignKeys(modelClass, attrToColumn, context);
+    const indexes = (modelClass.options?.indexes || []).map(index => ({
+      name: index.name,
+      columns: (index.columns || []).map(column => attrToColumn[column] || column),
+      unique: index.unique || false
+    }));
 
     return {
       modelName: modelClass.modelName,
       tableName: sourceTable,
       columns,
       uniqueConstraints,
-      indexes: [],
+      indexes,
       foreignKeys,
       primaryKey: pkAttr ? attrToColumn[pkAttr] : null,
       autoIncrement: aiAttr ? attrToColumn[aiAttr] : null,
@@ -3289,6 +3294,34 @@ class BaseAdapter {
   _log(...args) {
     this._seq?._log(...args);
   }
+
+  _measureSql(sql, params = [], execute) {
+    const loggedSql = sql.replace(/\s+/g, ' ').trim();
+    const startedAt = performance.now();
+    const finish = (level, error) => {
+      const sqlDurationMs = performance.now() - startedAt;
+      this._log(level, loggedSql, params, {
+        type: 'sql',
+        sqlDurationMs,
+        error: error ? { name: error.name, message: error.message, code: error.code } : undefined
+      });
+    };
+    const success = result => {
+      finish(this._seq?._isSlowQuery(performance.now() - startedAt) ? 'warn' : 'trace');
+      return result;
+    };
+    const failure = error => {
+      finish('error', error);
+      throw error;
+    };
+
+    try {
+      const result = execute();
+      return result && typeof result.then === 'function' ? result.then(success, failure) : success(result);
+    } catch (error) {
+      return failure(error);
+    }
+  }
 }
 
 class ErrorAbstract extends SeqError {
@@ -3326,40 +3359,8 @@ class BaseAbstract {
     this._adapter?._log(...args);
   }
 
-  /**
-   * Executes a SQL callback and logs its duration. The SQL and parameters stay
-   * as the first two log values for compatibility with existing log handlers.
-   * @param {string} sql
-   * @param {*[]} params
-   * @param {Function} execute
-   * @returns {*}
-   */
   _measureSql(sql, params = [], execute) {
-    const loggedSql = sql.replace(/\s+/g, ' ').trim();
-    const startedAt = performance.now();
-    const finish = (level, error) => {
-      const sqlDurationMs = performance.now() - startedAt;
-      this._log(level, loggedSql, params, {
-        type: 'sql',
-        sqlDurationMs,
-        error: error ? { name: error.name, message: error.message, code: error.code } : undefined
-      });
-    };
-    const success = result => {
-      finish(this._adapter?._seq?._isSlowQuery(performance.now() - startedAt) ? 'warn' : 'trace');
-      return result;
-    };
-    const failure = error => {
-      finish('error', error);
-      throw error;
-    };
-
-    try {
-      const result = execute();
-      return result && typeof result.then === 'function' ? result.then(success, failure) : success(result);
-    } catch (error) {
-      return failure(error);
-    }
+    return this._adapter._measureSql(sql, params, execute);
   }
 }
 
@@ -6265,7 +6266,7 @@ class MySQLDDL extends DDLAbstract {
   async _execute(sql, params = []) {
     return this._measureSql(sql.replaceAll('\n  ', ' '), params, async () => {
       try {
-        const [result] = await this._connection().execute(sql, params);
+        const [result] = await this._adapter._withConnection(connection => connection.execute(sql, params));
         return result;
       } catch (error) {
         throw MySQLError.from(error);
@@ -6455,7 +6456,7 @@ class MySQLDDL extends DDLAbstract {
   async _executeQueryAll(sql, params = []) {
     return this._measureSql(sql, params, async () => {
       try {
-        const [rows] = await this._connection().execute(sql, params);
+        const [rows] = await this._adapter._withConnection(connection => connection.execute(sql, params));
         return rows;
       } catch (error) {
         throw MySQLError.from(error);
@@ -6497,7 +6498,7 @@ class MySQLDML extends DMLAbstract {
   async _executeQueryAll(sql, params = []) {
     return this._measureSql(sql, params, async () => {
       try {
-        const [rows] = await this._connection().execute(sql, params);
+        const [rows] = await this._adapter._withConnection(connection => connection.execute(sql, params));
         return rows;
       } catch (error) {
         throw MySQLError.from(error);
@@ -6513,7 +6514,7 @@ class MySQLDML extends DMLAbstract {
   async _execute(sql, params = []) {
     return this._measureSql(sql, params, async () => {
       try {
-        const [result] = await this._connection().execute(sql, params);
+        const [result] = await this._adapter._withConnection(connection => connection.execute(sql, params));
         return {
           changes: result.affectedRows || 0,
           lastInsertRowid: result.insertId || 0
@@ -6637,9 +6638,13 @@ class MySQLTCL extends TCLAbstract {
       });
     }
 
-    await this._adapter.connect();
-    const connection = await this._adapter._pool.getConnection();
-    await connection.beginTransaction();
+    const connection = await this._adapter._acquireConnection();
+    try {
+      await connection.beginTransaction();
+    } catch (error) {
+      connection.release();
+      throw error;
+    }
     const transaction = {
       id: ++transactionIdCounter,
       active: true,
@@ -6690,6 +6695,8 @@ class MySQLAdapter extends BaseAdapter {
   constructor(options = {}) {
     super({ fkStrategy: 'alter', ...options });
     this._pool = null;
+    this._configuredConnections = new WeakSet();
+    this._sessionTimeouts = this._normalizeSessionTimeouts(options);
     this._connectionOptions = this._normalizeConnectionOptions(options);
     this.ddl = new MySQLDDL(this);
     this.dml = new MySQLDML(this);
@@ -6735,6 +6742,44 @@ class MySQLAdapter extends BaseAdapter {
 
   _connection() {
     return this._activeTransaction?.connection || this._pool;
+  }
+
+  async _acquireConnection() {
+    await this.connect();
+    let lastError;
+
+    for (let attempt = 0; attempt < 2; attempt++) {
+      const connection = await this._pool.getConnection();
+      try {
+        await this._configureConnection(connection);
+        await this._measureSql('SELECT 1', [], () => connection.execute('SELECT 1'));
+        return connection;
+      } catch (error) {
+        lastError = error;
+        connection.destroy();
+      }
+    }
+
+    throw lastError;
+  }
+
+  async _withConnection(run) {
+    if (this._activeTransaction) return run(this._activeTransaction.connection);
+
+    const connection = await this._acquireConnection();
+    try {
+      return await run(connection);
+    } finally {
+      connection.release();
+    }
+  }
+
+  async _configureConnection(connection) {
+    if (this._configuredConnections.has(connection)) return;
+    const { waitTimeout, interactiveTimeout } = this._sessionTimeouts;
+    await this._measureSql(`SET SESSION wait_timeout = ${waitTimeout}`, [], () => connection.execute(`SET SESSION wait_timeout = ${waitTimeout}`));
+    await this._measureSql(`SET SESSION interactive_timeout = ${interactiveTimeout}`, [], () => connection.execute(`SET SESSION interactive_timeout = ${interactiveTimeout}`));
+    this._configuredConnections.add(connection);
   }
 
   _quoteIdentifier(name) {
@@ -6787,23 +6832,24 @@ class MySQLAdapter extends BaseAdapter {
   }
 
   _normalizeConnectionOptions(options) {
-    const {
-      naming,
-      fkStrategy,
-      eager,
-      ...connectionOptions
-    } = options;
+    const {naming, fkStrategy, eager, waitTimeout, interactiveTimeout, ...connectionOptions} = options;
     return {
-      host: 'localhost',
-      port: 3306,
-      user: 'root',
-      database: 'seq',
-      waitForConnections: true,
-      connectionLimit: 10,
-      timezone: 'Z',
-      supportBigNumbers: true,
-      ...connectionOptions
+      host: 'localhost', port: 3306, user: 'root', database: 'seq',
+      waitForConnections: true, connectionLimit: 10, maxIdle: 10, idleTimeout: 60000,
+      timezone: 'Z', supportBigNumbers: true, ...connectionOptions
     };
+  }
+
+  _normalizeSessionTimeouts(options) {
+    return {
+      waitTimeout: this._normalizeTimeout(options.waitTimeout ?? 300, 'waitTimeout'),
+      interactiveTimeout: this._normalizeTimeout(options.interactiveTimeout ?? 300, 'interactiveTimeout')
+    };
+  }
+
+  _normalizeTimeout(value, name) {
+    if (!Number.isInteger(value) || value < 1) throw new TypeError(`${name} must be a positive integer in seconds`);
+    return value;
   }
 }
 

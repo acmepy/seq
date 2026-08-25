@@ -56,6 +56,11 @@ export interface ModelOptions {
   timestamps?: boolean;
   createdAt?: string;
   updatedAt?: string;
+  indexes?: Array<{
+    name: string;
+    columns: string[];
+    unique?: boolean;
+  }>;
   hooks?: Record<string, Function | Function[]>;
   alias?: string;
 }
@@ -245,6 +250,14 @@ export interface MySQLAdapterOptions extends AdapterOptions {
   password?: string;
   database?: string;
   connectionLimit?: number;
+  /** Maximum number of idle connections retained by the pool. Defaults to 10. */
+  maxIdle?: number;
+  /** Milliseconds an idle connection may remain in the pool. Defaults to 60000. */
+  idleTimeout?: number;
+  /** Session inactivity timeout in seconds. Defaults to 300. */
+  waitTimeout?: number;
+  /** Session interactive inactivity timeout in seconds. Defaults to 300. */
+  interactiveTimeout?: number;
   waitForConnections?: boolean;
   timezone?: string;
   ssl?: unknown;

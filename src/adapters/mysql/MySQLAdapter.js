@@ -18,6 +18,8 @@ export class MySQLAdapter extends BaseAdapter {
   constructor(options = {}) {
     super({ fkStrategy: 'alter', ...options });
     this._pool = null;
+    this._configuredConnections = new WeakSet();
+    this._sessionTimeouts = this._normalizeSessionTimeouts(options);
     this._connectionOptions = this._normalizeConnectionOptions(options);
     this.ddl = new MySQLDDL(this);
     this.dml = new MySQLDML(this);
@@ -63,6 +65,44 @@ export class MySQLAdapter extends BaseAdapter {
 
   _connection() {
     return this._activeTransaction?.connection || this._pool;
+  }
+
+  async _acquireConnection() {
+    await this.connect();
+    let lastError;
+
+    for (let attempt = 0; attempt < 2; attempt++) {
+      const connection = await this._pool.getConnection();
+      try {
+        await this._configureConnection(connection);
+        await this._measureSql('SELECT 1', [], () => connection.execute('SELECT 1'));
+        return connection;
+      } catch (error) {
+        lastError = error;
+        connection.destroy();
+      }
+    }
+
+    throw lastError;
+  }
+
+  async _withConnection(run) {
+    if (this._activeTransaction) return run(this._activeTransaction.connection);
+
+    const connection = await this._acquireConnection();
+    try {
+      return await run(connection);
+    } finally {
+      connection.release();
+    }
+  }
+
+  async _configureConnection(connection) {
+    if (this._configuredConnections.has(connection)) return;
+    const { waitTimeout, interactiveTimeout } = this._sessionTimeouts;
+    await this._measureSql(`SET SESSION wait_timeout = ${waitTimeout}`, [], () => connection.execute(`SET SESSION wait_timeout = ${waitTimeout}`));
+    await this._measureSql(`SET SESSION interactive_timeout = ${interactiveTimeout}`, [], () => connection.execute(`SET SESSION interactive_timeout = ${interactiveTimeout}`));
+    this._configuredConnections.add(connection);
   }
 
   _quoteIdentifier(name) {
@@ -115,22 +155,23 @@ export class MySQLAdapter extends BaseAdapter {
   }
 
   _normalizeConnectionOptions(options) {
-    const {
-      naming,
-      fkStrategy,
-      eager,
-      ...connectionOptions
-    } = options;
+    const {naming, fkStrategy, eager, waitTimeout, interactiveTimeout, ...connectionOptions} = options;
     return {
-      host: 'localhost',
-      port: 3306,
-      user: 'root',
-      database: 'seq',
-      waitForConnections: true,
-      connectionLimit: 10,
-      timezone: 'Z',
-      supportBigNumbers: true,
-      ...connectionOptions
+      host: 'localhost', port: 3306, user: 'root', database: 'seq',
+      waitForConnections: true, connectionLimit: 10, maxIdle: 10, idleTimeout: 60000,
+      timezone: 'Z', supportBigNumbers: true, ...connectionOptions
     };
+  }
+
+  _normalizeSessionTimeouts(options) {
+    return {
+      waitTimeout: this._normalizeTimeout(options.waitTimeout ?? 300, 'waitTimeout'),
+      interactiveTimeout: this._normalizeTimeout(options.interactiveTimeout ?? 300, 'interactiveTimeout')
+    };
+  }
+
+  _normalizeTimeout(value, name) {
+    if (!Number.isInteger(value) || value < 1) throw new TypeError(`${name} must be a positive integer in seconds`);
+    return value;
   }
 }

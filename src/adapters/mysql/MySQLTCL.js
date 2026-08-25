@@ -15,9 +15,13 @@ export class MySQLTCL extends TCLAbstract {
       });
     }
 
-    await this._adapter.connect();
-    const connection = await this._adapter._pool.getConnection();
-    await connection.beginTransaction();
+    const connection = await this._adapter._acquireConnection();
+    try {
+      await connection.beginTransaction();
+    } catch (error) {
+      connection.release();
+      throw error;
+    }
     const transaction = {
       id: ++transactionIdCounter,
       active: true,

@@ -77,6 +77,14 @@ describe('MySQL Adapter', () => {
       });
     });
 
+    it('passes pool sizing options to mysql2', () => {
+      const mysql = new MySQLAdapter({ connectionLimit: 8, maxIdle: 3, idleTimeout: 45000 });
+
+      assert.equal(mysql._connectionOptions.connectionLimit, 8);
+      assert.equal(mysql._connectionOptions.maxIdle, 3);
+      assert.equal(mysql._connectionOptions.idleTimeout, 45000);
+    });
+
     it('maps Seq data types to MySQL types', () => {
       const mysql = new MySQLAdapter();
 
@@ -106,16 +114,52 @@ describe('MySQL Adapter', () => {
       assert.equal(user.getDataValue('balance'), 0);
     });
 
+    it('validates a pooled connection before handing it to SQL execution', async () => {
+      const mysql = new MySQLAdapter();
+      const calls = [];
+      const stale = {
+        async execute(sql) {
+          calls.push(`stale:${sql}`);
+          throw new Error('connection is closed');
+        },
+        destroy() { calls.push('stale:destroy'); },
+        release() { calls.push('stale:release'); }
+      };
+      const healthy = {
+        async execute(sql) {
+          calls.push(`healthy:${sql}`);
+          return [[{ ok: 1 }]];
+        },
+        release() { calls.push('healthy:release'); }
+      };
+      let checkout = 0;
+      mysql._pool = { async getConnection() { return checkout++ === 0 ? stale : healthy; } };
+
+      await mysql._withConnection(connection => connection.execute('SELECT data'));
+
+      assert.deepEqual(calls, [
+        'stale:SET SESSION wait_timeout = 300', 'stale:destroy',
+        'healthy:SET SESSION wait_timeout = 300', 'healthy:SET SESSION interactive_timeout = 300', 'healthy:SELECT 1',
+        'healthy:SELECT data', 'healthy:release'
+      ]);
+    });
+
     it('logs database execution errors through Seq before throwing', async () => {
       const errors = [];
       const mysql = new MySQLAdapter();
       new Seq({
         adapter: mysql,
-        logging: { info: false, error: (...args) => errors.push(args) }
+        logging: { info: false, trace: false, error: (...args) => errors.push(args) }
       });
       mysql._pool = {
-        async execute() {
-          throw Object.assign(new Error("Column 'token' cannot be null"), { code: 'ER_BAD_NULL_ERROR' });
+        async getConnection() {
+          return {
+            async execute(sql) {
+              if (sql.startsWith('SET SESSION') || sql === 'SELECT 1') return [[{ ok: 1 }]];
+              throw Object.assign(new Error("Column 'token' cannot be null"), { code: 'ER_BAD_NULL_ERROR' });
+            },
+            release() {}
+          };
         }
       };
 

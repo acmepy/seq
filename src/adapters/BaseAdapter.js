@@ -191,13 +191,18 @@ export class BaseAdapter {
     const pkAttr = modelClass.primaryKeyAttribute;
     const aiAttr = modelClass.autoIncrementAttribute;
     const foreignKeys = this.buildForeignKeys(modelClass, attrToColumn, context);
+    const indexes = (modelClass.options?.indexes || []).map(index => ({
+      name: index.name,
+      columns: (index.columns || []).map(column => attrToColumn[column] || column),
+      unique: index.unique || false
+    }));
 
     return {
       modelName: modelClass.modelName,
       tableName: sourceTable,
       columns,
       uniqueConstraints,
-      indexes: [],
+      indexes,
       foreignKeys,
       primaryKey: pkAttr ? attrToColumn[pkAttr] : null,
       autoIncrement: aiAttr ? attrToColumn[aiAttr] : null,
@@ -403,5 +408,33 @@ export class BaseAdapter {
    */
   _log(...args) {
     this._seq?._log(...args);
+  }
+
+  _measureSql(sql, params = [], execute) {
+    const loggedSql = sql.replace(/\s+/g, ' ').trim();
+    const startedAt = performance.now();
+    const finish = (level, error) => {
+      const sqlDurationMs = performance.now() - startedAt;
+      this._log(level, loggedSql, params, {
+        type: 'sql',
+        sqlDurationMs,
+        error: error ? { name: error.name, message: error.message, code: error.code } : undefined
+      });
+    };
+    const success = result => {
+      finish(this._seq?._isSlowQuery(performance.now() - startedAt) ? 'warn' : 'trace');
+      return result;
+    };
+    const failure = error => {
+      finish('error', error);
+      throw error;
+    };
+
+    try {
+      const result = execute();
+      return result && typeof result.then === 'function' ? result.then(success, failure) : success(result);
+    } catch (error) {
+      return failure(error);
+    }
   }
 }
