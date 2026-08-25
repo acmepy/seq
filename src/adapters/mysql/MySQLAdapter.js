@@ -98,11 +98,15 @@ export class MySQLAdapter extends BaseAdapter {
   }
 
   async _configureConnection(connection) {
-    if (this._configuredConnections.has(connection)) return;
+    // mysql2/promise creates a lightweight PromisePoolConnection wrapper on
+    // every checkout. The underlying PoolConnection is the physical session
+    // whose server-side settings persist while it remains in the pool.
+    const physicalConnection = connection.connection ?? connection;
+    if (this._configuredConnections.has(physicalConnection)) return;
     const { waitTimeout, interactiveTimeout } = this._sessionTimeouts;
     await this._measureSql(`SET SESSION wait_timeout = ${waitTimeout}`, [], () => connection.execute(`SET SESSION wait_timeout = ${waitTimeout}`));
     await this._measureSql(`SET SESSION interactive_timeout = ${interactiveTimeout}`, [], () => connection.execute(`SET SESSION interactive_timeout = ${interactiveTimeout}`));
-    this._configuredConnections.add(connection);
+    this._configuredConnections.add(physicalConnection);
   }
 
   _quoteIdentifier(name) {

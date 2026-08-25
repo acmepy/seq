@@ -144,6 +144,29 @@ describe('MySQL Adapter', () => {
       ]);
     });
 
+    it('configures session timeouts once for a reused physical connection', async () => {
+      const mysql = new MySQLAdapter();
+      const calls = [];
+      const physicalConnection = {};
+      const connection = {
+        connection: physicalConnection,
+        async execute(sql) {
+          calls.push(sql);
+          return [[{ ok: 1 }]];
+        },
+        release() {}
+      };
+      mysql._pool = { async getConnection() { return { ...connection }; } };
+
+      await mysql._withConnection(connection => connection.execute('SELECT first'));
+      await mysql._withConnection(connection => connection.execute('SELECT second'));
+
+      assert.deepEqual(calls, [
+        'SET SESSION wait_timeout = 300', 'SET SESSION interactive_timeout = 300', 'SELECT 1', 'SELECT first',
+        'SELECT 1', 'SELECT second'
+      ]);
+    });
+
     it('logs database execution errors through Seq before throwing', async () => {
       const errors = [];
       const mysql = new MySQLAdapter();
