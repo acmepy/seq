@@ -19,6 +19,8 @@ export class MySQLAdapter extends BaseAdapter {
     super({ fkStrategy: 'alter', ...options });
     this._pool = null;
     this._configuredConnections = new WeakSet();
+    this._lastConnectionUse = new WeakMap();
+    this._validationIdleTimeout = this._normalizeValidationIdleTimeout(options.validationIdleTimeout ?? 15000);
     this._sessionTimeouts = this._normalizeSessionTimeouts(options);
     this._connectionOptions = this._normalizeConnectionOptions(options);
     this.ddl = new MySQLDDL(this);
@@ -75,7 +77,10 @@ export class MySQLAdapter extends BaseAdapter {
       const connection = await this._pool.getConnection();
       try {
         await this._configureConnection(connection);
-        await this._measureSql('SELECT 1', [], () => connection.execute('SELECT 1'));
+        if (this._requiresValidation(connection)) {
+          await this._measureSql('SELECT 1', [], () => connection.execute('SELECT 1'));
+          this._markConnectionUsed(connection);
+        }
         return connection;
       } catch (error) {
         lastError = error;
@@ -91,7 +96,9 @@ export class MySQLAdapter extends BaseAdapter {
 
     const connection = await this._acquireConnection();
     try {
-      return await run(connection);
+      const result = await run(connection);
+      this._markConnectionUsed(connection);
+      return result;
     } finally {
       connection.release();
     }
@@ -107,6 +114,19 @@ export class MySQLAdapter extends BaseAdapter {
     await this._measureSql(`SET SESSION wait_timeout = ${waitTimeout}`, [], () => connection.execute(`SET SESSION wait_timeout = ${waitTimeout}`));
     await this._measureSql(`SET SESSION interactive_timeout = ${interactiveTimeout}`, [], () => connection.execute(`SET SESSION interactive_timeout = ${interactiveTimeout}`));
     this._configuredConnections.add(physicalConnection);
+  }
+
+  _physicalConnection(connection) {
+    return connection.connection ?? connection;
+  }
+
+  _requiresValidation(connection) {
+    const lastUse = this._lastConnectionUse.get(this._physicalConnection(connection));
+    return lastUse === undefined || Date.now() - lastUse >= this._validationIdleTimeout;
+  }
+
+  _markConnectionUsed(connection) {
+    this._lastConnectionUse.set(this._physicalConnection(connection), Date.now());
   }
 
   _quoteIdentifier(name) {
@@ -159,7 +179,7 @@ export class MySQLAdapter extends BaseAdapter {
   }
 
   _normalizeConnectionOptions(options) {
-    const {naming, fkStrategy, eager, waitTimeout, interactiveTimeout, ...connectionOptions} = options;
+    const {naming, fkStrategy, eager, waitTimeout, interactiveTimeout, validationIdleTimeout, ...connectionOptions} = options;
     return {
       host: 'localhost', port: 3306, user: 'root', database: 'seq',
       waitForConnections: true, connectionLimit: 10, maxIdle: 10, idleTimeout: 60000,
@@ -176,6 +196,11 @@ export class MySQLAdapter extends BaseAdapter {
 
   _normalizeTimeout(value, name) {
     if (!Number.isInteger(value) || value < 1) throw new TypeError(`${name} must be a positive integer in seconds`);
+    return value;
+  }
+
+  _normalizeValidationIdleTimeout(value) {
+    if (!Number.isInteger(value) || value < 0) throw new TypeError('validationIdleTimeout must be a non-negative integer in milliseconds');
     return value;
   }
 }

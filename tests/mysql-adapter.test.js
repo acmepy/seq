@@ -144,7 +144,7 @@ describe('MySQL Adapter', () => {
       ]);
     });
 
-    it('configures session timeouts once for a reused physical connection', async () => {
+    it('configures session timeouts and validates once for a recently used physical connection', async () => {
       const mysql = new MySQLAdapter();
       const calls = [];
       const physicalConnection = {};
@@ -163,7 +163,7 @@ describe('MySQL Adapter', () => {
 
       assert.deepEqual(calls, [
         'SET SESSION wait_timeout = 300', 'SET SESSION interactive_timeout = 300', 'SELECT 1', 'SELECT first',
-        'SELECT 1', 'SELECT second'
+        'SELECT second'
       ]);
     });
 

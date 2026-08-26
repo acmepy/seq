@@ -254,6 +254,8 @@ export interface MySQLAdapterOptions extends AdapterOptions {
   maxIdle?: number;
   /** Milliseconds an idle connection may remain in the pool. Defaults to 60000. */
   idleTimeout?: number;
+  /** Milliseconds a pooled connection may be idle before Seq validates it with SELECT 1. Defaults to 15000. */
+  validationIdleTimeout?: number;
   /** Session inactivity timeout in seconds. Defaults to 300. */
   waitTimeout?: number;
   /** Session interactive inactivity timeout in seconds. Defaults to 300. */

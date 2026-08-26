@@ -98,6 +98,7 @@ export function mysqlTestOptions() {
     connectionLimit: readPositiveIntegerEnv('MYSQL_CONNECTION_LIMIT', 10),
     maxIdle: readPositiveIntegerEnv('MYSQL_MAX_IDLE', 10),
     idleTimeout: readPositiveIntegerEnv('MYSQL_IDLE_TIMEOUT', 60000),
+    validationIdleTimeout: readPositiveIntegerEnv('MYSQL_VALIDATION_IDLE_TIMEOUT', 15000),
     waitTimeout: readPositiveIntegerEnv('MYSQL_WAIT_TIMEOUT', 300),
     interactiveTimeout: readPositiveIntegerEnv('MYSQL_INTERACTIVE_TIMEOUT', 300),
     naming: { prefix: testTablePrefix() }
