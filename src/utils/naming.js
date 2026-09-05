@@ -74,11 +74,3 @@ export function applyCase(name, caseStyle) {
   return name;
 }
 
-/**
- * Derives a table name from a model name.
- * @param {string} modelName
- * @returns {string}
- */
-export function deriveTableName(modelName) {
-  return toSnakeCase(modelName) + 's';
-}

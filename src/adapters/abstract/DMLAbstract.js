@@ -3,7 +3,7 @@ import { AdapterError } from '../../core/errors/AdapterError.js';
 import { ValidationError } from '../../core/errors/ValidationError.js';
 import { Op } from '../../operators.js';
 import { resolveWhereValue } from '../../utils/where.js';
-import { buildIncludeSqlAliasMap, eagerNestedIncludes, loadIncludes, loadNestedLazyIncludes, processJoinedRows, resolveIncludeAlias, resolveEager, resolveAssociation } from '../../utils/include.js';
+import { buildIncludeSqlAliasMap, chunks, eagerNestedIncludes, loadIncludes, loadNestedLazyIncludes, processJoinedRows, resolveIncludeAlias, resolveEager, resolveAssociation, trimProjection } from '../../utils/include.js';
 
 /**
  * Base DML abstract.
@@ -37,19 +37,6 @@ export class DMLAbstract extends BaseAbstract {
       throw new AdapterError(`Table "${tableName}" does not exist`, { code: 'SEQ_ADAPTER_TABLE_NOT_FOUND' });
     }
     return { tableName, schema, alias: model.alias || null };
-  }
-
-  _associationThroughTable(assoc) {
-    return assoc.throughModel?._resolvedTableName
-      || assoc.throughModel?.tableName
-      || assoc.throughTable
-      || assoc.through;
-  }
-
-  _chunks(values, size = 500) {
-    const result = [];
-    for (let index = 0; index < values.length; index += size) result.push(values.slice(index, index + size));
-    return result;
   }
 
   /**
@@ -289,19 +276,6 @@ export class DMLAbstract extends BaseAbstract {
     return [...new Set(required)];
   }
 
-  _trimProjection(instances, attributes, includes = [], model = null) {
-    if (!Array.isArray(attributes) || attributes.length === 0) return;
-    const selected = new Set(attributes);
-    for (const include of includes || []) {
-      if (include.model && model) selected.add(resolveIncludeAlias(include, model));
-    }
-    for (const instance of instances) {
-      for (const key of Object.keys(instance.dataValues)) {
-        if (!selected.has(key)) delete instance.dataValues[key];
-      }
-    }
-  }
-
   _assertTransaction(options = {}) {
     const active = this._adapter._activeTransaction || null;
     const transaction = options.transaction || null;
@@ -377,7 +351,7 @@ export class DMLAbstract extends BaseAbstract {
       const fkAttr = assoc.foreignKey;
 
       if (assoc.type === 'belongsToMany') {
-        const throughTable = this._associationThroughTable(assoc);
+        const throughTable = this._adapter.getAssociationThroughTable(assoc);
         const junctionSchema = this._adapter.schemas.get(throughTable);
         if (!junctionSchema) continue;
         const junctionAlias = throughTable;
@@ -466,7 +440,7 @@ export class DMLAbstract extends BaseAbstract {
     const otherKeyAttr = assoc.otherKey;
 
     if (assoc.throughModel) {
-      const rows = await Promise.all(this._chunks(sourceIds).map(ids => {
+      const rows = await Promise.all(chunks(sourceIds).map(ids => {
         return this.selectAll(assoc.throughModel, {
           where: { [fkAttr]: { [Op.in]: ids } },
           attributes: [fkAttr, otherKeyAttr],
@@ -479,7 +453,7 @@ export class DMLAbstract extends BaseAbstract {
       }));
     }
 
-    const throughTable = this._associationThroughTable(assoc);
+    const throughTable = this._adapter.getAssociationThroughTable(assoc);
     const junctionSchema = this._adapter.schemas.get(throughTable);
     if (!junctionSchema) {
       throw new AdapterError(`Table "${throughTable}" does not exist`, { code: 'SEQ_ADAPTER_TABLE_NOT_FOUND' });
@@ -487,7 +461,7 @@ export class DMLAbstract extends BaseAbstract {
 
     const fkCol = junctionSchema.attrToColumn[fkAttr] || fkAttr;
     const otherKeyCol = junctionSchema.attrToColumn[otherKeyAttr] || otherKeyAttr;
-    const rows = await Promise.all(this._chunks(sourceIds).map(ids => {
+    const rows = await Promise.all(chunks(sourceIds).map(ids => {
       const placeholders = ids.map(() => '?').join(', ');
       const sql = `SELECT ${this._q(fkCol)} AS ${this._q(fkAttr)}, ${this._q(otherKeyCol)} AS ${this._q(otherKeyAttr)} FROM ${this._q(throughTable)} WHERE ${this._q(fkCol)} IN (${placeholders})`;
       return this._executeQueryAll(sql, ids.map(id => this._serializeValue(id)));
@@ -587,7 +561,7 @@ export class DMLAbstract extends BaseAbstract {
       instances = await loadIncludes(instances, lazyIncludes, model, this, queryOptions);
     }
     if (requestedAttributes && requiredLazyAttributes.length > 0) {
-      this._trimProjection(instances, requestedAttributes, includes, model);
+      trimProjection(instances, requestedAttributes, includes, model);
     }
     return instances;
   }
@@ -757,22 +731,6 @@ export class DMLAbstract extends BaseAbstract {
   // ---------------------------------------------------------------------------
   // High-level methods — delegate to selectAll
   // ---------------------------------------------------------------------------
-
-  /**
-   * Selects a record by primary key.
-   * @param {typeof import('../../core/Model.js').Model} model
-   * @param {*} id
-   * @param {object} [options]
-   * @returns {Promise<import('../../core/Model.js').Model|null>}
-   */
-  async selectByPk(model, id, options = {}) {
-    if (!model.primaryKeyAttribute) {
-      throw new AdapterError(`Model "${model.modelName}" has no primary key`, { code: 'SEQ_DML_NO_PRIMARY_KEY' });
-    }
-    const where = { [model.primaryKeyAttribute]: id };
-    const results = await this.selectAll(model, { ...options, where, limit: 1, offset: 0 });
-    return results.length > 0 ? results[0] : null;
-  }
 
   /**
    * Selects one record matching the where clause.

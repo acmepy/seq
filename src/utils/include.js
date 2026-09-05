@@ -49,7 +49,7 @@ export function resolveIncludeAlias(include, model) {
   if (include.as) return include.as;
   const assoc = resolveAssociation(model, include);
   if (assoc?.as) return assoc.as;
-  if (include.model?.alias) return include.model.modelName.toLowerCase() + 's';
+  if (include.model?.alias) return include.model.alias;
   return include.model.modelName.toLowerCase() + 's';
 }
 
@@ -226,7 +226,7 @@ async function _loadHasMany(instances, inc, assoc, alias, dml, queryOptions) {
     const pkVal = instance.getDataValue(parentPK);
     instance.setDataValue(alias, childrenByFK.get(pkVal) || []);
   }
-  _trimProjection(children, inc.attributes, inc.include, target);
+  trimProjection(children, inc.attributes, inc.include, target);
 }
 
 async function _loadHasOne(instances, inc, assoc, alias, dml, queryOptions) {
@@ -250,7 +250,7 @@ async function _loadHasOne(instances, inc, assoc, alias, dml, queryOptions) {
     const pkVal = instance.getDataValue(parentPK);
     instance.setDataValue(alias, childByFK.get(pkVal) || null);
   }
-  _trimProjection(children, inc.attributes, inc.include, target);
+  trimProjection(children, inc.attributes, inc.include, target);
 }
 
 async function _loadBelongsTo(instances, inc, assoc, alias, dml, queryOptions) {
@@ -274,7 +274,7 @@ async function _loadBelongsTo(instances, inc, assoc, alias, dml, queryOptions) {
     const fkVal = instance.getDataValue(fkAttr);
     instance.setDataValue(alias, targetByPK.get(fkVal) || null);
   }
-  _trimProjection(targets, inc.attributes, inc.include, target);
+  trimProjection(targets, inc.attributes, inc.include, target);
 }
 
 async function _loadBelongsToMany(instances, inc, assoc, alias, dml, queryOptions) {
@@ -315,7 +315,7 @@ async function _loadBelongsToMany(instances, inc, assoc, alias, dml, queryOption
       .filter(Boolean);
     instance.setDataValue(alias, matching);
   }
-  _trimProjection(targets, inc.attributes, inc.include, target);
+  trimProjection(targets, inc.attributes, inc.include, target);
 }
 
 function _withRequiredAttributes(attributes, required) {
@@ -328,14 +328,14 @@ function _requiredAttributes(include, model, attributes) {
   return [...new Set([...attributes, model.primaryKeyAttribute || 'id'])];
 }
 
-function _chunks(values, size = 500) {
+export function chunks(values, size = 500) {
   const result = [];
   for (let index = 0; index < values.length; index += size) result.push(values.slice(index, index + size));
   return result;
 }
 
 async function _selectInChunks(dml, model, field, values, inc, queryOptions, requiredAttributes) {
-  const rows = await Promise.all(_chunks(values).map(ids => {
+  const rows = await Promise.all(chunks(values).map(ids => {
     const relationWhere = { [field]: { [Op.in]: ids } };
     const where = inc.where ? { [Op.and]: [relationWhere, inc.where] } : relationWhere;
     return dml.selectAll(model, {
@@ -349,7 +349,7 @@ async function _selectInChunks(dml, model, field, values, inc, queryOptions, req
   return rows.flat();
 }
 
-function _trimProjection(instances, attributes, includes = [], model = null) {
+export function trimProjection(instances, attributes, includes = [], model = null) {
   if (!Array.isArray(attributes) || attributes.length === 0) return;
   const selected = new Set(attributes);
   for (const include of includes || []) {

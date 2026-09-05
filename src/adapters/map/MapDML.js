@@ -212,7 +212,7 @@ export class MapDML extends DMLAbstract {
       }));
     }
 
-    const throughTable = this._associationThroughTable(assoc);
+    const throughTable = this._adapter.getAssociationThroughTable(assoc);
     const table = this._adapter.database.get(throughTable);
     const schema = this._adapter.schemas.get(throughTable);
     if (!table || !schema) {

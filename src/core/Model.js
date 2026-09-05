@@ -99,7 +99,6 @@ export class Model {
 
     this.modelName = options.modelName || this.name;
     this.tableName = options.tableName;
-    //this._tableNameExplicit = options.tableName !== undefined;
     this.seq = options.seq || null;
     this.associations = this.associations || {};
     this._hooks = {};
@@ -225,14 +224,6 @@ export class Model {
       includes.push(include);
     }
     return includes;
-  }
-
-  /**
-   * Returns the Seq instance associated with this model.
-   * @returns {import('./Seq.js').Seq}
-   */
-  static get _seq() {
-    return this.seq;
   }
 
   /**
@@ -674,7 +665,7 @@ export class Model {
     delete countOptions.offset;
     const [count, rows] = await Promise.all([this.count(countOptions), this.findAll(findOptions)]);
 
-    return { count, rows: this._normalizeFindResult(rows, options.plain) };
+    return { count, rows };
   }
 
   /**
@@ -882,6 +873,7 @@ export class Model {
       return this;
     }
     const pk = Ctor.primaryKeyAttribute;
+    if (!pk) throw new ModelError(`Model "${Ctor.modelName}" has no primary key`, { code: 'SEQ_MODEL_NO_PRIMARY_KEY' });
     const where = { [pk]: this.dataValues[pk] };
     const result = await Ctor._adapter.dml.update(Ctor, this.dataValues, { ...options, where });
     if (result && result.length > 0) Object.assign(this.dataValues, result[0].dataValues);

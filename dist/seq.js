@@ -682,7 +682,7 @@ function resolveIncludeAlias(include, model) {
   if (include.as) return include.as;
   const assoc = resolveAssociation(model, include);
   if (assoc?.as) return assoc.as;
-  if (include.model?.alias) return include.model.modelName.toLowerCase() + 's';
+  if (include.model?.alias) return include.model.alias;
   return include.model.modelName.toLowerCase() + 's';
 }
 
@@ -859,7 +859,7 @@ async function _loadHasMany(instances, inc, assoc, alias, dml, queryOptions) {
     const pkVal = instance.getDataValue(parentPK);
     instance.setDataValue(alias, childrenByFK.get(pkVal) || []);
   }
-  _trimProjection(children, inc.attributes, inc.include, target);
+  trimProjection(children, inc.attributes, inc.include, target);
 }
 
 async function _loadHasOne(instances, inc, assoc, alias, dml, queryOptions) {
@@ -883,7 +883,7 @@ async function _loadHasOne(instances, inc, assoc, alias, dml, queryOptions) {
     const pkVal = instance.getDataValue(parentPK);
     instance.setDataValue(alias, childByFK.get(pkVal) || null);
   }
-  _trimProjection(children, inc.attributes, inc.include, target);
+  trimProjection(children, inc.attributes, inc.include, target);
 }
 
 async function _loadBelongsTo(instances, inc, assoc, alias, dml, queryOptions) {
@@ -907,7 +907,7 @@ async function _loadBelongsTo(instances, inc, assoc, alias, dml, queryOptions) {
     const fkVal = instance.getDataValue(fkAttr);
     instance.setDataValue(alias, targetByPK.get(fkVal) || null);
   }
-  _trimProjection(targets, inc.attributes, inc.include, target);
+  trimProjection(targets, inc.attributes, inc.include, target);
 }
 
 async function _loadBelongsToMany(instances, inc, assoc, alias, dml, queryOptions) {
@@ -948,7 +948,7 @@ async function _loadBelongsToMany(instances, inc, assoc, alias, dml, queryOption
       .filter(Boolean);
     instance.setDataValue(alias, matching);
   }
-  _trimProjection(targets, inc.attributes, inc.include, target);
+  trimProjection(targets, inc.attributes, inc.include, target);
 }
 
 function _withRequiredAttributes(attributes, required) {
@@ -961,14 +961,14 @@ function _requiredAttributes(include, model, attributes) {
   return [...new Set([...attributes, model.primaryKeyAttribute || 'id'])];
 }
 
-function _chunks(values, size = 500) {
+function chunks(values, size = 500) {
   const result = [];
   for (let index = 0; index < values.length; index += size) result.push(values.slice(index, index + size));
   return result;
 }
 
 async function _selectInChunks(dml, model, field, values, inc, queryOptions, requiredAttributes) {
-  const rows = await Promise.all(_chunks(values).map(ids => {
+  const rows = await Promise.all(chunks(values).map(ids => {
     const relationWhere = { [field]: { [Op.in]: ids } };
     const where = inc.where ? { [Op.and]: [relationWhere, inc.where] } : relationWhere;
     return dml.selectAll(model, {
@@ -982,7 +982,7 @@ async function _selectInChunks(dml, model, field, values, inc, queryOptions, req
   return rows.flat();
 }
 
-function _trimProjection(instances, attributes, includes = [], model = null) {
+function trimProjection(instances, attributes, includes = [], model = null) {
   if (!Array.isArray(attributes) || attributes.length === 0) return;
   const selected = new Set(attributes);
   for (const include of includes || []) {
@@ -1233,7 +1233,6 @@ class Model {
 
     this.modelName = options.modelName || this.name;
     this.tableName = options.tableName;
-    //this._tableNameExplicit = options.tableName !== undefined;
     this.seq = options.seq || null;
     this.associations = this.associations || {};
     this._hooks = {};
@@ -1359,14 +1358,6 @@ class Model {
       includes.push(include);
     }
     return includes;
-  }
-
-  /**
-   * Returns the Seq instance associated with this model.
-   * @returns {import('./Seq.js').Seq}
-   */
-  static get _seq() {
-    return this.seq;
   }
 
   /**
@@ -1808,7 +1799,7 @@ class Model {
     delete countOptions.offset;
     const [count, rows] = await Promise.all([this.count(countOptions), this.findAll(findOptions)]);
 
-    return { count, rows: this._normalizeFindResult(rows, options.plain) };
+    return { count, rows };
   }
 
   /**
@@ -2016,6 +2007,7 @@ class Model {
       return this;
     }
     const pk = Ctor.primaryKeyAttribute;
+    if (!pk) throw new ModelError(`Model "${Ctor.modelName}" has no primary key`, { code: 'SEQ_MODEL_NO_PRIMARY_KEY' });
     const where = { [pk]: this.dataValues[pk] };
     const result = await Ctor._adapter.dml.update(Ctor, this.dataValues, { ...options, where });
     if (result && result.length > 0) Object.assign(this.dataValues, result[0].dataValues);
@@ -2553,7 +2545,7 @@ class Seq {
         tableName,
         force: options.force === true,
         alter: options.alter === true,
-        error: logError(error)
+        error: serializeError(error)
       });
       throw error;
     }
@@ -2778,7 +2770,7 @@ class Seq {
     } catch {
       output = String(value);
     }
-    return output.replace(/[\\"']/g, '');
+    return output;
   }
 
   /**
@@ -2798,13 +2790,12 @@ class Seq {
   }
 }
 
-function logError(error) {
+function serializeError(error) {
   return {
     name: error?.name || 'Error',
     message: error?.message || String(error),
     code: error?.code ?? null,
-    details: error?.details ?? null,
-    stack: error?.stack ?? null
+    details: error?.details ?? null
   };
 }
 
@@ -3812,19 +3803,6 @@ class DMLAbstract extends BaseAbstract {
     return { tableName, schema, alias: model.alias || null };
   }
 
-  _associationThroughTable(assoc) {
-    return assoc.throughModel?._resolvedTableName
-      || assoc.throughModel?.tableName
-      || assoc.throughTable
-      || assoc.through;
-  }
-
-  _chunks(values, size = 500) {
-    const result = [];
-    for (let index = 0; index < values.length; index += size) result.push(values.slice(index, index + size));
-    return result;
-  }
-
   /**
    * Generates a column reference, optionally prefixed with a table alias.
    * @param {string} colName
@@ -4062,19 +4040,6 @@ class DMLAbstract extends BaseAbstract {
     return [...new Set(required)];
   }
 
-  _trimProjection(instances, attributes, includes = [], model = null) {
-    if (!Array.isArray(attributes) || attributes.length === 0) return;
-    const selected = new Set(attributes);
-    for (const include of includes || []) {
-      if (include.model && model) selected.add(resolveIncludeAlias(include, model));
-    }
-    for (const instance of instances) {
-      for (const key of Object.keys(instance.dataValues)) {
-        if (!selected.has(key)) delete instance.dataValues[key];
-      }
-    }
-  }
-
   _assertTransaction(options = {}) {
     const active = this._adapter._activeTransaction || null;
     const transaction = options.transaction || null;
@@ -4150,7 +4115,7 @@ class DMLAbstract extends BaseAbstract {
       const fkAttr = assoc.foreignKey;
 
       if (assoc.type === 'belongsToMany') {
-        const throughTable = this._associationThroughTable(assoc);
+        const throughTable = this._adapter.getAssociationThroughTable(assoc);
         const junctionSchema = this._adapter.schemas.get(throughTable);
         if (!junctionSchema) continue;
         const junctionAlias = throughTable;
@@ -4239,7 +4204,7 @@ class DMLAbstract extends BaseAbstract {
     const otherKeyAttr = assoc.otherKey;
 
     if (assoc.throughModel) {
-      const rows = await Promise.all(this._chunks(sourceIds).map(ids => {
+      const rows = await Promise.all(chunks(sourceIds).map(ids => {
         return this.selectAll(assoc.throughModel, {
           where: { [fkAttr]: { [Op.in]: ids } },
           attributes: [fkAttr, otherKeyAttr],
@@ -4252,7 +4217,7 @@ class DMLAbstract extends BaseAbstract {
       }));
     }
 
-    const throughTable = this._associationThroughTable(assoc);
+    const throughTable = this._adapter.getAssociationThroughTable(assoc);
     const junctionSchema = this._adapter.schemas.get(throughTable);
     if (!junctionSchema) {
       throw new AdapterError(`Table "${throughTable}" does not exist`, { code: 'SEQ_ADAPTER_TABLE_NOT_FOUND' });
@@ -4260,7 +4225,7 @@ class DMLAbstract extends BaseAbstract {
 
     const fkCol = junctionSchema.attrToColumn[fkAttr] || fkAttr;
     const otherKeyCol = junctionSchema.attrToColumn[otherKeyAttr] || otherKeyAttr;
-    const rows = await Promise.all(this._chunks(sourceIds).map(ids => {
+    const rows = await Promise.all(chunks(sourceIds).map(ids => {
       const placeholders = ids.map(() => '?').join(', ');
       const sql = `SELECT ${this._q(fkCol)} AS ${this._q(fkAttr)}, ${this._q(otherKeyCol)} AS ${this._q(otherKeyAttr)} FROM ${this._q(throughTable)} WHERE ${this._q(fkCol)} IN (${placeholders})`;
       return this._executeQueryAll(sql, ids.map(id => this._serializeValue(id)));
@@ -4360,7 +4325,7 @@ class DMLAbstract extends BaseAbstract {
       instances = await loadIncludes(instances, lazyIncludes, model, this, queryOptions);
     }
     if (requestedAttributes && requiredLazyAttributes.length > 0) {
-      this._trimProjection(instances, requestedAttributes, includes, model);
+      trimProjection(instances, requestedAttributes, includes, model);
     }
     return instances;
   }
@@ -4530,22 +4495,6 @@ class DMLAbstract extends BaseAbstract {
   // ---------------------------------------------------------------------------
   // High-level methods — delegate to selectAll
   // ---------------------------------------------------------------------------
-
-  /**
-   * Selects a record by primary key.
-   * @param {typeof import('../../core/Model.js').Model} model
-   * @param {*} id
-   * @param {object} [options]
-   * @returns {Promise<import('../../core/Model.js').Model|null>}
-   */
-  async selectByPk(model, id, options = {}) {
-    if (!model.primaryKeyAttribute) {
-      throw new AdapterError(`Model "${model.modelName}" has no primary key`, { code: 'SEQ_DML_NO_PRIMARY_KEY' });
-    }
-    const where = { [model.primaryKeyAttribute]: id };
-    const results = await this.selectAll(model, { ...options, where, limit: 1, offset: 0 });
-    return results.length > 0 ? results[0] : null;
-  }
 
   /**
    * Selects one record matching the where clause.
@@ -5065,7 +5014,7 @@ class MapDML extends DMLAbstract {
       }));
     }
 
-    const throughTable = this._associationThroughTable(assoc);
+    const throughTable = this._adapter.getAssociationThroughTable(assoc);
     const table = this._adapter.database.get(throughTable);
     const schema = this._adapter.schemas.get(throughTable);
     if (!table || !schema) {

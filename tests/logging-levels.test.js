@@ -130,7 +130,7 @@ describe('Logging levels', () => {
     assert.deepEqual(calls, [{ target: console, args: ['[Seq]', 'sql'] }]);
   });
 
-  it('stringifies object and array payloads without quotes', () => {
+  it('stringifies object and array payloads as valid JSON', () => {
     const calls = [];
     const seq = new Seq({
       adapter: new MapAdapter(),
@@ -142,8 +142,8 @@ describe('Logging levels', () => {
     assert.deepEqual(calls, [[
       '[Seq]',
       'payload',
-      '{name:Ana,meta:{role:admin}}',
-      '[one,two]'
+      '{"name":"Ana","meta":{"role":"admin"}}',
+      '["one","two"]'
     ]]);
   });
 
@@ -241,19 +241,22 @@ describe('Logging levels', () => {
 
       const sqlLog = trace.find(args => args[1]?.startsWith?.('INSERT INTO'));
       assert.ok(sqlLog, 'expected INSERT SQL trace');
-      assert.match(sqlLog[3], /type:sql/);
-      assert.match(sqlLog[3], /sqlDurationMs:/);
+      assert.equal(JSON.parse(sqlLog[3]).type, 'sql');
+      assert.ok(Number.isFinite(JSON.parse(sqlLog[3]).sqlDurationMs));
 
       const operationLog = trace.find(args => args[1] === 'TimedUser.create');
       assert.ok(operationLog, 'expected create operation trace');
-      assert.match(operationLog[2], /type:model-operation/);
-      assert.match(operationLog[2], /operation:create/);
-      assert.match(operationLog[2], /model:TimedUser/);
-      assert.match(operationLog[2], /operationDurationMs:/);
+      assert.deepEqual(JSON.parse(operationLog[2]), {
+        type: 'model-operation',
+        operation: 'create',
+        model: 'TimedUser',
+        operationDurationMs: JSON.parse(operationLog[2]).operationDurationMs
+      });
+      assert.ok(Number.isFinite(JSON.parse(operationLog[2]).operationDurationMs));
 
       await assert.rejects(() => TimedUser.create({ name: 'Ana' }));
-      assert.ok(errors.some(args => args[1]?.startsWith?.('INSERT INTO') && /type:sql/.test(args[3]) && /error:/.test(args[3])));
-      assert.ok(errors.some(args => args[1] === 'TimedUser.create' && /type:model-operation/.test(args[2]) && /error:/.test(args[2])));
+      assert.ok(errors.some(args => args[1]?.startsWith?.('INSERT INTO') && JSON.parse(args[3]).type === 'sql' && JSON.parse(args[3]).error));
+      assert.ok(errors.some(args => args[1] === 'TimedUser.create' && JSON.parse(args[2]).type === 'model-operation' && JSON.parse(args[2]).error));
     } finally {
       await cleanupTestContext(context);
     }
@@ -280,8 +283,8 @@ describe('Logging levels', () => {
       warn.length = 0;
       await SlowUser.create({ name: 'Ana' });
 
-      assert.ok(warn.some(args => args[1]?.startsWith?.('INSERT INTO') && /type:sql/.test(args[3])));
-      assert.ok(warn.some(args => args[1] === 'SlowUser.create' && /type:model-operation/.test(args[2])));
+      assert.ok(warn.some(args => args[1]?.startsWith?.('INSERT INTO') && JSON.parse(args[3]).type === 'sql'));
+      assert.ok(warn.some(args => args[1] === 'SlowUser.create' && JSON.parse(args[2]).type === 'model-operation'));
     } finally {
       await cleanupTestContext(context);
     }

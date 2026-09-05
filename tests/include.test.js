@@ -303,14 +303,24 @@ describe('Aliases & Include', () => {
       assert.equal(result, 'tasks');
     });
 
-    it('falls back to auto-generated', () => {
+    it('uses the model alias when no association exists', () => {
       class _X extends Model {}
       _X.init(
         { id: { type: DataTypes.INTEGER, primaryKey: true, autoIncrement: true } },
         { modelName: 'X', tableName: 'x', timestamps: false }
       );
       const result = resolveIncludeAlias({ model: _X }, User);
-      assert.equal(result, 'xs');
+      assert.equal(result, 'x');
+    });
+
+    it('uses the target model alias when no association exists', () => {
+      class _AuditLog extends Model {}
+      _AuditLog.init(
+        { id: { type: DataTypes.INTEGER, primaryKey: true, autoIncrement: true } },
+        { modelName: 'AuditLog', tableName: 'audit_logs', alias: 'audit', timestamps: false }
+      );
+
+      assert.equal(resolveIncludeAlias({ model: _AuditLog }, User), 'audit');
     });
   });
 

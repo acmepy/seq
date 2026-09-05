@@ -235,7 +235,7 @@ export class Seq {
         tableName,
         force: options.force === true,
         alter: options.alter === true,
-        error: logError(error)
+        error: serializeError(error)
       });
       throw error;
     }
@@ -460,7 +460,7 @@ export class Seq {
     } catch {
       output = String(value);
     }
-    return output.replace(/[\\"']/g, '');
+    return output;
   }
 
   /**
@@ -480,12 +480,11 @@ export class Seq {
   }
 }
 
-function logError(error) {
+function serializeError(error) {
   return {
     name: error?.name || 'Error',
     message: error?.message || String(error),
     code: error?.code ?? null,
-    details: error?.details ?? null,
-    stack: error?.stack ?? null
+    details: error?.details ?? null
   };
 }
