@@ -4,6 +4,38 @@ import { DataTypes, Model, Oracle11Adapter, Oracle11Error, Oracle12Adapter, Seq 
 import { ErrorAbstract } from '../src/adapters/abstract/ErrorAbstract.js';
 
 test('Oracle adapters', async t => {
+  await t.test('names primary-key and not-null constraints in Oracle DDL', async () => {
+    for (const Adapter of [Oracle11Adapter, Oracle12Adapter]) {
+      const adapter = new Adapter({ naming: { prefix: 'AFI_' } });
+      const statements = [];
+      adapter.ddl._execute = async sql => statements.push(sql);
+      await adapter.ddl.createTableStructure({
+        tableName: 'AFI_BIENES',
+        columns: {
+          id: { field: 'ID', type: DataTypes.INTEGER, primaryKey: true, allowNull: false },
+          code: { field: 'CODIGO', type: DataTypes.INTEGER, primaryKey: true, allowNull: false },
+          description: { field: 'DESCRIPCION', type: DataTypes.STRING(100), allowNull: false },
+          optional: { field: 'OPCIONAL', type: DataTypes.STRING(100), allowNull: true }
+        }
+      });
+      assert.match(statements[0], /CONSTRAINT "PK_BIENES_ID_CODIGO" PRIMARY KEY \("ID", "CODIGO"\)/);
+      assert.match(statements[0], /"DESCRIPCION" VARCHAR2\(100\) CONSTRAINT "NN_BIENES_DESCRIPCION" NOT NULL/);
+      assert.doesNotMatch(statements[0], /NN_BIENES_(ID|CODIGO|OPCIONAL)/);
+
+      adapter.schemas.set('AFI_BIENES', { columns: {}, attrToColumn: {}, columnToAttr: {} });
+      await adapter.ddl.addColumns('AFI_BIENES', {
+        value: { field: 'VALOR', type: DataTypes.INTEGER, allowNull: false, defaultValue: 0 }
+      });
+      assert.match(statements[1], /DEFAULT 0 CONSTRAINT "NN_BIENES_VALOR" NOT NULL/);
+    }
+  });
+
+  await t.test('Oracle constraint names respect case and truncate the middle', () => {
+    const adapter = new Oracle11Adapter({ naming: { prefix: 'AFI_', caseStyle: 'lower', maxLength: 20 } });
+    assert.equal(adapter.ddl._constraintName('pk', 'AFI_BIENES', ['ID']), 'pk_bienes_id');
+    assert.equal(adapter.ddl._constraintName('nn', 'AFI_INVENTARIOS', ['DESCRIPCION']), 'nn_inventa_scripcion');
+  });
+
   await t.test('reports a missing oracledb dependency', async () => {
     const originalLoadClient = Oracle11Adapter._loadClient;
     const errors = [];

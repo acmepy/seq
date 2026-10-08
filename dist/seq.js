@@ -6911,16 +6911,22 @@ class Oracle11DDL extends DDLAbstract {
   
   _usesSequenceForAutoIncrement() { return true; }
 
+  _constraintName(kind, tableName, columns) {
+    const naming = this._adapter.naming;
+    const table = naming.prefix ? tableName.replaceAll(naming.prefix, '') : tableName;
+    return truncateMiddle(applyCase(`${kind}_${table}_${columns.join('_')}`, naming.caseStyle), naming.maxLength);
+  }
+
   async createTableStructure(def) {
     const columns = []; const primaryKeys = [];
     for (const [attr, column] of Object.entries(def.columns)) {
       const name = column.field || attr;
       const parts = [this._q(name), this._adapter.mapDataType(column.type)];
       if (column.defaultValue !== undefined && column.defaultValue !== null && typeof column.defaultValue !== 'function') parts.push(`DEFAULT ${this._formatDefaultValue(column.defaultValue)}`);
-      if (!column.allowNull && !column.primaryKey) parts.push('NOT NULL');
+      if (!column.allowNull && !column.primaryKey) parts.push(`CONSTRAINT ${this._q(this._constraintName('nn', def.tableName, [name]))} NOT NULL`);
       columns.push(parts.join(' ')); if (column.primaryKey) primaryKeys.push(name);
     }
-    if (primaryKeys.length) columns.push(`PRIMARY KEY (${primaryKeys.map(key => this._q(key)).join(', ')})`);
+    if (primaryKeys.length) columns.push(`CONSTRAINT ${this._q(this._constraintName('pk', def.tableName, primaryKeys))} PRIMARY KEY (${primaryKeys.map(key => this._q(key)).join(', ')})`);
     await this._execute(`CREATE TABLE ${this._q(def.tableName)} (\n  ${columns.join(',\n  ')}\n)`);
     if (def.autoIncrement && this._usesSequenceForAutoIncrement()) await this._execute(`CREATE SEQUENCE ${this._q(this._adapter.sequenceName(def.tableName))} START WITH 1 INCREMENT BY 1`);
   }
@@ -6993,7 +6999,7 @@ class Oracle11DDL extends DDLAbstract {
         const value = typeof column.defaultValue === 'function' ? column.defaultValue() : column.defaultValue;
         parts.push(`DEFAULT ${this._formatDefaultValue(value)}`);
       }
-      if (!column.allowNull) parts.push('NOT NULL');
+      if (!column.allowNull) parts.push(`CONSTRAINT ${this._q(this._constraintName('nn', tableName, [name]))} NOT NULL`);
       await this._execute(`ALTER TABLE ${this._q(tableName)} ADD (${parts.join(' ')})`);
       schema.columns[attr] = column; 
       schema.attrToColumn[attr] = name; 

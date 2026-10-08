@@ -1,6 +1,6 @@
 {
   "name": "seq",
-  "version": "1.2.4",
+  "version": "1.2.41",
   "description": "seq es un micro orm, modular, flexible y de facil integracion",
   "type": "module",
   "main": "src/index.js",
@@ -18,7 +18,7 @@
     }
   },
   "scripts": {
-    "----------------------https://testcontainers.com/------------------":"",
+    "----------------------https://testcontainers.com/------------------": "",
     "test": "node scripts/run-unit-tests.js",
     "test:all": "npm run test && npm run test:mysql && npm run test:oracle11 && npm run test:oracle12",
     "test:mysql": "node --test tests/integration/mysql-suite.test.js",
@@ -79,5 +79,9 @@
   "license": "MIT",
   "engines": {
     "node": ">=22.0.0"
+  },
+  "allowScripts": {
+    "better-sqlite3@12.11.1": true,
+    "oracledb@5.5.0": true
   }
 }
