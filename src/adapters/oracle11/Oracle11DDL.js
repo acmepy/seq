@@ -71,7 +71,7 @@ export class Oracle11DDL extends DDLAbstract {
   }
 
   async listTables() { 
-    return (await this._executeQueryAll('SELECT TABLE_NAME FROM USER_TABLES')).map(row => row.TABLE_NAME);
+    return (await this._executeQueryAll('SELECT TABLE_NAME FROM USER_TABLES union all select view_name from user_views')).map(row => row.TABLE_NAME);
   }
   
   async describeTable(tableName) {
