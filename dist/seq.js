@@ -7187,7 +7187,7 @@ class Oracle11DML extends DMLAbstract {
       if (['ArrayType', 'ObjectType', 'JSONType'].includes(type) && typeof value === 'string') { 
         try { result[attr] = JSON.parse(value); } catch { result[attr] = value; } 
       } else if (type === 'BooleanType') {
-        result[attr] = value === true || value === 1 || value === '1'; 
+        result[attr] = value === true || value === 1 || (typeof value === 'string' && ['1', 'S', 'Y', 'TRUE'].includes(value.trim().toUpperCase()));
       }else if (type === 'DateType' && typeof value === 'string') {
         result[attr] = new Date(value); 
       }else if (type === 'IntegerType' || type === 'DecimalType' || type === 'NumberType') {
