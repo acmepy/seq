@@ -85,6 +85,8 @@ export class SQLiteDML extends DMLAbstract {
       } else if (typeName === 'BooleanType') {
         if (typeof value === 'boolean') result[attrName] = value;
         else result[attrName] = value === 1 || value === '1';
+      } else if (typeName === 'IntegerType' || typeName === 'NumberType' || typeName === 'DecimalType') {
+        result[attrName] = this._parseNumericValue(value, typeName);
       } else if (typeName === 'DateType') {
         if (value instanceof Date) result[attrName] = value;
         else if (typeof value === 'string') {

@@ -119,8 +119,8 @@ export class MySQLDML extends DMLAbstract {
         if (value instanceof Date) result[attrName] = value;
         else if (typeof value === 'string') result[attrName] = new Date(value);
         else result[attrName] = value;
-      } else if (typeName === 'DecimalType' || typeName === 'NumberType') {
-        result[attrName] = value === null || value === undefined ? value : Number(value);
+      } else if (typeName === 'IntegerType' || typeName === 'DecimalType' || typeName === 'NumberType') {
+        result[attrName] = this._parseNumericValue(value, typeName);
       } else {
         result[attrName] = value;
       }

@@ -136,6 +136,23 @@ export class Oracle11DML extends DMLAbstract {
     }));
   }
   _toAttrNames(record, schema) {
-    const result = {}; for (const [key, value] of Object.entries(record)) { const attr = schema.columnToAttr[key] || key; if (key === 'SEQ_ROWNUM') continue; const type = schema.columns[attr]?.type?.constructor?.name; if (['ArrayType', 'ObjectType', 'JSONType'].includes(type) && typeof value === 'string') { try { result[attr] = JSON.parse(value); } catch { result[attr] = value; } } else if (type === 'BooleanType') result[attr] = value === true || value === 1 || value === '1'; else if (type === 'DateType' && typeof value === 'string') result[attr] = new Date(value); else if (type === 'DecimalType' || type === 'NumberType') result[attr] = value == null ? value : Number(value); else result[attr] = value; } return result;
+    const result = {}; 
+    for (const [key, value] of Object.entries(record)) { 
+      const attr = schema.columnToAttr[key] || key; 
+      if (key === 'SEQ_ROWNUM') continue; 
+      const type = schema.columns[attr]?.type?.constructor?.name; 
+      if (['ArrayType', 'ObjectType', 'JSONType'].includes(type) && typeof value === 'string') { 
+        try { result[attr] = JSON.parse(value); } catch { result[attr] = value; } 
+      } else if (type === 'BooleanType') {
+        result[attr] = value === true || value === 1 || value === '1'; 
+      }else if (type === 'DateType' && typeof value === 'string') {
+        result[attr] = new Date(value); 
+      }else if (type === 'IntegerType' || type === 'DecimalType' || type === 'NumberType') {
+        result[attr] = this._parseNumericValue(value, type); 
+      }else{ 
+        result[attr] = value; 
+      }
+    } 
+    return result;
   }
 }

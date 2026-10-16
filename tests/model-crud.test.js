@@ -19,6 +19,81 @@ function selectFirstSql(context, model) {
   return context.adapter.dml._applyLimitOffset(sql, { limit: 1 });
 }
 
+describe('Reading numeric attributes from text columns', () => {
+  let context;
+  let Numeric;
+  let definition;
+
+  beforeEach(async () => {
+    Numeric = class Numeric extends Model {};
+    Numeric.init({
+      id: { type: DataTypes.INTEGER, primaryKey: true },
+      integer: { type: DataTypes.INTEGER, field: 'qty_text' },
+      number: { type: DataTypes.NUMBER(12, 2), field: 'num_text' },
+      decimal: { type: DataTypes.DECIMAL(12, 2), field: 'dec_text' },
+      label: { type: DataTypes.STRING(100) },
+      parentId: { type: DataTypes.INTEGER, field: 'parent_id' }
+    }, { modelName: 'Numeric', tableName: testTable('numeric_text'), timestamps: false });
+    Numeric.hasMany(Numeric, { foreignKey: 'parentId', as: 'children' });
+    context = await createTestContext({ models: [Numeric] });
+    definition = context.seq._buildTableDefinition(Numeric);
+    const columns = Object.fromEntries(Object.entries(definition.columns).map(([attr, column]) => [
+      attr, { ...column, type: ['id', 'parentId'].includes(attr) ? column.type : DataTypes.STRING(100) }
+    ]));
+    // Create a real legacy schema: numeric model attributes backed by text columns.
+    await context.adapter.ddl.createTable({ ...definition, columns, foreignKeys: [] });
+    context.adapter.schemas.delete(definition.tableName);
+    await context.seq._registerExistingSchemas();
+  });
+
+  afterEach(async () => cleanupTestContext(context));
+
+  async function insert(id, integer, number, decimal, parentId = null) {
+    const attrs = ['id', 'integer', 'number', 'decimal', 'label', 'parentId'];
+    const columns = attrs.map(attr => quoteTestIdentifier(definition.attrToColumn[attr])).join(', ');
+    await context.adapter.dml._execute(
+      `INSERT INTO ${quoteTestIdentifier(definition.tableName)} (${columns}) VALUES (?, ?, ?, ?, ?, ?)`,
+      [id, integer, number, decimal, '0042', parentId]
+    );
+  }
+
+  it(`converts numeric text using model types with ${testAdapterName()}`, async () => {
+    await insert(1, '0042', '-12.5', '1.25e2');
+    await insert(2, '0', '+.5', ' 2.50 ', '1');
+    const raw = await context.adapter.dml._executeGet(selectFirstSql(context, Numeric), []);
+    assert.equal(typeof raw[definition.attrToColumn.integer], 'string');
+    const row = await Numeric.findByPk(1);
+    assert.equal(row.getDataValue('integer'), 42);
+    assert.equal(row.getDataValue('number'), -12.5);
+    assert.equal(row.getDataValue('decimal'), 125);
+    assert.equal(row.getDataValue('label'), '0042');
+    assert.equal(row.toJSON().integer, 42);
+    const projected = await Numeric.findOne({ where: { id: 2 }, attributes: ['integer', 'number', 'decimal'], plain: true });
+    assert.deepEqual(projected, { integer: 0, number: 0.5, decimal: 2.5 });
+    for (const eager of [false, true]) {
+      const parent = await Numeric.findOne({ where: { id: 1 }, include: [{ model: Numeric, as: 'children', eager }] });
+      const [child] = parent.getDataValue('children');
+      assert.ok(child, `Expected a child with eager=${eager}`);
+      assert.equal(child.getDataValue('integer'), 0);
+      assert.equal(child.getDataValue('number'), 0.5);
+      assert.equal(child.getDataValue('parentId'), 1);
+    }
+  });
+
+  it('preserves invalid numeric text, nulls, fractional integers and unsafe integers', async () => {
+    const values = ['invalid', '12abc', ' ', 'NaN', 'Infinity', '1e999', '0x10', null];
+    for (const [index, value] of values.entries()) await insert(index + 1, value, value, value);
+    await insert(9, '1.5', '0', '0');
+    await insert(10, '9007199254740993', '0', '0');
+    const rows = await Numeric.findAll({ order: [['id', 'ASC']] });
+    for (const [index, value] of values.entries()) {
+      for (const attr of ['integer', 'number', 'decimal']) assert.equal(rows[index].getDataValue(attr), value);
+    }
+    assert.equal(rows[8].getDataValue('integer'), '1.5');
+    assert.equal(rows[9].getDataValue('integer'), '9007199254740993');
+  });
+});
+
 describe('Model CRUD', () => {
   let context;
   let User;

@@ -827,9 +827,20 @@ export class DMLAbstract extends BaseAbstract {
     const result = {};
     const map = schema.columnToAttr;
     for (const [key, value] of Object.entries(record)) {
-      result[map[key] || key] = value;
+      const attr = map[key] || key;
+      result[attr] = this._parseNumericValue(value, schema.columns?.[attr]?.type?.constructor?.name);
     }
     return result;
+  }
+
+  /** Converts numeric text read from storage, preserving values that cannot be converted. */
+  _parseNumericValue(value, typeName) {
+    if (!['IntegerType', 'NumberType', 'DecimalType'].includes(typeName) || typeof value !== 'string') return value;
+    const text = value.trim();
+    if (!/^[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:e[+-]?\d+)?$/i.test(text)) return value;
+    const number = Number(text);
+    if (!Number.isFinite(number) || (typeName === 'IntegerType' && !Number.isSafeInteger(number))) return value;
+    return number;
   }
 
   /**

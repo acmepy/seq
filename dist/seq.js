@@ -4591,9 +4591,20 @@ class DMLAbstract extends BaseAbstract {
     const result = {};
     const map = schema.columnToAttr;
     for (const [key, value] of Object.entries(record)) {
-      result[map[key] || key] = value;
+      const attr = map[key] || key;
+      result[attr] = this._parseNumericValue(value, schema.columns?.[attr]?.type?.constructor?.name);
     }
     return result;
+  }
+
+  /** Converts numeric text read from storage, preserving values that cannot be converted. */
+  _parseNumericValue(value, typeName) {
+    if (!['IntegerType', 'NumberType', 'DecimalType'].includes(typeName) || typeof value !== 'string') return value;
+    const text = value.trim();
+    if (!/^[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:e[+-]?\d+)?$/i.test(text)) return value;
+    const number = Number(text);
+    if (!Number.isFinite(number) || (typeName === 'IntegerType' && !Number.isSafeInteger(number))) return value;
+    return number;
   }
 
   /**
@@ -5860,6 +5871,8 @@ class SQLiteDML extends DMLAbstract {
       } else if (typeName === 'BooleanType') {
         if (typeof value === 'boolean') result[attrName] = value;
         else result[attrName] = value === 1 || value === '1';
+      } else if (typeName === 'IntegerType' || typeName === 'NumberType' || typeName === 'DecimalType') {
+        result[attrName] = this._parseNumericValue(value, typeName);
       } else if (typeName === 'DateType') {
         if (value instanceof Date) result[attrName] = value;
         else if (typeof value === 'string') {
@@ -6552,8 +6565,8 @@ class MySQLDML extends DMLAbstract {
         if (value instanceof Date) result[attrName] = value;
         else if (typeof value === 'string') result[attrName] = new Date(value);
         else result[attrName] = value;
-      } else if (typeName === 'DecimalType' || typeName === 'NumberType') {
-        result[attrName] = value === null || value === undefined ? value : Number(value);
+      } else if (typeName === 'IntegerType' || typeName === 'DecimalType' || typeName === 'NumberType') {
+        result[attrName] = this._parseNumericValue(value, typeName);
       } else {
         result[attrName] = value;
       }
@@ -7166,7 +7179,24 @@ class Oracle11DML extends DMLAbstract {
     }));
   }
   _toAttrNames(record, schema) {
-    const result = {}; for (const [key, value] of Object.entries(record)) { const attr = schema.columnToAttr[key] || key; if (key === 'SEQ_ROWNUM') continue; const type = schema.columns[attr]?.type?.constructor?.name; if (['ArrayType', 'ObjectType', 'JSONType'].includes(type) && typeof value === 'string') { try { result[attr] = JSON.parse(value); } catch { result[attr] = value; } } else if (type === 'BooleanType') result[attr] = value === true || value === 1 || value === '1'; else if (type === 'DateType' && typeof value === 'string') result[attr] = new Date(value); else if (type === 'DecimalType' || type === 'NumberType') result[attr] = value == null ? value : Number(value); else result[attr] = value; } return result;
+    const result = {}; 
+    for (const [key, value] of Object.entries(record)) { 
+      const attr = schema.columnToAttr[key] || key; 
+      if (key === 'SEQ_ROWNUM') continue; 
+      const type = schema.columns[attr]?.type?.constructor?.name; 
+      if (['ArrayType', 'ObjectType', 'JSONType'].includes(type) && typeof value === 'string') { 
+        try { result[attr] = JSON.parse(value); } catch { result[attr] = value; } 
+      } else if (type === 'BooleanType') {
+        result[attr] = value === true || value === 1 || value === '1'; 
+      }else if (type === 'DateType' && typeof value === 'string') {
+        result[attr] = new Date(value); 
+      }else if (type === 'IntegerType' || type === 'DecimalType' || type === 'NumberType') {
+        result[attr] = this._parseNumericValue(value, type); 
+      }else { 
+        result[attr] = value; 
+      }
+    } 
+    return result;
   }
 }
 
