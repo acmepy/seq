@@ -3,6 +3,28 @@ import test from 'node:test';
 import { DataTypes, Model, Oracle11Adapter, Oracle11Error, Oracle12Adapter, Seq } from '../src/index.js';
 import { ErrorAbstract } from '../src/adapters/abstract/ErrorAbstract.js';
 
+test('Oracle boolean configuration validation', () => {
+  for (const Adapter of [Oracle11Adapter, Oracle12Adapter]) {
+    for (const values of [null, {}, { true: 'S' }, { true: '', false: 'N' },
+      { true: 'S', false: ' s ' }, { true: 1, false: 1 }, { true: 'S', false: 0 },
+      { true: true, false: false }, { true: Infinity, false: 0 }]) {
+      assert.throws(() => new Adapter({ booleanValues: values }), { code: 'SEQ_ORACLE_INVALID_BOOLEAN_VALUES' });
+    }
+    const adapter = new Adapter({ booleanValues: { true: 'S', false: 'N' } });
+    assert.ok(!Object.hasOwn(adapter._connectionOptions, 'booleanValues'));
+    assert.equal(adapter.mapDataType(DataTypes.BOOLEAN), 'VARCHAR2(1 CHAR)');
+    assert.equal(adapter.deserializeBoolean(null), null);
+    assert.equal(adapter.deserializeBoolean('n'), false);
+    assert.equal(adapter.deserializeBoolean('Y', { booleanValues: { true: 'N', false: 'Y' } }), false);
+    assert.equal(new Adapter({ booleanValues: { true: 10, false: -2 } }).mapDataType(DataTypes.BOOLEAN), 'NUMBER');
+    assert.equal(new Adapter().mapDataType(DataTypes.BOOLEAN), 'NUMBER(1)');
+    class Invalid extends Model {}
+    Invalid.init({ flag: { type: DataTypes.BOOLEAN, booleanValues: { true: 'x', false: 'x' } } }, { modelName: 'Invalid', timestamps: false });
+    const seq = new Seq({ adapter, logging: false });
+    assert.throws(() => seq._buildTableDefinition(Invalid), { code: 'SEQ_ORACLE_INVALID_BOOLEAN_VALUES' });
+  }
+});
+
 test('Oracle adapters', async t => {
   await t.test('names primary-key and not-null constraints in Oracle DDL', async () => {
     for (const Adapter of [Oracle11Adapter, Oracle12Adapter]) {

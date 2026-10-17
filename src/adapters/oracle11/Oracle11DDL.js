@@ -46,8 +46,8 @@ export class Oracle11DDL extends DDLAbstract {
     const columns = []; const primaryKeys = [];
     for (const [attr, column] of Object.entries(def.columns)) {
       const name = column.field || attr;
-      const parts = [this._q(name), this._adapter.mapDataType(column.type)];
-      if (column.defaultValue !== undefined && column.defaultValue !== null && typeof column.defaultValue !== 'function') parts.push(`DEFAULT ${this._formatDefaultValue(column.defaultValue)}`);
+      const parts = [this._q(name), this._adapter.mapDataType(column.type, column)];
+      if (column.defaultValue !== undefined && column.defaultValue !== null && typeof column.defaultValue !== 'function') parts.push(`DEFAULT ${this._formatDefaultValue(column.defaultValue, column)}`);
       if (!column.allowNull && !column.primaryKey) parts.push(`CONSTRAINT ${this._q(this._constraintName('nn', def.tableName, [name]))} NOT NULL`);
       columns.push(parts.join(' ')); if (column.primaryKey) primaryKeys.push(name);
     }
@@ -119,10 +119,10 @@ export class Oracle11DDL extends DDLAbstract {
   async addColumns(tableName, missingColumns) {
     const schema = this._adapter.schemas.get(tableName);
     for (const [attr, column] of Object.entries(missingColumns)) {
-      const name = column.field || attr; const parts = [this._q(name), this._adapter.mapDataType(column.type)];
+      const name = column.field || attr; const parts = [this._q(name), this._adapter.mapDataType(column.type, column)];
       if (column.defaultValue !== undefined && column.defaultValue !== null) {
         const value = typeof column.defaultValue === 'function' ? column.defaultValue() : column.defaultValue;
-        parts.push(`DEFAULT ${this._formatDefaultValue(value)}`);
+        parts.push(`DEFAULT ${this._formatDefaultValue(value, column)}`);
       }
       if (!column.allowNull) parts.push(`CONSTRAINT ${this._q(this._constraintName('nn', tableName, [name]))} NOT NULL`);
       await this._execute(`ALTER TABLE ${this._q(tableName)} ADD (${parts.join(' ')})`);
@@ -146,7 +146,8 @@ export class Oracle11DDL extends DDLAbstract {
     await this._execute(`ALTER TABLE ${this._q(tableName)} ADD CONSTRAINT ${this._q(fk.constraintName)} FOREIGN KEY (${this._q(fk.columnName)}) REFERENCES ${this._q(fk.references.table)} (${this._q(fk.references.column)})${deleteClause}`);
     this._adapter.schemas.get(tableName).foreignKeys.push({ ...fk });
   }
-  _formatDefaultValue(value) { 
+  _formatDefaultValue(value, column) {
+    if (typeof value === 'boolean') value = this._adapter.serializeBoolean(value, column);
     if (value === null) return 'NULL'; 
     if (value instanceof Date) return `TO_DATE('${value.toISOString().slice(0, 19).replace('T', ' ')}', 'YYYY-MM-DD HH24:MI:SS')`; 
     if (typeof value === 'string') return `'${value.replaceAll("'", "''")}'`; 

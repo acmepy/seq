@@ -5,6 +5,7 @@ import { Oracle11TCL } from './Oracle11TCL.js';
 import { Oracle11Error } from './Oracle11Error.js';
 import { truncateMiddle } from '../../utils/naming.js';
 import util from 'node:util';
+import { ConfigurationError } from '../../core/errors/ConfigurationError.js';
 
 let oracleClient = null;
 
@@ -18,6 +19,7 @@ export class Oracle11Adapter extends BaseAdapter {
   };
   constructor(options = {}) {
     super({ fkStrategy: 'alter', ...options });
+    this.booleanValues = this._validateBooleanValues(options.booleanValues);
     this._pool = null; this._connectionOptions = this._normalizeConnectionOptions(options);
     this.ddl = new Oracle11DDL(this); this.dml = new Oracle11DML(this); this.dcl = null; this.tcl = new Oracle11TCL(this);
   }
@@ -76,14 +78,63 @@ export class Oracle11Adapter extends BaseAdapter {
   }
   sequenceName(tableName) { const prefix = 'seq_'; const safe = String(tableName).replace(/[^A-Za-z0-9_$#]/g, '_'); return `${prefix}${safe}`.slice(0, 30); }
 
-  mapDataType(dataType) {
+  _validateBooleanValues(values) {
+    if (values === undefined) return undefined;
+    const valid = value => (typeof value === 'string' && value.trim().length > 0 && value.length <= 4000)
+      || (typeof value === 'number' && Number.isFinite(value));
+    if (!values || !valid(values.true) || !valid(values.false)
+      || typeof values.true !== typeof values.false
+      || this._booleanKey(values.true) === this._booleanKey(values.false)) {
+      throw new ConfigurationError('booleanValues requires distinct true and false values, both non-empty strings or finite numbers', { code: 'SEQ_ORACLE_INVALID_BOOLEAN_VALUES' });
+    }
+    return { true: values.true, false: values.false };
+  }
+
+  _booleanKey(value) { return String(value).trim().toUpperCase(); }
+
+  booleanValuesFor(column) { return column?.booleanValues ?? this.booleanValues ?? { true: 1, false: 0 }; }
+
+  serializeBoolean(value, column) {
+    if (typeof value !== 'boolean') return value;
+    return this.booleanValuesFor(column)[value ? 'true' : 'false'];
+  }
+
+  deserializeBoolean(value, column) {
+    if (value === null || value === undefined || typeof value === 'boolean') return value;
+    const values = this.booleanValuesFor(column);
+    const key = this._booleanKey(value);
+    if (key === this._booleanKey(values.true)) return true;
+    if (key === this._booleanKey(values.false)) return false;
+    return value === 1 || (typeof value === 'string' && ['1', 'S', 'Y', 'TRUE'].includes(key));
+  }
+
+  buildTableDefinition(modelClass, context) {
+    const definition = super.buildTableDefinition(modelClass, context);
+    for (const [attr, column] of Object.entries(definition.columns)) {
+      const values = modelClass.rawAttributes[attr]?.booleanValues;
+      if (values !== undefined) {
+        if (column.type?.constructor?.name !== 'BooleanType') {
+          throw new ConfigurationError('booleanValues can only be used with BOOLEAN attributes', { code: 'SEQ_ORACLE_INVALID_BOOLEAN_VALUES' });
+        }
+        column.booleanValues = this._validateBooleanValues(values);
+      }
+    }
+    return definition;
+  }
+
+  mapDataType(dataType, column) {
     const name = dataType?.constructor?.name || String(dataType);
     switch (name) {
       case 'IntegerType': return 'NUMBER(10)';
       case 'DecimalType': return `NUMBER(${dataType.options?.precision ?? 10}, ${dataType.options?.scale ?? 2})`;
       case 'NumberType': return `NUMBER(${dataType.options?.precision ?? 10}, ${dataType.options?.scale ?? 0})`;
       case 'StringType': return `VARCHAR2(${Math.min(dataType.options?.length ?? 255, 4000)})`;
-      case 'BooleanType': return 'NUMBER(1)';
+      case 'BooleanType': {
+        const values = this.booleanValuesFor(column);
+        return typeof values.true === 'string'
+          ? `VARCHAR2(${Math.max(values.true.length, values.false.length)} CHAR)`
+          : (column?.booleanValues || this.booleanValues ? 'NUMBER' : 'NUMBER(1)');
+      }
       case 'DateType': return 'DATE';
       case 'ArrayType': case 'ObjectType': case 'JSONType': return 'VARCHAR2(4000)';
       default: return 'VARCHAR2(4000)';
@@ -115,5 +166,5 @@ export class Oracle11Adapter extends BaseAdapter {
     return 0;
   }
   _dependencyWarning(message) { if (this._seq) this._log('error', message); else console.error(`[Seq] ${message}`); }
-  _normalizeConnectionOptions(options) { const { naming, fkStrategy, eager, connectString, user, password, poolMin, poolMax, poolIncrement, ...rest } = options; return { user, password, connectString, poolMin: poolMin ?? 0, poolMax: poolMax ?? 4, poolIncrement: poolIncrement ?? 1, ...rest }; }
+  _normalizeConnectionOptions(options) { const { naming, fkStrategy, eager, booleanValues, connectString, user, password, poolMin, poolMax, poolIncrement, ...rest } = options; return { user, password, connectString, poolMin: poolMin ?? 0, poolMax: poolMax ?? 4, poolIncrement: poolIncrement ?? 1, ...rest }; }
 }

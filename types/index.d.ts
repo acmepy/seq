@@ -32,6 +32,8 @@ export interface AttributeValidation {
 
 export interface AttributeDefinition {
   type: unknown;
+  /** Oracle BOOLEAN storage values; overrides the adapter configuration. */
+  booleanValues?: BooleanValues;
   primaryKey?: boolean;
   autoIncrement?: boolean;
   allowNull?: boolean;
@@ -271,7 +273,10 @@ export class MySQLAdapter extends BaseAdapter {
 
 export class MySQLError extends ErrorAbstract {}
 
+export type BooleanValues = { true: string; false: string } | { true: number; false: number };
+
 export interface OracleAdapterOptions extends AdapterOptions {
+  booleanValues?: BooleanValues;
   user?: string;
   password?: string;
   connectString?: string;

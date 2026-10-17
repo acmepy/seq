@@ -3868,7 +3868,7 @@ class DMLAbstract extends BaseAbstract {
     return v;
   }
 
-  _buildCondition(col, rawValue) {
+  _buildCondition(col, rawValue, column) {
     if (rawValue !== null && typeof rawValue === 'object' && !Array.isArray(rawValue)
       && Object.getOwnPropertySymbols(rawValue).length > 1) {
       throw new ValidationError('A field condition can contain only one operator', { code: 'SEQ_VALIDATION_OPERATOR' });
@@ -3877,40 +3877,40 @@ class DMLAbstract extends BaseAbstract {
     switch (op) {
       case Op.eq:
         if (value === null) return { sql: `${col} IS NULL`, params: [] };
-        return { sql: `${col} = ?`, params: [this._serializeValue(value)] };
+        return { sql: `${col} = ?`, params: [this._serializeValue(value, column)] };
       case Op.ne:
         if (value === null) return { sql: `${col} IS NOT NULL`, params: [] };
-        return { sql: `${col} != ?`, params: [this._serializeValue(value)] };
+        return { sql: `${col} != ?`, params: [this._serializeValue(value, column)] };
       case Op.gt:
-        return { sql: `${col} > ?`, params: [this._serializeValue(value)] };
+        return { sql: `${col} > ?`, params: [this._serializeValue(value, column)] };
       case Op.gte:
-        return { sql: `${col} >= ?`, params: [this._serializeValue(value)] };
+        return { sql: `${col} >= ?`, params: [this._serializeValue(value, column)] };
       case Op.lt:
-        return { sql: `${col} < ?`, params: [this._serializeValue(value)] };
+        return { sql: `${col} < ?`, params: [this._serializeValue(value, column)] };
       case Op.lte:
-        return { sql: `${col} <= ?`, params: [this._serializeValue(value)] };
+        return { sql: `${col} <= ?`, params: [this._serializeValue(value, column)] };
       case Op.like:
-        return { sql: `${col} LIKE ?`, params: [this._serializeValue(value)] };
+        return { sql: `${col} LIKE ?`, params: [this._serializeValue(value, column)] };
       case Op.notLike:
-        return { sql: `${col} NOT LIKE ?`, params: [this._serializeValue(value)] };
+        return { sql: `${col} NOT LIKE ?`, params: [this._serializeValue(value, column)] };
       case Op.in: {
         if (!Array.isArray(value)) throw new ValidationError('Op.in requires an array', { code: 'SEQ_VALIDATION_OPERATOR' });
         if (value.length === 0) return { sql: '0 = 1', params: [] };
-        const inParams = value.map(v => this._serializeValue(v));
+        const inParams = value.map(v => this._serializeValue(v, column));
         return { sql: `${col} IN (${inParams.map(() => '?').join(', ')})`, params: inParams };
       }
       case Op.notIn: {
         if (!Array.isArray(value)) throw new ValidationError('Op.notIn requires an array', { code: 'SEQ_VALIDATION_OPERATOR' });
         if (value.length === 0) return { sql: '1 = 1', params: [] };
-        const notInParams = value.map(v => this._serializeValue(v));
+        const notInParams = value.map(v => this._serializeValue(v, column));
         return { sql: `${col} NOT IN (${notInParams.map(() => '?').join(', ')})`, params: notInParams };
       }
       case Op.between:
         if (!Array.isArray(value) || value.length !== 2) throw new ValidationError('Op.between requires a two-item array', { code: 'SEQ_VALIDATION_OPERATOR' });
-        return { sql: `${col} BETWEEN ? AND ?`, params: [this._serializeValue(value[0]), this._serializeValue(value[1])] };
+        return { sql: `${col} BETWEEN ? AND ?`, params: [this._serializeValue(value[0], column), this._serializeValue(value[1], column)] };
       case Op.notBetween:
         if (!Array.isArray(value) || value.length !== 2) throw new ValidationError('Op.notBetween requires a two-item array', { code: 'SEQ_VALIDATION_OPERATOR' });
-        return { sql: `${col} NOT BETWEEN ? AND ?`, params: [this._serializeValue(value[0]), this._serializeValue(value[1])] };
+        return { sql: `${col} NOT BETWEEN ? AND ?`, params: [this._serializeValue(value[0], column), this._serializeValue(value[1], column)] };
       default:
         throw new ValidationError('Unknown where operator', { code: 'SEQ_VALIDATION_OPERATOR' });
     }
@@ -3942,7 +3942,7 @@ class DMLAbstract extends BaseAbstract {
         continue;
       }
 
-      const condition = this._buildCondition(this._colRef(k, alias), v);
+      const condition = this._buildCondition(this._colRef(k, alias), v, schema.columns?.[schema.columnToAttr?.[k] || k]);
       conditions.push(condition.sql);
       params.push(...condition.params);
     }
@@ -4371,7 +4371,7 @@ class DMLAbstract extends BaseAbstract {
       if (primaryKeys.length === 0) return [];
     }
     const setClauses = Object.keys(colValues).map(k => `${this._q(k)} = ?`);
-    const params = [...Object.values(colValues).map(v => this._serializeValue(v))];
+    const params = Object.entries(colValues).map(([col, value]) => this._serializeValue(value, schema.columns[schema.columnToAttr[col] || col]));
     const where = this._buildWhere(options.where, schema);
     const sql = `UPDATE ${this._q(tableName)} SET ${setClauses.join(', ')}${where.sql}`;
     params.push(...where.params);
@@ -6934,8 +6934,8 @@ class Oracle11DDL extends DDLAbstract {
     const columns = []; const primaryKeys = [];
     for (const [attr, column] of Object.entries(def.columns)) {
       const name = column.field || attr;
-      const parts = [this._q(name), this._adapter.mapDataType(column.type)];
-      if (column.defaultValue !== undefined && column.defaultValue !== null && typeof column.defaultValue !== 'function') parts.push(`DEFAULT ${this._formatDefaultValue(column.defaultValue)}`);
+      const parts = [this._q(name), this._adapter.mapDataType(column.type, column)];
+      if (column.defaultValue !== undefined && column.defaultValue !== null && typeof column.defaultValue !== 'function') parts.push(`DEFAULT ${this._formatDefaultValue(column.defaultValue, column)}`);
       if (!column.allowNull && !column.primaryKey) parts.push(`CONSTRAINT ${this._q(this._constraintName('nn', def.tableName, [name]))} NOT NULL`);
       columns.push(parts.join(' ')); if (column.primaryKey) primaryKeys.push(name);
     }
@@ -7007,10 +7007,10 @@ class Oracle11DDL extends DDLAbstract {
   async addColumns(tableName, missingColumns) {
     const schema = this._adapter.schemas.get(tableName);
     for (const [attr, column] of Object.entries(missingColumns)) {
-      const name = column.field || attr; const parts = [this._q(name), this._adapter.mapDataType(column.type)];
+      const name = column.field || attr; const parts = [this._q(name), this._adapter.mapDataType(column.type, column)];
       if (column.defaultValue !== undefined && column.defaultValue !== null) {
         const value = typeof column.defaultValue === 'function' ? column.defaultValue() : column.defaultValue;
-        parts.push(`DEFAULT ${this._formatDefaultValue(value)}`);
+        parts.push(`DEFAULT ${this._formatDefaultValue(value, column)}`);
       }
       if (!column.allowNull) parts.push(`CONSTRAINT ${this._q(this._constraintName('nn', tableName, [name]))} NOT NULL`);
       await this._execute(`ALTER TABLE ${this._q(tableName)} ADD (${parts.join(' ')})`);
@@ -7034,7 +7034,8 @@ class Oracle11DDL extends DDLAbstract {
     await this._execute(`ALTER TABLE ${this._q(tableName)} ADD CONSTRAINT ${this._q(fk.constraintName)} FOREIGN KEY (${this._q(fk.columnName)}) REFERENCES ${this._q(fk.references.table)} (${this._q(fk.references.column)})${deleteClause}`);
     this._adapter.schemas.get(tableName).foreignKeys.push({ ...fk });
   }
-  _formatDefaultValue(value) { 
+  _formatDefaultValue(value, column) {
+    if (typeof value === 'boolean') value = this._adapter.serializeBoolean(value, column);
     if (value === null) return 'NULL'; 
     if (value instanceof Date) return `TO_DATE('${value.toISOString().slice(0, 19).replace('T', ' ')}', 'YYYY-MM-DD HH24:MI:SS')`; 
     if (typeof value === 'string') return `'${value.replaceAll("'", "''")}'`; 
@@ -7086,6 +7087,14 @@ class Oracle11DML extends DMLAbstract {
   _usesSequenceForAutoIncrement() { return true; }
   _sequenceName(tableName) { return this._adapter.sequenceName(tableName); }
 
+  _applyDefaults(record, schema) {
+    const nullBooleans = Object.entries(schema.columns)
+      .filter(([attr, column]) => column.type?.constructor?.name === 'BooleanType' && record[schema.attrToColumn[attr] || attr] === null)
+      .map(([attr]) => schema.attrToColumn[attr] || attr);
+    super._applyDefaults(record, schema);
+    for (const column of nullBooleans) record[column] = null;
+  }
+
   async count(model, options = {}) {
     this._assertTransaction(options);
     const { tableName, schema, alias } = this._schema(model);
@@ -7108,7 +7117,7 @@ class Oracle11DML extends DMLAbstract {
     const params = [];
     const valuesSql = columns.map(column => {
       if (record[column]?.__oracleSequence) return `${this._q(record[column].__oracleSequence)}.NEXTVAL`;
-      params.push(this._serializeValue(record[column]));
+      params.push(this._serializeValue(record[column], schema.columns[schema.columnToAttr[column]]));
       return `:${++bindIndex}`;
     }).join(', ');
     let sql = `INSERT INTO ${this._q(tableName)} (${columns.map(column => this._q(column)).join(', ')}) VALUES (${valuesSql})`;
@@ -7171,7 +7180,7 @@ class Oracle11DML extends DMLAbstract {
     await this._adapter.ddl.truncateTable(tableName);
   }
 
-  _serializeValue(value) { if (value instanceof Date) return value; if (value === undefined) return null; if (typeof value === 'boolean') return value ? 1 : 0; if (Array.isArray(value) || (typeof value === 'object' && value !== null)) return JSON.stringify(value); return value; }
+  _serializeValue(value, column) { if (value instanceof Date) return value; if (value === undefined) return null; if (typeof value === 'boolean') return column?.type?.constructor?.name === 'BooleanType' ? this._adapter.serializeBoolean(value, column) : (value ? 1 : 0); if (Array.isArray(value) || (typeof value === 'object' && value !== null)) return JSON.stringify(value); return value; }
   _mapRows(rows, model, schema, options = {}) {
     return rows.map(row => new model(this._toAttrNames(row, schema), {
       _isNew: false,
@@ -7187,7 +7196,7 @@ class Oracle11DML extends DMLAbstract {
       if (['ArrayType', 'ObjectType', 'JSONType'].includes(type) && typeof value === 'string') { 
         try { result[attr] = JSON.parse(value); } catch { result[attr] = value; } 
       } else if (type === 'BooleanType') {
-        result[attr] = value === true || value === 1 || (typeof value === 'string' && ['1', 'S', 'Y', 'TRUE'].includes(value.trim().toUpperCase()));
+        result[attr] = this._adapter.deserializeBoolean(value, schema.columns[attr]);
       }else if (type === 'DateType' && typeof value === 'string') {
         result[attr] = new Date(value); 
       }else if (type === 'IntegerType' || type === 'DecimalType' || type === 'NumberType') {
@@ -7235,6 +7244,7 @@ class Oracle11Adapter extends BaseAdapter {
   };
   constructor(options = {}) {
     super({ fkStrategy: 'alter', ...options });
+    this.booleanValues = this._validateBooleanValues(options.booleanValues);
     this._pool = null; this._connectionOptions = this._normalizeConnectionOptions(options);
     this.ddl = new Oracle11DDL(this); this.dml = new Oracle11DML(this); this.dcl = null; this.tcl = new Oracle11TCL(this);
   }
@@ -7293,14 +7303,63 @@ class Oracle11Adapter extends BaseAdapter {
   }
   sequenceName(tableName) { const prefix = 'seq_'; const safe = String(tableName).replace(/[^A-Za-z0-9_$#]/g, '_'); return `${prefix}${safe}`.slice(0, 30); }
 
-  mapDataType(dataType) {
+  _validateBooleanValues(values) {
+    if (values === undefined) return undefined;
+    const valid = value => (typeof value === 'string' && value.trim().length > 0 && value.length <= 4000)
+      || (typeof value === 'number' && Number.isFinite(value));
+    if (!values || !valid(values.true) || !valid(values.false)
+      || typeof values.true !== typeof values.false
+      || this._booleanKey(values.true) === this._booleanKey(values.false)) {
+      throw new ConfigurationError('booleanValues requires distinct true and false values, both non-empty strings or finite numbers', { code: 'SEQ_ORACLE_INVALID_BOOLEAN_VALUES' });
+    }
+    return { true: values.true, false: values.false };
+  }
+
+  _booleanKey(value) { return String(value).trim().toUpperCase(); }
+
+  booleanValuesFor(column) { return column?.booleanValues ?? this.booleanValues ?? { true: 1, false: 0 }; }
+
+  serializeBoolean(value, column) {
+    if (typeof value !== 'boolean') return value;
+    return this.booleanValuesFor(column)[value ? 'true' : 'false'];
+  }
+
+  deserializeBoolean(value, column) {
+    if (value === null || value === undefined || typeof value === 'boolean') return value;
+    const values = this.booleanValuesFor(column);
+    const key = this._booleanKey(value);
+    if (key === this._booleanKey(values.true)) return true;
+    if (key === this._booleanKey(values.false)) return false;
+    return value === 1 || (typeof value === 'string' && ['1', 'S', 'Y', 'TRUE'].includes(key));
+  }
+
+  buildTableDefinition(modelClass, context) {
+    const definition = super.buildTableDefinition(modelClass, context);
+    for (const [attr, column] of Object.entries(definition.columns)) {
+      const values = modelClass.rawAttributes[attr]?.booleanValues;
+      if (values !== undefined) {
+        if (column.type?.constructor?.name !== 'BooleanType') {
+          throw new ConfigurationError('booleanValues can only be used with BOOLEAN attributes', { code: 'SEQ_ORACLE_INVALID_BOOLEAN_VALUES' });
+        }
+        column.booleanValues = this._validateBooleanValues(values);
+      }
+    }
+    return definition;
+  }
+
+  mapDataType(dataType, column) {
     const name = dataType?.constructor?.name || String(dataType);
     switch (name) {
       case 'IntegerType': return 'NUMBER(10)';
       case 'DecimalType': return `NUMBER(${dataType.options?.precision ?? 10}, ${dataType.options?.scale ?? 2})`;
       case 'NumberType': return `NUMBER(${dataType.options?.precision ?? 10}, ${dataType.options?.scale ?? 0})`;
       case 'StringType': return `VARCHAR2(${Math.min(dataType.options?.length ?? 255, 4000)})`;
-      case 'BooleanType': return 'NUMBER(1)';
+      case 'BooleanType': {
+        const values = this.booleanValuesFor(column);
+        return typeof values.true === 'string'
+          ? `VARCHAR2(${Math.max(values.true.length, values.false.length)} CHAR)`
+          : (column?.booleanValues || this.booleanValues ? 'NUMBER' : 'NUMBER(1)');
+      }
       case 'DateType': return 'DATE';
       case 'ArrayType': case 'ObjectType': case 'JSONType': return 'VARCHAR2(4000)';
       default: return 'VARCHAR2(4000)';
@@ -7332,7 +7391,7 @@ class Oracle11Adapter extends BaseAdapter {
     return 0;
   }
   _dependencyWarning(message) { if (this._seq) this._log('error', message); else console.error(`[Seq] ${message}`); }
-  _normalizeConnectionOptions(options) { const { naming, fkStrategy, eager, connectString, user, password, poolMin, poolMax, poolIncrement, ...rest } = options; return { user, password, connectString, poolMin: poolMin ?? 0, poolMax: poolMax ?? 4, poolIncrement: poolIncrement ?? 1, ...rest }; }
+  _normalizeConnectionOptions(options) { const { naming, fkStrategy, eager, booleanValues, connectString, user, password, poolMin, poolMax, poolIncrement, ...rest } = options; return { user, password, connectString, poolMin: poolMin ?? 0, poolMax: poolMax ?? 4, poolIncrement: poolIncrement ?? 1, ...rest }; }
 }
 
 class Oracle12Adapter extends Oracle11Adapter {

@@ -43,6 +43,14 @@ export class Oracle11DML extends DMLAbstract {
   _usesSequenceForAutoIncrement() { return true; }
   _sequenceName(tableName) { return this._adapter.sequenceName(tableName); }
 
+  _applyDefaults(record, schema) {
+    const nullBooleans = Object.entries(schema.columns)
+      .filter(([attr, column]) => column.type?.constructor?.name === 'BooleanType' && record[schema.attrToColumn[attr] || attr] === null)
+      .map(([attr]) => schema.attrToColumn[attr] || attr);
+    super._applyDefaults(record, schema);
+    for (const column of nullBooleans) record[column] = null;
+  }
+
   async count(model, options = {}) {
     this._assertTransaction(options);
     const { tableName, schema, alias } = this._schema(model);
@@ -65,7 +73,7 @@ export class Oracle11DML extends DMLAbstract {
     const params = [];
     const valuesSql = columns.map(column => {
       if (record[column]?.__oracleSequence) return `${this._q(record[column].__oracleSequence)}.NEXTVAL`;
-      params.push(this._serializeValue(record[column]));
+      params.push(this._serializeValue(record[column], schema.columns[schema.columnToAttr[column]]));
       return `:${++bindIndex}`;
     }).join(', ');
     let sql = `INSERT INTO ${this._q(tableName)} (${columns.map(column => this._q(column)).join(', ')}) VALUES (${valuesSql})`;
@@ -128,7 +136,7 @@ export class Oracle11DML extends DMLAbstract {
     await this._adapter.ddl.truncateTable(tableName);
   }
 
-  _serializeValue(value) { if (value instanceof Date) return value; if (value === undefined) return null; if (typeof value === 'boolean') return value ? 1 : 0; if (Array.isArray(value) || (typeof value === 'object' && value !== null)) return JSON.stringify(value); return value; }
+  _serializeValue(value, column) { if (value instanceof Date) return value; if (value === undefined) return null; if (typeof value === 'boolean') return column?.type?.constructor?.name === 'BooleanType' ? this._adapter.serializeBoolean(value, column) : (value ? 1 : 0); if (Array.isArray(value) || (typeof value === 'object' && value !== null)) return JSON.stringify(value); return value; }
   _mapRows(rows, model, schema, options = {}) {
     return rows.map(row => new model(this._toAttrNames(row, schema), {
       _isNew: false,
@@ -144,7 +152,7 @@ export class Oracle11DML extends DMLAbstract {
       if (['ArrayType', 'ObjectType', 'JSONType'].includes(type) && typeof value === 'string') { 
         try { result[attr] = JSON.parse(value); } catch { result[attr] = value; } 
       } else if (type === 'BooleanType') {
-        result[attr] = value === true || value === 1 || (typeof value === 'string' && ['1', 'S', 'Y', 'TRUE'].includes(value.trim().toUpperCase()));
+        result[attr] = this._adapter.deserializeBoolean(value, schema.columns[attr]);
       }else if (type === 'DateType' && typeof value === 'string') {
         result[attr] = new Date(value); 
       }else if (type === 'IntegerType' || type === 'DecimalType' || type === 'NumberType') {

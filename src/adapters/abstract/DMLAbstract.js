@@ -104,7 +104,7 @@ export class DMLAbstract extends BaseAbstract {
     return v;
   }
 
-  _buildCondition(col, rawValue) {
+  _buildCondition(col, rawValue, column) {
     if (rawValue !== null && typeof rawValue === 'object' && !Array.isArray(rawValue)
       && Object.getOwnPropertySymbols(rawValue).length > 1) {
       throw new ValidationError('A field condition can contain only one operator', { code: 'SEQ_VALIDATION_OPERATOR' });
@@ -113,40 +113,40 @@ export class DMLAbstract extends BaseAbstract {
     switch (op) {
       case Op.eq:
         if (value === null) return { sql: `${col} IS NULL`, params: [] };
-        return { sql: `${col} = ?`, params: [this._serializeValue(value)] };
+        return { sql: `${col} = ?`, params: [this._serializeValue(value, column)] };
       case Op.ne:
         if (value === null) return { sql: `${col} IS NOT NULL`, params: [] };
-        return { sql: `${col} != ?`, params: [this._serializeValue(value)] };
+        return { sql: `${col} != ?`, params: [this._serializeValue(value, column)] };
       case Op.gt:
-        return { sql: `${col} > ?`, params: [this._serializeValue(value)] };
+        return { sql: `${col} > ?`, params: [this._serializeValue(value, column)] };
       case Op.gte:
-        return { sql: `${col} >= ?`, params: [this._serializeValue(value)] };
+        return { sql: `${col} >= ?`, params: [this._serializeValue(value, column)] };
       case Op.lt:
-        return { sql: `${col} < ?`, params: [this._serializeValue(value)] };
+        return { sql: `${col} < ?`, params: [this._serializeValue(value, column)] };
       case Op.lte:
-        return { sql: `${col} <= ?`, params: [this._serializeValue(value)] };
+        return { sql: `${col} <= ?`, params: [this._serializeValue(value, column)] };
       case Op.like:
-        return { sql: `${col} LIKE ?`, params: [this._serializeValue(value)] };
+        return { sql: `${col} LIKE ?`, params: [this._serializeValue(value, column)] };
       case Op.notLike:
-        return { sql: `${col} NOT LIKE ?`, params: [this._serializeValue(value)] };
+        return { sql: `${col} NOT LIKE ?`, params: [this._serializeValue(value, column)] };
       case Op.in: {
         if (!Array.isArray(value)) throw new ValidationError('Op.in requires an array', { code: 'SEQ_VALIDATION_OPERATOR' });
         if (value.length === 0) return { sql: '0 = 1', params: [] };
-        const inParams = value.map(v => this._serializeValue(v));
+        const inParams = value.map(v => this._serializeValue(v, column));
         return { sql: `${col} IN (${inParams.map(() => '?').join(', ')})`, params: inParams };
       }
       case Op.notIn: {
         if (!Array.isArray(value)) throw new ValidationError('Op.notIn requires an array', { code: 'SEQ_VALIDATION_OPERATOR' });
         if (value.length === 0) return { sql: '1 = 1', params: [] };
-        const notInParams = value.map(v => this._serializeValue(v));
+        const notInParams = value.map(v => this._serializeValue(v, column));
         return { sql: `${col} NOT IN (${notInParams.map(() => '?').join(', ')})`, params: notInParams };
       }
       case Op.between:
         if (!Array.isArray(value) || value.length !== 2) throw new ValidationError('Op.between requires a two-item array', { code: 'SEQ_VALIDATION_OPERATOR' });
-        return { sql: `${col} BETWEEN ? AND ?`, params: [this._serializeValue(value[0]), this._serializeValue(value[1])] };
+        return { sql: `${col} BETWEEN ? AND ?`, params: [this._serializeValue(value[0], column), this._serializeValue(value[1], column)] };
       case Op.notBetween:
         if (!Array.isArray(value) || value.length !== 2) throw new ValidationError('Op.notBetween requires a two-item array', { code: 'SEQ_VALIDATION_OPERATOR' });
-        return { sql: `${col} NOT BETWEEN ? AND ?`, params: [this._serializeValue(value[0]), this._serializeValue(value[1])] };
+        return { sql: `${col} NOT BETWEEN ? AND ?`, params: [this._serializeValue(value[0], column), this._serializeValue(value[1], column)] };
       default:
         throw new ValidationError('Unknown where operator', { code: 'SEQ_VALIDATION_OPERATOR' });
     }
@@ -178,7 +178,7 @@ export class DMLAbstract extends BaseAbstract {
         continue;
       }
 
-      const condition = this._buildCondition(this._colRef(k, alias), v);
+      const condition = this._buildCondition(this._colRef(k, alias), v, schema.columns?.[schema.columnToAttr?.[k] || k]);
       conditions.push(condition.sql);
       params.push(...condition.params);
     }
@@ -607,7 +607,7 @@ export class DMLAbstract extends BaseAbstract {
       if (primaryKeys.length === 0) return [];
     }
     const setClauses = Object.keys(colValues).map(k => `${this._q(k)} = ?`);
-    const params = [...Object.values(colValues).map(v => this._serializeValue(v))];
+    const params = Object.entries(colValues).map(([col, value]) => this._serializeValue(value, schema.columns[schema.columnToAttr[col] || col]));
     const where = this._buildWhere(options.where, schema);
     const sql = `UPDATE ${this._q(tableName)} SET ${setClauses.join(', ')}${where.sql}`;
     params.push(...where.params);

@@ -812,6 +812,34 @@ Instala `oracledb` para usar Oracle. Oracle 11 pagina con `ROWNUM` y genera IDs 
 
 Los ejemplos aceptan `SEQ_EXAMPLE_ADAPTER=oracle11` o `oracle12`; por defecto usan SQLite. Las suites de integración se ejecutan con `npm run test:oracle11` y `npm run test:oracle12` usando las variables `ORACLE_USER`, `ORACLE_PASSWORD` y `ORACLE_CONNECT_STRING` de `.env.example`.
 
+#### Valores booleanos en Oracle
+
+Por defecto, Oracle guarda los booleanos como `1` y `0`. Puedes configurar otro par en `Oracle11Adapter` o `Oracle12Adapter`:
+
+```js
+const adapter = new Oracle11Adapter({
+  user: process.env.ORACLE_USER,
+  password: process.env.ORACLE_PASSWORD,
+  connectString: process.env.ORACLE_CONNECT_STRING,
+  booleanValues: { true: 'S', false: 'N' }
+});
+```
+
+Cada atributo `BOOLEAN` puede sobrescribir ese par:
+
+```js
+activo: {
+  type: DataTypes.BOOLEAN,
+  booleanValues: { true: 'Y', false: 'N' }
+}
+```
+
+La prioridad es atributo, adaptador y finalmente `1/0`. Ambos valores deben ser textos no vacíos o ambos números finitos, y deben ser distintos incluso al ignorar mayúsculas y espacios exteriores. La configuración se aplica a lecturas, escrituras, filtros y valores por defecto. Desde JavaScript se siguen usando `true`, `false` y `null`; un `null` explícito se conserva incluso si el atributo tiene un valor por defecto.
+
+Al leer texto se ignoran mayúsculas y espacios exteriores. Primero se reconoce el par configurado; los indicadores históricos `1`, `S`, `Y` y `true` también se reconocen como verdaderos cuando no coinciden con el valor falso configurado.
+
+Para tablas nuevas, los pares de texto generan columnas `VARCHAR2` con espacio para ambos valores, y los pares numéricos generan columnas `NUMBER`. Las columnas existentes deben tener un tipo compatible con el par elegido; esta opción no convierte los datos existentes. La configuración solo afecta a Oracle.
+
 ## Errores
 
 Todos los errores propios extienden `SeqError` e incluyen `code` y opcionalmente `details`.
