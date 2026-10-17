@@ -5591,13 +5591,22 @@ class SQLiteDDL extends DDLAbstract {
 
   async createTableStructure(def) {
     const colDefs = [];
+    const primaryKeys = Object.entries(def.columns)
+      .filter(([, column]) => column.primaryKey)
+      .map(([attr, column]) => column.field || attr);
+    const compositePrimaryKey = primaryKeys.length > 1;
+    if (compositePrimaryKey && (def.autoIncrement || Object.values(def.columns).some(column => column.autoIncrement))) {
+      throw new AdapterError('SQLite does not support AUTOINCREMENT with a composite primary key', {
+        code: 'SEQ_SQLITE_COMPOSITE_PK_AUTOINCREMENT'
+      });
+    }
     for (const [attrName, colDef] of Object.entries(def.columns)) {
       const colName = colDef.field || attrName;
       const parts = [this._q(colName)];
       parts.push(this._adapter.mapDataType(colDef.type));
-      if (colDef.primaryKey && !def.autoIncrement) parts.push('PRIMARY KEY');
       if (colDef.autoIncrement) parts.push('PRIMARY KEY AUTOINCREMENT');
-      if (!colDef.allowNull && !colDef.primaryKey) parts.push('NOT NULL');
+      else if (colDef.primaryKey && !compositePrimaryKey) parts.push('PRIMARY KEY');
+      if (!colDef.allowNull && (!colDef.primaryKey || compositePrimaryKey)) parts.push('NOT NULL');
       if (colDef.defaultCurrentTimestamp) {
         parts.push('DEFAULT CURRENT_TIMESTAMP');
       } else if (colDef.defaultValue !== undefined && colDef.defaultValue !== null && typeof colDef.defaultValue !== 'function') {
@@ -5605,6 +5614,8 @@ class SQLiteDDL extends DDLAbstract {
       }
       colDefs.push(parts.join(' '));
     }
+
+    if (compositePrimaryKey) colDefs.push(`PRIMARY KEY (${primaryKeys.map(key => this._q(key)).join(', ')})`);
 
     for (const fk of (def.foreignKeys || [])) {
       if (this._adapter.fkStrategy !== 'inline') continue;

@@ -8,6 +8,72 @@ import { SQLiteError } from '../src/adapters/sqlite/SQLiteError.js';
 import { ErrorAbstract } from '../src/adapters/abstract/ErrorAbstract.js';
 import { MapAdapter } from '../src/adapters/map/MapAdapter.js';
 
+describe('SQLite composite primary-key DDL', () => {
+  it('creates a table-level primary key using ordered, quoted physical column names', async () => {
+    const adapter = new SQLiteAdapter({ database: ':memory:' });
+    await adapter.connect();
+    try {
+      await adapter.ddl.createTable({
+        tableName: 'composite_keys',
+        columns: {
+          companyId: { type: DataTypes.INTEGER, field: 'company"id', primaryKey: true, allowNull: false },
+          itemCode: { type: DataTypes.STRING(20), field: 'item_code', primaryKey: true, allowNull: false }
+        }
+      });
+      const sql = adapter._db.prepare("SELECT sql FROM sqlite_master WHERE name = 'composite_keys'").get().sql;
+      assert.equal((sql.match(/PRIMARY KEY/g) || []).length, 1);
+      assert.ok(sql.includes('PRIMARY KEY ("company""id", "item_code")'));
+      const columns = adapter._db.pragma('table_info(composite_keys)');
+      assert.deepEqual(columns.map(column => [column.name, column.pk]), [['company"id', 1], ['item_code', 2]]);
+      const insert = 'INSERT INTO "composite_keys" ("company""id", "item_code") VALUES (?, ?)';
+      await adapter.dml._execute(insert, [1, 'A']);
+      await adapter.dml._execute(insert, [1, 'B']);
+      await adapter.dml._execute(insert, [2, 'A']);
+      assert.throws(() => adapter.dml._execute(insert, [1, 'A']), /UNIQUE constraint failed/);
+      assert.throws(() => adapter.dml._execute(insert, [null, 'A']), /NOT NULL constraint failed/);
+    } finally {
+      await adapter.close();
+    }
+  });
+
+  it('rejects AUTOINCREMENT in composite primary keys before creating the table', async () => {
+    const adapter = new SQLiteAdapter({ database: ':memory:' });
+    await adapter.connect();
+    try {
+      for (const columnAutoIncrement of [false, true]) {
+        await assert.rejects(() => adapter.ddl.createTable({
+          tableName: 'invalid_composite',
+          autoIncrement: columnAutoIncrement ? null : 'id',
+          columns: {
+            id: { type: DataTypes.INTEGER, primaryKey: true, autoIncrement: columnAutoIncrement },
+            code: { type: DataTypes.INTEGER, primaryKey: true }
+          }
+        }), { code: 'SEQ_SQLITE_COMPOSITE_PK_AUTOINCREMENT' });
+        assert.equal(await adapter.ddl.hasTable('invalid_composite'), false);
+        assert.equal(adapter.schemas.has('invalid_composite'), false);
+      }
+    } finally {
+      await adapter.close();
+    }
+  });
+
+  it('preserves inline primary keys and generated IDs for a single column', async () => {
+    const adapter = new SQLiteAdapter({ database: ':memory:' });
+    await adapter.connect();
+    try {
+      for (const autoIncrement of [false, true]) {
+        const table = autoIncrement ? 'single_auto' : 'single_key';
+        await adapter.ddl.createTable({ tableName: table, columns: { id: { type: DataTypes.INTEGER, primaryKey: true, autoIncrement } } });
+        await adapter.dml._execute(`INSERT INTO "${table}" DEFAULT VALUES`);
+        await adapter.dml._execute(`INSERT INTO "${table}" DEFAULT VALUES`);
+        assert.deepEqual(adapter._db.prepare(`SELECT id FROM "${table}" ORDER BY id`).all(), [{ id: 1 }, { id: 2 }]);
+      }
+    } finally {
+      await adapter.close();
+    }
+  });
+});
+
 describe('SQLite Adapter', () => {
   let seq, adapter;
 
