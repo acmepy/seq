@@ -225,7 +225,7 @@ export class MySQLDDL extends DDLAbstract {
   }
 
   async addForeignKey(tableName, fk) {
-    const sql = `ALTER TABLE ${this._q(tableName)} ADD CONSTRAINT ${this._q(fk.constraintName)} FOREIGN KEY (${this._q(fk.columnName)}) REFERENCES ${this._q(fk.references.table)} (${this._q(fk.references.column)}) ON DELETE ${fk.onDelete || 'RESTRICT'} ON UPDATE ${fk.onUpdate || 'RESTRICT'}`;
+    const sql = `ALTER TABLE ${this._q(tableName)} ADD CONSTRAINT ${this._q(fk.constraintName)} FOREIGN KEY (${(fk.columnNames || [fk.columnName]).map(column => this._q(column)).join(', ')}) REFERENCES ${this._q(fk.references.table)} (${(fk.references.columns || [fk.references.column]).map(column => this._q(column)).join(', ')}) ON DELETE ${fk.onDelete || 'RESTRICT'} ON UPDATE ${fk.onUpdate || 'RESTRICT'}`;
     await this._execute(sql);
     const schema = this._adapter.schemas.get(tableName);
     schema.foreignKeys.push({ ...fk });

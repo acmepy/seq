@@ -4,6 +4,7 @@ import { ModelError } from './errors/ModelError.js';
 import { ValidationError, ValidationWhereError, ValidationOrderError, ValidationLimitError, ValidationOffsetError } from './errors/ValidationError.js';
 import { DataTypes } from '../data-types/index.js';
 import { normalizeInclude, resolveAssociation, resolveIncludeAlias } from '../utils/include.js';
+import { primaryAttributes, keyObject, valuesFor } from '../utils/keys.js';
 
 /**
  * Base Model class. All user-defined models must extend this.
@@ -22,6 +23,7 @@ export class Model {
     this.dataValues = {};
     this._changed = {};
     this._isNew = options._isNew !== undefined ? options._isNew : true;
+    this._originalPrimaryKey = keyObject(primaryAttributes(this.constructor), valuesFor(values, primaryAttributes(this.constructor)));
 
     const Ctor = this.constructor;
     const attrs = Ctor.rawAttributes || {};
@@ -61,6 +63,7 @@ export class Model {
 
     this.rawAttributes = {};
     this.primaryKeyAttribute = null;
+    this.primaryKeyAttributes = [];
     this.autoIncrementAttribute = null;
 
     for (const [name, def] of Object.entries(attributes)) {
@@ -72,14 +75,15 @@ export class Model {
       }
       this.rawAttributes[name] = { ...def, type: this._normalizeDataType(def.type) };
       if (def.primaryKey) {
-        if (this.primaryKeyAttribute) throw new Error('Model must not have more than one primaryKey attribute');
-        this.primaryKeyAttribute = name;
+        this.primaryKeyAttributes.push(name);
       }
       if (def.autoIncrement) {
         if (this.autoIncrementAttribute) throw new Error('Model must not have more than one autoIncrement attribute');
         this.autoIncrementAttribute = name;
       }
     }
+
+    this.primaryKeyAttribute = this.primaryKeyAttributes.length === 1 ? this.primaryKeyAttributes[0] : null;
 
     // Timestamps
     const timestamps = options.timestamps !== undefined ? options.timestamps : true;
@@ -150,8 +154,7 @@ export class Model {
 
   static hasMany(target, options = {}) {
     if (!target) throw new ModelError('hasMany requires a target model', { code: 'SEQ_ASSOCIATION_INVALID_TARGET' });
-    const fkAttr = options.foreignKey || this._defaultForeignKeyName(this.modelName, target.primaryKeyAttribute || 'id');
-    if (target.rawAttributes && !target.rawAttributes[fkAttr]) throw new ModelError(`Target model "${target.modelName}" must have a "${fkAttr}" attribute for hasMany association`, { code: 'SEQ_ASSOCIATION_MISSING_FK', details: { target: target.modelName, foreignKey: fkAttr } });
+    const fkAttr = this._associationForeignKey(target, options, false);
     if (!this.associations) this.associations = {};
     if (!options.as) options.as = (target.modelName || target.name || 'unknown').toLowerCase() + 's';
     const assoc = new Association('hasMany', this, target, { ...options, foreignKey: fkAttr });
@@ -161,8 +164,7 @@ export class Model {
 
   static hasOne(target, options = {}) {
     if (!target) throw new ModelError('hasOne requires a target model', { code: 'SEQ_ASSOCIATION_INVALID_TARGET' });
-    const fkAttr = options.foreignKey || this._defaultForeignKeyName(this.modelName, target.primaryKeyAttribute || 'id');
-    if (target.rawAttributes && !target.rawAttributes[fkAttr]) throw new ModelError(`Target model "${target.modelName}" must have a "${fkAttr}" attribute for hasOne association`, { code: 'SEQ_ASSOCIATION_MISSING_FK', details: { target: target.modelName, foreignKey: fkAttr } });
+    const fkAttr = this._associationForeignKey(target, options, false);
     if (!this.associations) this.associations = {};
     if (!options.as) options.as = (target.modelName || target.name || 'unknown').toLowerCase();
     const assoc = new Association('hasOne', this, target, { ...options, foreignKey: fkAttr });
@@ -172,8 +174,7 @@ export class Model {
 
   static belongsTo(target, options = {}) {
     if (!target) throw new ModelError('belongsTo requires a target model', { code: 'SEQ_ASSOCIATION_INVALID_TARGET' });
-    const fkAttr = options.foreignKey || this._defaultForeignKeyName(target.modelName || target.name, target.primaryKeyAttribute || 'id');
-    if (this.rawAttributes && !this.rawAttributes[fkAttr]) throw new ModelError(`Model "${this.modelName}" must have a "${fkAttr}" attribute for belongsTo association`,{ code: 'SEQ_ASSOCIATION_MISSING_FK', details: { source: this.modelName, foreignKey: fkAttr } });
+    const fkAttr = this._associationForeignKey(target, options, true);
     if (!this.associations) this.associations = {};
     if (!options.as) options.as = (target.modelName || target.name || 'unknown').toLowerCase();
     const assoc = new Association('belongsTo', this, target, { ...options, foreignKey: fkAttr });
@@ -183,6 +184,9 @@ export class Model {
 
   static belongsToMany(target, options = {}) {
     if (!target) throw new ModelError('belongsToMany requires a target model', { code: 'SEQ_ASSOCIATION_INVALID_TARGET' });
+    if (primaryAttributes(this).length > 1 || primaryAttributes(target).length > 1 || Array.isArray(options.foreignKey) || Array.isArray(options.otherKey)) {
+      throw new ModelError('belongsToMany does not support composite keys yet', { code: 'SEQ_ASSOCIATION_COMPOSITE_MANY_TO_MANY_UNSUPPORTED' });
+    }
     if (!options.through) throw new ModelError('belongsToMany requires a "through" option', { code: 'SEQ_ASSOCIATION_MISSING_THROUGH' });
 
     const fkAttr = options.foreignKey || this._defaultForeignKeyName(this.modelName, this.primaryKeyAttribute || 'id');
@@ -193,6 +197,25 @@ export class Model {
     const assoc = new Association('belongsToMany', this, target, { ...options, ...throughInfo, foreignKey: fkAttr, otherKey });
     this._storeAssociation(assoc, target);
     return this;
+  }
+
+  static _associationForeignKey(target, options, belongsTo) {
+    const parent = belongsTo ? target : this;
+    const child = belongsTo ? this : target;
+    const keys = primaryAttributes(parent).length ? primaryAttributes(parent) : ['id'];
+    const supplied = options.foreignKey;
+    const defaultKeys = !belongsTo && keys.length === 1 ? [target.primaryKeyAttribute || 'id'] : keys;
+    const fields = supplied === undefined ? defaultKeys.map(key => this._defaultForeignKeyName(parent.modelName || parent.name, key))
+      : (Array.isArray(supplied) ? [...supplied] : [supplied]);
+    if (fields.length !== keys.length || new Set(fields).size !== fields.length || fields.some(field => typeof field !== 'string' || !field)) {
+      throw new ModelError('foreignKey must contain one distinct attribute for each referenced primary-key component, in order', { code: 'SEQ_ASSOCIATION_INVALID_FOREIGN_KEY' });
+    }
+    for (const field of fields) {
+      if (child.rawAttributes && (!child.rawAttributes[field] || child._isVirtualAttribute(child.rawAttributes[field]))) {
+        throw new ModelError(`Model "${child.modelName}" must have a "${field}" attribute for association`, { code: 'SEQ_ASSOCIATION_MISSING_FK' });
+      }
+    }
+    return fields.length === 1 ? fields[0] : fields;
   }
 
   static _storeAssociation(association, target) {
@@ -206,7 +229,7 @@ export class Model {
 
   /**
    * Returns this model's associations as include descriptors.
-   * @returns {Array<{ model: typeof Model, name: string, as: string, foreignKey: string|null, otherKey?: string|null }>}
+   * @returns {Array<{ model: typeof Model, name: string, as: string, foreignKey: string|string[]|null, otherKey?: string|null }>}
    */
   static getAssociationIncludes() {
     const seen = new Set();
@@ -370,14 +393,13 @@ export class Model {
     const nestedValue = sourceValues[alias];
     if (nestedValue === undefined) return;
 
-    const parentPK = assoc.source.primaryKeyAttribute || 'id';
-    const parentPKValue = parent.getDataValue(parentPK);
+    const foreignValues = keyObject(assoc.foreignKeys, valuesFor(parent, assoc.referencedKeys));
     const childOptions = { ...options, include: include.include || [] };
 
     if (assoc.type === 'hasMany') {
       if (!Array.isArray(nestedValue)) throw new ModelError(`Nested create include "${alias}" must be an array for hasMany association`, {code: 'SEQ_NESTED_CREATE_INVALID_VALUE', details: { model: this.modelName, include: alias, associationType: assoc.type }});
       const children = [];
-      for (const childValue of nestedValue) children.push(await assoc.target.create({ ...childValue, [assoc.foreignKey]: parentPKValue }, childOptions));
+      for (const childValue of nestedValue) children.push(await assoc.target.create({ ...childValue, ...foreignValues }, childOptions));
       parent.setDataValue(alias, children);
       return;
     }
@@ -392,7 +414,7 @@ export class Model {
         details: { model: this.modelName, include: alias, associationType: assoc.type }
       });
     }
-    const child = await assoc.target.create({ ...nestedValue, [assoc.foreignKey]: parentPKValue }, childOptions);
+    const child = await assoc.target.create({ ...nestedValue, ...foreignValues }, childOptions);
     parent.setDataValue(alias, child);
   }
 
@@ -463,15 +485,14 @@ export class Model {
     const nestedValue = sourceValues[alias];
     if (nestedValue === undefined) return;
 
-    const parentPK = assoc.source.primaryKeyAttribute || 'id';
-    const parentPKValue = parent.getDataValue(parentPK);
+    const foreignValues = keyObject(assoc.foreignKeys, valuesFor(parent, assoc.referencedKeys));
     const childOptions = { ...options, include: include.include || [] };
 
     if (assoc.type === 'hasMany') {
       if (!Array.isArray(nestedValue)) throw new ModelError(`Nested upsert include "${alias}" must be an array for hasMany association`, { code: 'SEQ_NESTED_UPSERT_INVALID_VALUE', details: { model: this.modelName, include: alias, associationType: assoc.type } });
       const children = [];
       for (const childValue of nestedValue) {
-        const [child] = await assoc.target.upsert({ ...childValue, [assoc.foreignKey]: parentPKValue }, childOptions);
+        const [child] = await assoc.target.upsert({ ...childValue, ...foreignValues }, childOptions);
         children.push(child);
       }
       parent.setDataValue(alias, children);
@@ -488,7 +509,7 @@ export class Model {
         details: { model: this.modelName, include: alias, associationType: assoc.type }
       });
     }
-    const [child] = await assoc.target.upsert({ ...nestedValue, [assoc.foreignKey]: parentPKValue }, childOptions);
+    const [child] = await assoc.target.upsert({ ...nestedValue, ...foreignValues }, childOptions);
     parent.setDataValue(alias, child);
   }
 
@@ -502,8 +523,18 @@ export class Model {
    */
   static async findByPk(id, options = {}) {
     //this._log('trace', `${this.modelName}.findByPk`, id);
-    if (!this.primaryKeyAttribute) throw new Error(`Model "${this.modelName}" has no primary key`);
-    const where = { [this.primaryKeyAttribute]: id };
+    const keys = primaryAttributes(this);
+    if (!keys.length) throw new Error(`Model "${this.modelName}" has no primary key`);
+    let where;
+    if (keys.length === 1) where = { [keys[0]]: id };
+    else {
+      const valid = value => typeof value === 'string' || typeof value === 'boolean' || typeof value === 'bigint'
+        || (typeof value === 'number' && Number.isFinite(value)) || (value instanceof Date && Number.isFinite(value.getTime()));
+      if (!id || typeof id !== 'object' || Array.isArray(id) || Object.keys(id).length !== keys.length || keys.some(key => !Object.hasOwn(id, key) || !valid(id[key]))) {
+        throw new ModelError('findByPk requires an object with every primary-key component', { code: 'SEQ_MODEL_INVALID_PRIMARY_KEY' });
+      }
+      where = keyObject(keys, valuesFor(id, keys));
+    }
     return this.findOne({ ...options, where });
   }
 
@@ -701,7 +732,9 @@ export class Model {
     const mutationOptions = { ...options, where };
     delete mutationOptions.include;
     if (options.hooks !== false) await this._runHooks('beforeUpdate', parentValues, mutationOptions);
-    const result = await this._adapter.dml.update(this, parentValues, mutationOptions);
+    const result = Object.keys(parentValues).length || this.options.timestamps
+      ? await this._adapter.dml.update(this, parentValues, mutationOptions)
+      : await this._adapter.dml.selectAll(this, mutationOptions);
     for (const parent of result) for (const include of includes) await this._replaceIncludedAssociation(parent, values, include, mutationOptions);
     if (options.hooks !== false) await this._runHooks('afterUpdate', result, mutationOptions);
     await this._invalidateCache(mutationOptions);
@@ -710,12 +743,12 @@ export class Model {
 
   static _resolveNestedUpdateWhere(values, options) {
     if (options.where) return options.where;
-    const pk = this.primaryKeyAttribute || 'id';
-    const pkValue = values?.[pk];
-    if (pkValue === undefined || pkValue === null) {
+    const keys = primaryAttributes(this).length ? primaryAttributes(this) : ['id'];
+    const pk = keys.join(', ');
+    if (keys.some(key => values?.[key] === undefined || values[key] === null)) {
       throw new ModelError(`Nested update for model "${this.modelName}" requires options.where or a "${pk}" value`, {code: 'SEQ_NESTED_UPDATE_MISSING_TARGET',details: { model: this.modelName, primaryKey: pk }});
     }
-    return { [pk]: pkValue };
+    return keyObject(keys, valuesFor(values, keys));
   }
 
   static async _replaceIncludedAssociation(parent, sourceValues, include, options) {
@@ -724,15 +757,14 @@ export class Model {
     const nestedValue = sourceValues[alias];
     if (nestedValue === undefined) return;
 
-    const parentPK = assoc.source.primaryKeyAttribute || 'id';
-    const parentPKValue = parent.getDataValue(parentPK);
+    const foreignValues = keyObject(assoc.foreignKeys, valuesFor(parent, assoc.referencedKeys));
     const childOptions = { ...options, include: include.include || [] };
 
     if (assoc.type === 'hasMany') {
       if (!Array.isArray(nestedValue)) throw new ModelError(`Nested update include "${alias}" must be an array for hasMany association`, {code: 'SEQ_NESTED_UPDATE_INVALID_VALUE', details: { model: this.modelName, include: alias, associationType: assoc.type }});
-      await assoc.target.destroy({ ...options, where: { [assoc.foreignKey]: parentPKValue } });
+      await assoc.target.destroy({ ...options, where: { ...foreignValues } });
       const children = [];
-      for (const childValue of nestedValue) children.push(await assoc.target.create({ ...childValue, [assoc.foreignKey]: parentPKValue }, childOptions));
+      for (const childValue of nestedValue) children.push(await assoc.target.create({ ...childValue, ...foreignValues }, childOptions));
       parent.setDataValue(alias, children);
       return;
     }
@@ -741,12 +773,12 @@ export class Model {
       throw new ModelError(`Nested update include "${alias}" must be an object or null for hasOne association`, {code: 'SEQ_NESTED_UPDATE_INVALID_VALUE', details: { model: this.modelName, include: alias, associationType: assoc.type }});
     }
 
-    await assoc.target.destroy({ ...options, where: { [assoc.foreignKey]: parentPKValue } });
+    await assoc.target.destroy({ ...options, where: { ...foreignValues } });
     if (nestedValue === null) {
       parent.setDataValue(alias, null);
       return;
     }
-    const child = await assoc.target.create({ ...nestedValue, [assoc.foreignKey]: parentPKValue }, childOptions);
+    const child = await assoc.target.create({ ...nestedValue, ...foreignValues }, childOptions);
     parent.setDataValue(alias, child);
   }
 
@@ -859,11 +891,14 @@ export class Model {
       await Ctor._runHooks('beforeSave', this, options);
       await Ctor._runHooks(isNew ? 'beforeCreate' : 'beforeUpdate', this, options);
     }
+    const values = { ...this.dataValues };
+    for (const assoc of Object.values(Ctor.associations || {})) delete values[assoc.as];
 
     if (this._isNew) {
-      const result = await Ctor._adapter.dml.insert(Ctor, this.dataValues, options);
+      const result = await Ctor._adapter.dml.insert(Ctor, values, options);
       Object.assign(this.dataValues, result.dataValues);
       this._isNew = false;
+      this._originalPrimaryKey = keyObject(primaryAttributes(Ctor), valuesFor(this.dataValues, primaryAttributes(Ctor)));
       this._changed = {};
       if (options.hooks !== false) {
         await Ctor._runHooks('afterCreate', this, options);
@@ -872,11 +907,12 @@ export class Model {
       await Ctor._invalidateCache(options);
       return this;
     }
-    const pk = Ctor.primaryKeyAttribute;
-    if (!pk) throw new ModelError(`Model "${Ctor.modelName}" has no primary key`, { code: 'SEQ_MODEL_NO_PRIMARY_KEY' });
-    const where = { [pk]: this.dataValues[pk] };
-    const result = await Ctor._adapter.dml.update(Ctor, this.dataValues, { ...options, where });
-    if (result && result.length > 0) Object.assign(this.dataValues, result[0].dataValues);
+    const where = this._instancePrimaryKeyWhere();
+    const result = await Ctor._adapter.dml.update(Ctor, values, { ...options, where });
+    if (result && result.length > 0) {
+      Object.assign(this.dataValues, result[0].dataValues);
+      this._originalPrimaryKey = keyObject(primaryAttributes(Ctor), valuesFor(this.dataValues, primaryAttributes(Ctor)));
+    }
     this._changed = {};
     if (options.hooks !== false) {
       await Ctor._runHooks('afterUpdate', this, options);
@@ -906,10 +942,17 @@ export class Model {
   async destroy(options = {}) {
     const Ctor = this.constructor;
     if (options.hooks !== false) await Ctor._runHooks('beforeDestroy', this, options);
-    const pk = Ctor.primaryKeyAttribute;
-    const where = { [pk]: this.dataValues[pk] };
+    const where = this._instancePrimaryKeyWhere();
     await Ctor.destroy({ ...options, where, hooks: false });
     if (options.hooks !== false) await Ctor._runHooks('afterDestroy', this, options);
+  }
+
+  _instancePrimaryKeyWhere() {
+    const keys = primaryAttributes(this.constructor);
+    if (!keys.length) throw new ModelError(`Model "${this.constructor.modelName}" has no primary key`, { code: 'SEQ_MODEL_NO_PRIMARY_KEY' });
+    const values = keys.map(key => this._originalPrimaryKey[key] ?? this.dataValues[key]);
+    if (values.some(value => value === null || value === undefined)) throw new ModelError('Instance requires every primary-key component', { code: 'SEQ_MODEL_INVALID_PRIMARY_KEY' });
+    return keyObject(keys, values);
   }
 }
 

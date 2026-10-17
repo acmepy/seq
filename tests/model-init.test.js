@@ -101,18 +101,17 @@ describe('Model', () => {
       );
     });
 
-    it('rejects more than one primaryKey', () => {
+    it('preserves the ordered attributes of a composite primary key', () => {
       class Bad extends Model {}
-      assert.throws(
-        () => Bad.init(
+      Bad.init(
           {
             a: { type: DataTypes.INTEGER, primaryKey: true },
             b: { type: DataTypes.INTEGER, primaryKey: true }
           },
           { modelName: 'Bad' }
-        ),
-        /more than one primaryKey/
       );
+      assert.deepEqual(Bad.primaryKeyAttributes, ['a', 'b']);
+      assert.equal(Bad.primaryKeyAttribute, null);
     });
 
     it('rejects more than one autoIncrement', () => {

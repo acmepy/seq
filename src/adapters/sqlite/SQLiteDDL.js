@@ -50,7 +50,7 @@ export class SQLiteDDL extends DDLAbstract {
       const fkName = fk.constraintName;
       const onDelete = fk.onDelete || 'RESTRICT';
       const onUpdate = fk.onUpdate || 'RESTRICT';
-      colDefs.push(`CONSTRAINT ${this._q(fkName)} FOREIGN KEY (${this._q(colName)}) REFERENCES ${this._q(refTable)} (${this._q(refCol)}) ON DELETE ${onDelete} ON UPDATE ${onUpdate}`);
+      colDefs.push(`CONSTRAINT ${this._q(fkName)} FOREIGN KEY (${(fk.columnNames || [colName]).map(column => this._q(column)).join(', ')}) REFERENCES ${this._q(refTable)} (${(fk.references.columns || [refCol]).map(column => this._q(column)).join(', ')}) ON DELETE ${onDelete} ON UPDATE ${onUpdate}`);
       const schema = this._adapter.schemas.get(def.tableName);
       schema.foreignKeys.push({ ...fk });
     }
@@ -123,9 +123,12 @@ export class SQLiteDDL extends DDLAbstract {
 
     const foreignKeySql = `PRAGMA foreign_key_list(${this._q(def.tableName)})`;
     const physicalFKs = this._measureSql(foreignKeySql, [], () => this._db().prepare(foreignKeySql).all());
-    const foreignKeys = def.foreignKeys.filter(fk => physicalFKs.some(row =>
-      row.from === fk.columnName && row.table === fk.references.table && row.to === fk.references.column
-    ));
+    const foreignKeys = def.foreignKeys.filter(fk => {
+      const columns = fk.columnNames || [fk.columnName];
+      const references = fk.references.columns || [fk.references.column];
+      return physicalFKs.some(first => first.seq === 0 && columns.every((column, index) =>
+        physicalFKs.some(row => row.id === first.id && row.seq === index && row.from === column && row.table === fk.references.table && row.to === references[index])));
+    });
 
     return { ...def, columns, attrToColumn, columnToAttr, uniqueConstraints, indexes, foreignKeys };
   }

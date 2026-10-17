@@ -1,3 +1,4 @@
+import { primaryAttributes, valuesFor, keyObject } from '../../utils/keys.js';
 import { DMLAbstract } from '../abstract/DMLAbstract.js';
 import { ValidationError } from '../../core/errors/ValidationError.js';
 import { Oracle11Error } from './Oracle11Error.js';
@@ -93,40 +94,55 @@ export class Oracle11DML extends DMLAbstract {
   async update(model, values, options = {}) {
     this._assertTransaction(options);
     const { tableName, schema } = this._schema(model);
-    const pkAttr = schema.primaryKeyAttribute;
-    if (!pkAttr || !Object.prototype.hasOwnProperty.call(values, pkAttr)) return super.update(model, values, options);
-
-    const pkCol = schema.attrToColumn[pkAttr] || pkAttr;
-    const newPk = values[pkAttr];
-    const matches = await this.selectAll(model, { where: options.where, attributes: [pkAttr], transaction: options.transaction });
-    const oldPks = matches.map(instance => instance.getDataValue(pkAttr));
-    if (oldPks.length === 0) return [];
-
+    const keys = primaryAttributes(model);
+    const changed = keys.filter(key => Object.hasOwn(values, key));
+    if (!changed.length) return super.update(model, values, options);
+    const matches = await this.selectAll(model, { where: options.where, attributes: keys, transaction: options.transaction });
+    if (!matches.length) return [];
     const cascadeFks = [];
     for (const [childTable, childSchema] of this._adapter.schemas) {
       for (const fk of childSchema.foreignKeys || []) {
-        if (fk.references?.table === tableName && fk.references?.column === pkCol && fk.onUpdate === 'CASCADE') {
-          cascadeFks.push({ childTable, fk });
+        const refs = fk.references.columns || [fk.references.column];
+        if (fk.references.table === tableName && ['CASCADE', 'SET NULL'].includes(fk.onUpdate)
+          && changed.some(key => refs.includes(schema.attrToColumn[key] || key))
+          && matches.some(row => changed.some(key => row.getDataValue(key) !== values[key]))) {
+          cascadeFks.push({ childTable, childSchema, fk });
         }
       }
     }
-    if (cascadeFks.length === 0) return super.update(model, values, options);
-
+    if (!cascadeFks.length) return super.update(model, values, options);
+    const ownTransaction = !options.transaction;
+    const transaction = options.transaction || await this._adapter.tcl.begin();
+    const mutationOptions = { ...options, transaction };
     try {
-      for (const { childTable, fk } of cascadeFks) {
-        await this._execute(`ALTER TABLE ${this._q(childTable)} DISABLE CONSTRAINT ${this._q(fk.constraintName)}`, []);
-      }
-      const updated = await super.update(model, values, options);
-      for (const oldPk of oldPks) {
-        for (const { childTable, fk } of cascadeFks) {
-          await this._execute(`UPDATE ${this._q(childTable)} SET ${this._q(fk.columnName)} = ? WHERE ${this._q(fk.columnName)} = ?`, [newPk, oldPk]);
+      for (const { fk } of cascadeFks) await this._execute('SET CONSTRAINTS ' + this._q(fk.constraintName) + ' DEFERRED');
+      const updated = await super.update(model, values, mutationOptions);
+      for (const previous of matches) {
+        for (const { childTable, childSchema, fk } of cascadeFks) {
+          const refs = fk.references.columns || [fk.references.column];
+          const columns = fk.columnNames || [fk.columnName];
+          const oldValues = refs.map(col => previous.getDataValue(schema.columnToAttr[col] || col));
+          const newValues = refs.map(col => {
+            const attr = schema.columnToAttr[col] || col;
+            return fk.onUpdate === 'SET NULL' ? null : Object.hasOwn(values, attr) ? values[attr] : previous.getDataValue(attr);
+          });
+          const childModel = this._adapter._seq?.getModel(childSchema.modelName);
+          if (childModel) {
+            const attrs = columns.map(col => childSchema.columnToAttr[col] || col);
+            await this.update(childModel, keyObject(attrs, newValues), { ...mutationOptions, where: keyObject(attrs, oldValues), include: undefined });
+          } else {
+            const set = columns.map(col => this._q(col) + ' = ?').join(', ');
+            const where = columns.map(col => this._q(col) + ' = ?').join(' AND ');
+            await this._execute('UPDATE ' + this._q(childTable) + ' SET ' + set + ' WHERE ' + where, [...newValues, ...oldValues]);
+          }
         }
       }
+      for (const { fk } of cascadeFks) await this._execute('SET CONSTRAINTS ' + this._q(fk.constraintName) + ' IMMEDIATE');
+      if (ownTransaction) await this._adapter.tcl.commit(transaction);
       return updated;
-    } finally {
-      for (const { childTable, fk } of cascadeFks) {
-        await this._execute(`ALTER TABLE ${this._q(childTable)} ENABLE CONSTRAINT ${this._q(fk.constraintName)}`, []);
-      }
+    } catch (error) {
+      if (ownTransaction) await this._adapter.tcl.rollback(transaction);
+      throw error;
     }
   }
 

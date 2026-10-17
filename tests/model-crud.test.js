@@ -208,12 +208,15 @@ describe('Model CRUD', () => {
     it('rejects saving an existing instance when the model has no primary key', async () => {
       const user = await User.create({ name: 'Ana', email: 'ana@test.com' });
       const primaryKey = User.primaryKeyAttribute;
+      const primaryKeys = User.primaryKeyAttributes;
       User.primaryKeyAttribute = null;
+      User.primaryKeyAttributes = [];
 
       try {
         await assert.rejects(() => user.save(), error => error.code === 'SEQ_MODEL_NO_PRIMARY_KEY');
       } finally {
         User.primaryKeyAttribute = primaryKey;
+        User.primaryKeyAttributes = primaryKeys;
       }
     });
   });

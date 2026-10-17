@@ -1,4 +1,5 @@
 import { ModelError } from './errors/ModelError.js';
+import { primaryAttributes } from '../utils/keys.js';
 
 export class Association {
   /**
@@ -18,6 +19,12 @@ export class Association {
     this.source = source;
     this.target = target;
     this.foreignKey = options.foreignKey || null;
+    this.foreignKeys = Array.isArray(this.foreignKey) ? [...this.foreignKey] : (this.foreignKey ? [this.foreignKey] : []);
+    const parent = type === 'belongsTo' ? target : source;
+    this.referencedKeys = primaryAttributes(parent);
+    if (!this.referencedKeys.length) this.referencedKeys = ['id'];
+    this.sourceKeys = type === 'belongsTo' ? this.foreignKeys : this.referencedKeys;
+    this.targetKeys = type === 'belongsTo' ? this.referencedKeys : this.foreignKeys;
     this.as = options.as || null;
     this.onDelete = options.onDelete || 'RESTRICT';
     this.onUpdate = options.onUpdate || 'RESTRICT';

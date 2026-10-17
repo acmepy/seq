@@ -1,3 +1,4 @@
+import { primaryAttributes, valuesFor, tupleKey, tuplesWhere } from './keys.js';
 import { Op } from '../operators.js';
 
 /**
@@ -141,6 +142,7 @@ export async function loadNestedLazyIncludes(instances, includes, model, dml, qu
       children = await loadNestedLazyIncludes(children, eagerIncludes, inc.model, dml, queryOptions);
       _retainAttachedInstances(instances, inc, model, children);
     }
+    trimProjection(children, inc.attributes, inc.include, inc.model);
   }
   return instances;
 }
@@ -205,77 +207,36 @@ function _indexBy(items, getKey) {
   return index;
 }
 
-async function _loadHasMany(instances, inc, assoc, alias, dml, queryOptions) {
-  const target = assoc.target;
-  const fkAttr = assoc.foreignKey;
-  const parentPK = assoc.source.primaryKeyAttribute || 'id';
-
-  const parentIds = _definedValues(instances, i => i.getDataValue(parentPK));
-
-  if (parentIds.length === 0) {
-    for (const instance of instances) {
-      instance.setDataValue(alias, []);
-    }
-    return;
-  }
-
-  const children = await _selectInChunks(dml, target, fkAttr, parentIds, inc, queryOptions, _requiredAttributes(inc, target, [fkAttr]));
-  const childrenByFK = _groupBy(children, child => child.getDataValue(fkAttr));
-
+async function _loadKeyedAssociation(instances, inc, assoc, alias, dml, queryOptions) {
+  const sourceKeys = assoc.sourceKeys;
+  const targetKeys = assoc.targetKeys;
+  const distinct = new Map();
   for (const instance of instances) {
-    const pkVal = instance.getDataValue(parentPK);
-    instance.setDataValue(alias, childrenByFK.get(pkVal) || []);
+    const values = valuesFor(instance, sourceKeys);
+    if (values.every(value => value !== null && value !== undefined)) distinct.set(tupleKey(values), values);
   }
-  trimProjection(children, inc.attributes, inc.include, target);
+  const targets = [];
+  for (const tuples of chunks([...distinct.values()], Math.max(1, Math.floor(500 / targetKeys.length)))) {
+    const relationWhere = tuplesWhere(targetKeys, tuples);
+    const rows = await dml.selectAll(assoc.target, {
+      where: inc.where ? { [Op.and]: [relationWhere, inc.where] } : relationWhere,
+      attributes: _withRequiredAttributes(inc.attributes, _requiredAttributes(inc, assoc.target, targetKeys)),
+      include: inc.include || [], eager: queryOptions.eager, transaction: queryOptions.transaction
+    });
+    targets.push(...rows);
+  }
+  const groups = _groupBy(targets, target => tupleKey(valuesFor(target, targetKeys)));
+  for (const instance of instances) {
+    const values = valuesFor(instance, sourceKeys);
+    const related = values.every(value => value !== null && value !== undefined) ? groups.get(tupleKey(values)) || [] : [];
+    instance.setDataValue(alias, assoc.type === 'hasMany' ? related : related[0] || null);
+  }
+  trimProjection(targets, inc.attributes, inc.include, assoc.target);
 }
 
-async function _loadHasOne(instances, inc, assoc, alias, dml, queryOptions) {
-  const target = assoc.target;
-  const fkAttr = assoc.foreignKey;
-  const parentPK = assoc.source.primaryKeyAttribute || 'id';
-
-  const parentIds = _definedValues(instances, i => i.getDataValue(parentPK));
-
-  if (parentIds.length === 0) {
-    for (const instance of instances) {
-      instance.setDataValue(alias, null);
-    }
-    return;
-  }
-
-  const children = await _selectInChunks(dml, target, fkAttr, parentIds, inc, queryOptions, _requiredAttributes(inc, target, [fkAttr]));
-  const childByFK = _indexBy(children, child => child.getDataValue(fkAttr));
-
-  for (const instance of instances) {
-    const pkVal = instance.getDataValue(parentPK);
-    instance.setDataValue(alias, childByFK.get(pkVal) || null);
-  }
-  trimProjection(children, inc.attributes, inc.include, target);
-}
-
-async function _loadBelongsTo(instances, inc, assoc, alias, dml, queryOptions) {
-  const target = assoc.target;
-  const fkAttr = assoc.foreignKey;
-  const targetPK = target.primaryKeyAttribute || 'id';
-
-  const fkValues = _definedValues(instances, i => i.getDataValue(fkAttr));
-
-  if (fkValues.length === 0) {
-    for (const instance of instances) {
-      instance.setDataValue(alias, null);
-    }
-    return;
-  }
-
-  const targets = await _selectInChunks(dml, target, targetPK, fkValues, inc, queryOptions, _requiredAttributes(inc, target, [targetPK]));
-  const targetByPK = _indexBy(targets, target => target.getDataValue(targetPK));
-
-  for (const instance of instances) {
-    const fkVal = instance.getDataValue(fkAttr);
-    instance.setDataValue(alias, targetByPK.get(fkVal) || null);
-  }
-  trimProjection(targets, inc.attributes, inc.include, target);
-}
+const _loadHasMany = _loadKeyedAssociation;
+const _loadHasOne = _loadKeyedAssociation;
+const _loadBelongsTo = _loadKeyedAssociation;
 
 async function _loadBelongsToMany(instances, inc, assoc, alias, dml, queryOptions) {
   const target = assoc.target;
@@ -325,7 +286,7 @@ function _withRequiredAttributes(attributes, required) {
 
 function _requiredAttributes(include, model, attributes) {
   if (!include.include?.length) return attributes;
-  return [...new Set([...attributes, model.primaryKeyAttribute || 'id'])];
+  return [...new Set([...attributes, ...primaryAttributes(model), ...include.include.flatMap(inc => resolveAssociation(model, inc)?.sourceKeys || [])])];
 }
 
 export function chunks(values, size = 500) {
@@ -400,8 +361,7 @@ export function processJoinedRows(rows, model, includes, dml, includeSqlAliases 
 
   const parentAlias = model.alias;
   const { schema: parentSchema } = dml._schema(model);
-  const parentPK = model.primaryKeyAttribute || 'id';
-  const parentPKCol = parentPK;
+  const parentPKs = primaryAttributes(model).length ? primaryAttributes(model) : ['id'];
   const includeNodes = _buildIncludeNodes(includes, model, dml, includeSqlAliases, globalEager);
   const nodesByAlias = _indexNodesBySqlAlias(includeNodes);
 
@@ -425,7 +385,7 @@ export function processJoinedRows(rows, model, includes, dml, includeSqlAliases 
       }
     }
 
-    const pkVal = parentData[parentPKCol];
+    const pkVal = tupleKey(valuesFor(parentData, parentPKs));
     if (!parentMap.has(pkVal)) {
       parentMap.set(pkVal, { raw: parentData, children: new Map() });
     }
@@ -472,8 +432,8 @@ function _addJoinedNode(parentEntry, node, aliasData) {
   const raw = aliasData.get(node.sqlAlias);
   if (!raw || Object.values(raw).every(value => value === null)) return;
 
-  const pkAttr = node.model.primaryKeyAttribute || 'id';
-  const pkValue = raw[pkAttr];
+  const keys = primaryAttributes(node.model).length ? primaryAttributes(node.model) : ['id'];
+  const pkValue = tupleKey(valuesFor(raw, keys));
   if (!parentEntry.children.has(node)) parentEntry.children.set(node, new Map());
   const childMap = parentEntry.children.get(node);
   if (!childMap.has(pkValue)) childMap.set(pkValue, { raw, children: new Map() });
@@ -495,7 +455,8 @@ function _attachJoinedIncludes(instance, entry, nodes, dml) {
 }
 
 function _joinedInstance(entry, node, dml) {
-  const attrRow = _pickAttributes(dml._toAttrNames(entry.raw, node.schema), node.attributes);
+  const attributes = Array.isArray(node.attributes) ? _requiredAttributes(node.inc, node.model, node.attributes) : node.attributes;
+  const attrRow = _pickAttributes(dml._toAttrNames(entry.raw, node.schema), attributes);
   const instance = new node.model(attrRow, { _isNew: false, _partial: !!node.attributes });
   _attachJoinedIncludes(instance, entry, node.children, dml);
   return instance;

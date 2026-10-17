@@ -773,6 +773,18 @@ describe('Aliases & Include', () => {
       assert.ok(tables.includes(rolePermissionsTable));
     });
 
+    it('filters required associations before paginating many-to-many parents', async () => {
+      for (const eager of [false, true]) {
+        const users = await User.findAll({ limit: 1, order: [['id', 'DESC']], include: [{
+          model: Role, as: 'roles', where: { name: 'editor' }, required: true, eager,
+          include: [{ model: Permission, as: 'permissions', where: { name: 'write' }, required: true, eager }]
+        }] });
+        assert.equal(users.length, 1);
+        assert.equal(users[0].getDataValue('name'), 'Ana');
+        assert.equal(users[0].getDataValue('roles')[0].getDataValue('permissions')[0].getDataValue('name'), 'write');
+      }
+    });
+
     it('lazy loads belongsToMany roles for user', async () => {
       const users = await User.findAll({ include: Role });
       assert.equal(users.length, 2);

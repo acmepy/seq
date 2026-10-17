@@ -1,8 +1,9 @@
+import { tupleKey, valuesFor } from '../../utils/keys.js';
 import { AdapterError } from '../../core/errors/AdapterError.js';
 import { ValidationError } from '../../core/errors/ValidationError.js';
 import { clone } from '../../utils/clone.js';
 import { DMLAbstract } from '../abstract/DMLAbstract.js';
-import { loadIncludes } from '../../utils/include.js';
+import { loadIncludes, trimProjection } from '../../utils/include.js';
 import { Op } from '../../operators.js';
 
 /**
@@ -66,8 +67,8 @@ export class MapDML extends DMLAbstract {
 
     this._validateRecord(colRecord, schema, model.modelName);
 
-    if (schema.primaryKey) {
-      const pkValue = colRecord[schema.primaryKey];
+    if (schema.primaryKeys?.length || schema.primaryKey) {
+      const pkValue = this._recordKey(schema, colRecord);
       if (pkValue !== null && pkValue !== undefined && table.has(pkValue)) {
         throw new AdapterError(
           `Duplicate primary key value "${pkValue}" for model "${model.modelName}"`,
@@ -80,8 +81,8 @@ export class MapDML extends DMLAbstract {
     this._checkForeignKeyConstraint(schema, colRecord);
 
     const storedRecord = clone(colRecord);
-    if (schema.primaryKey) {
-      table.set(colRecord[schema.primaryKey], storedRecord);
+    if (schema.primaryKeys?.length || schema.primaryKey) {
+      table.set(this._recordKey(schema, colRecord), storedRecord);
     } else {
       table.set(table.size, storedRecord);
     }
@@ -120,8 +121,14 @@ export class MapDML extends DMLAbstract {
    */
   async selectAll(model, options = {}) {
     this._assertTransaction(options);
-    let instances = await this._select(model, options);
+    const required = this._requiredSourceAttributesForLazyIncludes(model, options.include);
+    const filterBeforePaging = options.include?.some(include => include.required) && (options.limit !== undefined || options.offset !== undefined);
+    const selection = { ...options, attributes: this._attributesWithRequired(options.attributes, required) };
+    if (filterBeforePaging) { selection.limit = undefined; selection.offset = undefined; }
+    let instances = await this._select(model, selection);
     if (options.include?.length) instances = await loadIncludes(instances, options.include, model, this, options);
+    if (filterBeforePaging) instances = instances.slice(options.offset || 0, options.limit === undefined ? undefined : (options.offset || 0) + options.limit);
+    trimProjection(instances, options.attributes, options.include, model);
     return instances;
   }
 
@@ -295,6 +302,7 @@ export class MapDML extends DMLAbstract {
 
     try {
       for (const { key, record } of toUpdate) {
+      const oldRecord = clone(record);
       for (const [colName, value] of Object.entries(colValues)) {
         record[colName] = value;
       }
@@ -304,7 +312,7 @@ export class MapDML extends DMLAbstract {
         record[updatedCol] = now;
       }
 
-      const newKey = schema.primaryKey ? record[schema.primaryKey] : key;
+      const newKey = schema.primaryKeys?.length || schema.primaryKey ? this._recordKey(schema, record) : key;
       if (newKey !== key && table.has(newKey)) {
         throw new ValidationError(`Duplicate primary key value "${newKey}" for model "${model.modelName}"`, {
           code: 'SEQ_VALIDATION_DUPLICATE_PK'
@@ -312,7 +320,7 @@ export class MapDML extends DMLAbstract {
       }
       this._checkUniqueConstraint(tableName, schema, record, key);
       this._checkForeignKeyConstraint(schema, record);
-      this._handleCascadeOnUpdate(model, schema, record, key);
+      this._handleCascadeOnUpdate(model, schema, record, oldRecord);
 
       if (schema) {
         this._validateRecord(record, schema, model.modelName);
@@ -362,8 +370,8 @@ export class MapDML extends DMLAbstract {
     try {
       for (const key of keysToDelete) {
         const record = table.get(key);
-        const deletedPkValue = schema.primaryKey ? record[schema.primaryKey] : key;
-        this._handleCascadeOnDelete(model, schema, deletedPkValue);
+        if (!record) continue;
+        this._handleCascadeOnDelete(model, schema, record);
         table.delete(key);
         count++;
       }
@@ -412,99 +420,76 @@ export class MapDML extends DMLAbstract {
     }
   }
 
-  _checkForeignKeyConstraint(schema, colRecord) {
-    const foreignKeys = schema.foreignKeys || [];
-    for (const fk of foreignKeys) {
-      const value = colRecord[fk.columnName];
-      if (value === null || value === undefined) continue;
+  _recordKey(schema, record) {
+    const columns = schema.primaryKeys?.length ? schema.primaryKeys : [schema.primaryKey];
+    return columns.length === 1 ? record[columns[0]] : tupleKey(valuesFor(record, columns));
+  }
 
-      const refTable = this._adapter.database.get(fk.references.table);
-      if (!refTable) continue;
-
-      const refSchema = this._adapter.schemas.get(fk.references.table);
-      const refPkCol = fk.references.column;
-      let found = false;
-      for (const [, existing] of refTable) {
-        if (existing[refPkCol] === value) {
-          found = true;
-          break;
-        }
-      }
-      if (!found) {
-        throw new ValidationError(
-          `Foreign key constraint "${fk.constraintName}": value "${value}" for "${fk.attributeName}" does not exist in "${fk.references.model}.${fk.references.key}"`,
-          {
-            code: 'SEQ_VALIDATION_FK',
-            details: { model: schema.modelName, field: fk.attributeName, value, constraintName: fk.constraintName, referencesModel: fk.references.model, referencesKey: fk.references.key }
-          }
-        );
+  _checkForeignKeyConstraint(schema, record) {
+    for (const fk of schema.foreignKeys || []) {
+      const columns = fk.columnNames || [fk.columnName];
+      const values = valuesFor(record, columns);
+      if (values.some(value => value === null || value === undefined)) continue;
+      const referenced = this._adapter.database.get(fk.references.table);
+      if (!referenced) continue;
+      const refColumns = fk.references.columns || [fk.references.column];
+      if (![...referenced.values()].some(row => refColumns.every((column, index) => row[column] === values[index]))) {
+        throw new ValidationError('Foreign key constraint "' + fk.constraintName + '": referenced record does not exist', {
+          code: 'SEQ_VALIDATION_FK', details: { model: schema.modelName, field: fk.attributeName, value: values.length === 1 ? values[0] : values, constraintName: fk.constraintName, referencesModel: fk.references.model, referencesKey: fk.references.key }
+        });
       }
     }
   }
 
-  _handleCascadeOnDelete(model, schema, deletedPkValue) {
-    const fkTableName = this._getTableName(model);
-    for (const otherTableName of this._adapter.database.keys()) {
-      if (otherTableName === fkTableName) continue;
-      const otherSchema = this._adapter.schemas.get(otherTableName);
-      if (!otherSchema) continue;
-      const otherTable = this._adapter.database.get(otherTableName);
-
-      for (const fk of (otherSchema.foreignKeys || [])) {
-        if (fk.references.table !== fkTableName) continue;
-
-        const pkCol = schema.primaryKey;
-        if (!pkCol) continue;
-
-        for (const [pk, record] of otherTable) {
-          if (record[fk.columnName] === deletedPkValue) {
-            if (fk.onDelete === 'CASCADE') {
-              otherTable.delete(pk);
-            } else if (fk.onDelete === 'SET NULL') {
-              record[fk.columnName] = null;
-            } else {
-              throw new ValidationError(
-                `Cannot delete: record is referenced by "${otherSchema.modelName}" via constraint "${fk.constraintName}" on "${fk.attributeName}"`,
-                { code: 'SEQ_VALIDATION_FK_RESTRICT', details: { model: otherSchema.modelName, field: fk.attributeName, constraintName: fk.constraintName } }
-              );
-            }
-          }
-        }
-      }
-    }
-  }
-
-  _handleCascadeOnUpdate(model, schema, record, pkValue) {
-    const pkCol = schema.primaryKey;
-    if (!pkCol) return;
-
-    const oldPkValue = pkValue;
-    const newPkValue = record[pkCol];
-    if (oldPkValue === newPkValue) return;
-
+  _handleCascadeOnDelete(model, schema, record, visited = new Set()) {
     const tableName = this._getTableName(model);
-    for (const otherTableName of this._adapter.database.keys()) {
-      if (otherTableName === tableName) continue;
-      const otherSchema = this._adapter.schemas.get(otherTableName);
-      if (!otherSchema) continue;
+    const identity = tupleKey([tableName, this._recordKey(schema, record)]);
+    if (visited.has(identity)) return;
+    visited.add(identity);
+    for (const [otherTableName, otherSchema] of this._adapter.schemas) {
       const otherTable = this._adapter.database.get(otherTableName);
-
-      for (const fk of (otherSchema.foreignKeys || [])) {
+      for (const fk of otherSchema.foreignKeys || []) {
         if (fk.references.table !== tableName) continue;
+        const refs = fk.references.columns || [fk.references.column];
+        const columns = fk.columnNames || [fk.columnName];
+        for (const [key, child] of [...otherTable]) {
+          if (!columns.every((column, index) => child[column] != null && child[column] === record[refs[index]])) continue;
+          if (fk.onDelete === 'CASCADE') {
+            this._handleCascadeOnDelete({ tableName: otherTableName }, otherSchema, child, visited);
+            otherTable.delete(key);
+          } else if (fk.onDelete === 'SET NULL') {
+            for (const column of columns) child[column] = null;
+            this._validateRecord(child, otherSchema, otherSchema.modelName);
+          } else throw new ValidationError('Cannot delete: record is referenced via constraint "' + fk.constraintName + '"', { code: 'SEQ_VALIDATION_FK_RESTRICT', details: { model: otherSchema.modelName, field: fk.attributeName, constraintName: fk.constraintName } });
+        }
+      }
+    }
+  }
 
-        for (const [, otherRecord] of otherTable) {
-          if (otherRecord[fk.columnName] === oldPkValue) {
-            if (fk.onUpdate === 'CASCADE') {
-              otherRecord[fk.columnName] = newPkValue;
-            } else if (fk.onUpdate === 'SET NULL') {
-              otherRecord[fk.columnName] = null;
-            } else {
-              throw new ValidationError(
-                `Cannot update: record is referenced by "${otherSchema.modelName}" via constraint "${fk.constraintName}" on "${fk.attributeName}"`,
-                { code: 'SEQ_VALIDATION_FK_RESTRICT', details: { model: otherSchema.modelName, field: fk.attributeName, constraintName: fk.constraintName } }
-              );
-            }
-          }
+  _handleCascadeOnUpdate(model, schema, record, oldRecord, visited = new Set()) {
+    const tableName = this._getTableName(model);
+    const identity = tupleKey([tableName, this._recordKey(schema, oldRecord)]);
+    if (visited.has(identity)) return;
+    visited.add(identity);
+    for (const [otherTableName, otherSchema] of this._adapter.schemas) {
+      const otherTable = this._adapter.database.get(otherTableName);
+      for (const fk of otherSchema.foreignKeys || []) {
+        if (fk.references.table !== tableName) continue;
+        const refs = fk.references.columns || [fk.references.column];
+        if (refs.every(column => record[column] === oldRecord[column])) continue;
+        const columns = fk.columnNames || [fk.columnName];
+        for (const [key, child] of [...otherTable]) {
+          if (!columns.every((column, index) => child[column] != null && child[column] === oldRecord[refs[index]])) continue;
+          if (fk.onUpdate !== 'CASCADE' && fk.onUpdate !== 'SET NULL') throw new ValidationError('Cannot update: record is referenced via constraint "' + fk.constraintName + '"', { code: 'SEQ_VALIDATION_FK_RESTRICT', details: { model: otherSchema.modelName, field: fk.attributeName, constraintName: fk.constraintName } });
+          const previous = clone(child);
+          columns.forEach((column, index) => { child[column] = fk.onUpdate === 'CASCADE' ? record[refs[index]] : null; });
+          this._validateRecord(child, otherSchema, otherSchema.modelName);
+          this._checkUniqueConstraint(otherTableName, otherSchema, child, key);
+          this._checkForeignKeyConstraint(otherSchema, child);
+          const nextKey = otherSchema.primaryKeys?.length || otherSchema.primaryKey ? this._recordKey(otherSchema, child) : key;
+          if (nextKey !== key && otherTable.has(nextKey)) throw new ValidationError('Duplicate primary key value', { code: 'SEQ_VALIDATION_DUPLICATE_PK' });
+          this._handleCascadeOnUpdate({ tableName: otherTableName }, otherSchema, child, previous, visited);
+          if (nextKey !== key) { otherTable.delete(key); otherTable.set(nextKey, child); }
         }
       }
     }

@@ -144,6 +144,48 @@ function clone(value) {
   return value;
 }
 
+/**
+ * Query operators for where clauses.
+ * Usage: { [Op.like]: '%ana%' }, { [Op.in]: [1, 2, 3] }
+ */
+const Op = {
+  eq:           Symbol.for('seq.Op.eq'),
+  ne:           Symbol.for('seq.Op.ne'),
+  gt:           Symbol.for('seq.Op.gt'),
+  gte:          Symbol.for('seq.Op.gte'),
+  lt:           Symbol.for('seq.Op.lt'),
+  lte:          Symbol.for('seq.Op.lte'),
+  like:         Symbol.for('seq.Op.like'),
+  notLike:      Symbol.for('seq.Op.notLike'),
+  in:           Symbol.for('seq.Op.in'),
+  notIn:        Symbol.for('seq.Op.notIn'),
+  between:      Symbol.for('seq.Op.between'),
+  notBetween:   Symbol.for('seq.Op.notBetween'),
+  and:          Symbol.for('seq.Op.and'),
+  or:           Symbol.for('seq.Op.or'),
+};
+
+function primaryAttributes(model) {
+  return model.primaryKeyAttributes || (model.primaryKeyAttribute ? [model.primaryKeyAttribute] : []);
+}
+
+function valuesFor(record, attributes) {
+  return attributes.map(attribute => typeof record.getDataValue === 'function' ? record.getDataValue(attribute) : record[attribute]);
+}
+
+function keyObject(attributes, values) {
+  return Object.fromEntries(attributes.map((attribute, index) => [attribute, values[index]]));
+}
+
+function tupleKey(values) {
+  return JSON.stringify(values.map(value => typeof value === 'bigint' ? ['bigint', String(value)] : value));
+}
+
+function tuplesWhere(attributes, tuples) {
+  if (attributes.length === 1) return { [attributes[0]]: { [Op.in]: tuples.map(tuple => tuple[0]) } };
+  return { [Op.or]: tuples.map(tuple => keyObject(attributes, tuple)) };
+}
+
 class Association {
   /**
    * @param {'hasMany'|'hasOne'|'belongsTo'|'belongsToMany'} type
@@ -162,6 +204,12 @@ class Association {
     this.source = source;
     this.target = target;
     this.foreignKey = options.foreignKey || null;
+    this.foreignKeys = Array.isArray(this.foreignKey) ? [...this.foreignKey] : (this.foreignKey ? [this.foreignKey] : []);
+    const parent = type === 'belongsTo' ? target : source;
+    this.referencedKeys = primaryAttributes(parent);
+    if (!this.referencedKeys.length) this.referencedKeys = ['id'];
+    this.sourceKeys = type === 'belongsTo' ? this.foreignKeys : this.referencedKeys;
+    this.targetKeys = type === 'belongsTo' ? this.referencedKeys : this.foreignKeys;
     this.as = options.as || null;
     this.onDelete = options.onDelete || 'RESTRICT';
     this.onUpdate = options.onUpdate || 'RESTRICT';
@@ -613,27 +661,6 @@ DataTypes._JSON = new JSONType();
 DataTypes._VIRTUAL = new VirtualType();
 
 /**
- * Query operators for where clauses.
- * Usage: { [Op.like]: '%ana%' }, { [Op.in]: [1, 2, 3] }
- */
-const Op = {
-  eq:           Symbol.for('seq.Op.eq'),
-  ne:           Symbol.for('seq.Op.ne'),
-  gt:           Symbol.for('seq.Op.gt'),
-  gte:          Symbol.for('seq.Op.gte'),
-  lt:           Symbol.for('seq.Op.lt'),
-  lte:          Symbol.for('seq.Op.lte'),
-  like:         Symbol.for('seq.Op.like'),
-  notLike:      Symbol.for('seq.Op.notLike'),
-  in:           Symbol.for('seq.Op.in'),
-  notIn:        Symbol.for('seq.Op.notIn'),
-  between:      Symbol.for('seq.Op.between'),
-  notBetween:   Symbol.for('seq.Op.notBetween'),
-  and:          Symbol.for('seq.Op.and'),
-  or:           Symbol.for('seq.Op.or'),
-};
-
-/**
  * Normalizes the include option to an array of include descriptors.
  * @param {string|typeof import('../core/Model.js').Model|object|Array} include
  * @returns {object[]}
@@ -774,6 +801,7 @@ async function loadNestedLazyIncludes(instances, includes, model, dml, queryOpti
       children = await loadNestedLazyIncludes(children, eagerIncludes, inc.model, dml, queryOptions);
       _retainAttachedInstances(instances, inc, model, children);
     }
+    trimProjection(children, inc.attributes, inc.include, inc.model);
   }
   return instances;
 }
@@ -838,77 +866,36 @@ function _indexBy(items, getKey) {
   return index;
 }
 
-async function _loadHasMany(instances, inc, assoc, alias, dml, queryOptions) {
-  const target = assoc.target;
-  const fkAttr = assoc.foreignKey;
-  const parentPK = assoc.source.primaryKeyAttribute || 'id';
-
-  const parentIds = _definedValues(instances, i => i.getDataValue(parentPK));
-
-  if (parentIds.length === 0) {
-    for (const instance of instances) {
-      instance.setDataValue(alias, []);
-    }
-    return;
-  }
-
-  const children = await _selectInChunks(dml, target, fkAttr, parentIds, inc, queryOptions, _requiredAttributes(inc, target, [fkAttr]));
-  const childrenByFK = _groupBy(children, child => child.getDataValue(fkAttr));
-
+async function _loadKeyedAssociation(instances, inc, assoc, alias, dml, queryOptions) {
+  const sourceKeys = assoc.sourceKeys;
+  const targetKeys = assoc.targetKeys;
+  const distinct = new Map();
   for (const instance of instances) {
-    const pkVal = instance.getDataValue(parentPK);
-    instance.setDataValue(alias, childrenByFK.get(pkVal) || []);
+    const values = valuesFor(instance, sourceKeys);
+    if (values.every(value => value !== null && value !== undefined)) distinct.set(tupleKey(values), values);
   }
-  trimProjection(children, inc.attributes, inc.include, target);
+  const targets = [];
+  for (const tuples of chunks([...distinct.values()], Math.max(1, Math.floor(500 / targetKeys.length)))) {
+    const relationWhere = tuplesWhere(targetKeys, tuples);
+    const rows = await dml.selectAll(assoc.target, {
+      where: inc.where ? { [Op.and]: [relationWhere, inc.where] } : relationWhere,
+      attributes: _withRequiredAttributes(inc.attributes, _requiredAttributes(inc, assoc.target, targetKeys)),
+      include: inc.include || [], eager: queryOptions.eager, transaction: queryOptions.transaction
+    });
+    targets.push(...rows);
+  }
+  const groups = _groupBy(targets, target => tupleKey(valuesFor(target, targetKeys)));
+  for (const instance of instances) {
+    const values = valuesFor(instance, sourceKeys);
+    const related = values.every(value => value !== null && value !== undefined) ? groups.get(tupleKey(values)) || [] : [];
+    instance.setDataValue(alias, assoc.type === 'hasMany' ? related : related[0] || null);
+  }
+  trimProjection(targets, inc.attributes, inc.include, assoc.target);
 }
 
-async function _loadHasOne(instances, inc, assoc, alias, dml, queryOptions) {
-  const target = assoc.target;
-  const fkAttr = assoc.foreignKey;
-  const parentPK = assoc.source.primaryKeyAttribute || 'id';
-
-  const parentIds = _definedValues(instances, i => i.getDataValue(parentPK));
-
-  if (parentIds.length === 0) {
-    for (const instance of instances) {
-      instance.setDataValue(alias, null);
-    }
-    return;
-  }
-
-  const children = await _selectInChunks(dml, target, fkAttr, parentIds, inc, queryOptions, _requiredAttributes(inc, target, [fkAttr]));
-  const childByFK = _indexBy(children, child => child.getDataValue(fkAttr));
-
-  for (const instance of instances) {
-    const pkVal = instance.getDataValue(parentPK);
-    instance.setDataValue(alias, childByFK.get(pkVal) || null);
-  }
-  trimProjection(children, inc.attributes, inc.include, target);
-}
-
-async function _loadBelongsTo(instances, inc, assoc, alias, dml, queryOptions) {
-  const target = assoc.target;
-  const fkAttr = assoc.foreignKey;
-  const targetPK = target.primaryKeyAttribute || 'id';
-
-  const fkValues = _definedValues(instances, i => i.getDataValue(fkAttr));
-
-  if (fkValues.length === 0) {
-    for (const instance of instances) {
-      instance.setDataValue(alias, null);
-    }
-    return;
-  }
-
-  const targets = await _selectInChunks(dml, target, targetPK, fkValues, inc, queryOptions, _requiredAttributes(inc, target, [targetPK]));
-  const targetByPK = _indexBy(targets, target => target.getDataValue(targetPK));
-
-  for (const instance of instances) {
-    const fkVal = instance.getDataValue(fkAttr);
-    instance.setDataValue(alias, targetByPK.get(fkVal) || null);
-  }
-  trimProjection(targets, inc.attributes, inc.include, target);
-}
+const _loadHasMany = _loadKeyedAssociation;
+const _loadHasOne = _loadKeyedAssociation;
+const _loadBelongsTo = _loadKeyedAssociation;
 
 async function _loadBelongsToMany(instances, inc, assoc, alias, dml, queryOptions) {
   const target = assoc.target;
@@ -958,7 +945,7 @@ function _withRequiredAttributes(attributes, required) {
 
 function _requiredAttributes(include, model, attributes) {
   if (!include.include?.length) return attributes;
-  return [...new Set([...attributes, model.primaryKeyAttribute || 'id'])];
+  return [...new Set([...attributes, ...primaryAttributes(model), ...include.include.flatMap(inc => resolveAssociation(model, inc)?.sourceKeys || [])])];
 }
 
 function chunks(values, size = 500) {
@@ -1033,8 +1020,7 @@ function processJoinedRows(rows, model, includes, dml, includeSqlAliases = build
 
   const parentAlias = model.alias;
   const { schema: parentSchema } = dml._schema(model);
-  const parentPK = model.primaryKeyAttribute || 'id';
-  const parentPKCol = parentPK;
+  const parentPKs = primaryAttributes(model).length ? primaryAttributes(model) : ['id'];
   const includeNodes = _buildIncludeNodes(includes, model, dml, includeSqlAliases, globalEager);
   const nodesByAlias = _indexNodesBySqlAlias(includeNodes);
 
@@ -1058,7 +1044,7 @@ function processJoinedRows(rows, model, includes, dml, includeSqlAliases = build
       }
     }
 
-    const pkVal = parentData[parentPKCol];
+    const pkVal = tupleKey(valuesFor(parentData, parentPKs));
     if (!parentMap.has(pkVal)) {
       parentMap.set(pkVal, { raw: parentData, children: new Map() });
     }
@@ -1105,8 +1091,8 @@ function _addJoinedNode(parentEntry, node, aliasData) {
   const raw = aliasData.get(node.sqlAlias);
   if (!raw || Object.values(raw).every(value => value === null)) return;
 
-  const pkAttr = node.model.primaryKeyAttribute || 'id';
-  const pkValue = raw[pkAttr];
+  const keys = primaryAttributes(node.model).length ? primaryAttributes(node.model) : ['id'];
+  const pkValue = tupleKey(valuesFor(raw, keys));
   if (!parentEntry.children.has(node)) parentEntry.children.set(node, new Map());
   const childMap = parentEntry.children.get(node);
   if (!childMap.has(pkValue)) childMap.set(pkValue, { raw, children: new Map() });
@@ -1128,7 +1114,8 @@ function _attachJoinedIncludes(instance, entry, nodes, dml) {
 }
 
 function _joinedInstance(entry, node, dml) {
-  const attrRow = _pickAttributes(dml._toAttrNames(entry.raw, node.schema), node.attributes);
+  const attributes = Array.isArray(node.attributes) ? _requiredAttributes(node.inc, node.model, node.attributes) : node.attributes;
+  const attrRow = _pickAttributes(dml._toAttrNames(entry.raw, node.schema), attributes);
   const instance = new node.model(attrRow, { _isNew: false, _partial: !!node.attributes });
   _attachJoinedIncludes(instance, entry, node.children, dml);
   return instance;
@@ -1156,6 +1143,7 @@ class Model {
     this.dataValues = {};
     this._changed = {};
     this._isNew = options._isNew !== undefined ? options._isNew : true;
+    this._originalPrimaryKey = keyObject(primaryAttributes(this.constructor), valuesFor(values, primaryAttributes(this.constructor)));
 
     const Ctor = this.constructor;
     const attrs = Ctor.rawAttributes || {};
@@ -1195,6 +1183,7 @@ class Model {
 
     this.rawAttributes = {};
     this.primaryKeyAttribute = null;
+    this.primaryKeyAttributes = [];
     this.autoIncrementAttribute = null;
 
     for (const [name, def] of Object.entries(attributes)) {
@@ -1206,14 +1195,15 @@ class Model {
       }
       this.rawAttributes[name] = { ...def, type: this._normalizeDataType(def.type) };
       if (def.primaryKey) {
-        if (this.primaryKeyAttribute) throw new Error('Model must not have more than one primaryKey attribute');
-        this.primaryKeyAttribute = name;
+        this.primaryKeyAttributes.push(name);
       }
       if (def.autoIncrement) {
         if (this.autoIncrementAttribute) throw new Error('Model must not have more than one autoIncrement attribute');
         this.autoIncrementAttribute = name;
       }
     }
+
+    this.primaryKeyAttribute = this.primaryKeyAttributes.length === 1 ? this.primaryKeyAttributes[0] : null;
 
     // Timestamps
     const timestamps = options.timestamps !== undefined ? options.timestamps : true;
@@ -1284,8 +1274,7 @@ class Model {
 
   static hasMany(target, options = {}) {
     if (!target) throw new ModelError('hasMany requires a target model', { code: 'SEQ_ASSOCIATION_INVALID_TARGET' });
-    const fkAttr = options.foreignKey || this._defaultForeignKeyName(this.modelName, target.primaryKeyAttribute || 'id');
-    if (target.rawAttributes && !target.rawAttributes[fkAttr]) throw new ModelError(`Target model "${target.modelName}" must have a "${fkAttr}" attribute for hasMany association`, { code: 'SEQ_ASSOCIATION_MISSING_FK', details: { target: target.modelName, foreignKey: fkAttr } });
+    const fkAttr = this._associationForeignKey(target, options, false);
     if (!this.associations) this.associations = {};
     if (!options.as) options.as = (target.modelName || target.name || 'unknown').toLowerCase() + 's';
     const assoc = new Association('hasMany', this, target, { ...options, foreignKey: fkAttr });
@@ -1295,8 +1284,7 @@ class Model {
 
   static hasOne(target, options = {}) {
     if (!target) throw new ModelError('hasOne requires a target model', { code: 'SEQ_ASSOCIATION_INVALID_TARGET' });
-    const fkAttr = options.foreignKey || this._defaultForeignKeyName(this.modelName, target.primaryKeyAttribute || 'id');
-    if (target.rawAttributes && !target.rawAttributes[fkAttr]) throw new ModelError(`Target model "${target.modelName}" must have a "${fkAttr}" attribute for hasOne association`, { code: 'SEQ_ASSOCIATION_MISSING_FK', details: { target: target.modelName, foreignKey: fkAttr } });
+    const fkAttr = this._associationForeignKey(target, options, false);
     if (!this.associations) this.associations = {};
     if (!options.as) options.as = (target.modelName || target.name || 'unknown').toLowerCase();
     const assoc = new Association('hasOne', this, target, { ...options, foreignKey: fkAttr });
@@ -1306,8 +1294,7 @@ class Model {
 
   static belongsTo(target, options = {}) {
     if (!target) throw new ModelError('belongsTo requires a target model', { code: 'SEQ_ASSOCIATION_INVALID_TARGET' });
-    const fkAttr = options.foreignKey || this._defaultForeignKeyName(target.modelName || target.name, target.primaryKeyAttribute || 'id');
-    if (this.rawAttributes && !this.rawAttributes[fkAttr]) throw new ModelError(`Model "${this.modelName}" must have a "${fkAttr}" attribute for belongsTo association`,{ code: 'SEQ_ASSOCIATION_MISSING_FK', details: { source: this.modelName, foreignKey: fkAttr } });
+    const fkAttr = this._associationForeignKey(target, options, true);
     if (!this.associations) this.associations = {};
     if (!options.as) options.as = (target.modelName || target.name || 'unknown').toLowerCase();
     const assoc = new Association('belongsTo', this, target, { ...options, foreignKey: fkAttr });
@@ -1317,6 +1304,9 @@ class Model {
 
   static belongsToMany(target, options = {}) {
     if (!target) throw new ModelError('belongsToMany requires a target model', { code: 'SEQ_ASSOCIATION_INVALID_TARGET' });
+    if (primaryAttributes(this).length > 1 || primaryAttributes(target).length > 1 || Array.isArray(options.foreignKey) || Array.isArray(options.otherKey)) {
+      throw new ModelError('belongsToMany does not support composite keys yet', { code: 'SEQ_ASSOCIATION_COMPOSITE_MANY_TO_MANY_UNSUPPORTED' });
+    }
     if (!options.through) throw new ModelError('belongsToMany requires a "through" option', { code: 'SEQ_ASSOCIATION_MISSING_THROUGH' });
 
     const fkAttr = options.foreignKey || this._defaultForeignKeyName(this.modelName, this.primaryKeyAttribute || 'id');
@@ -1327,6 +1317,25 @@ class Model {
     const assoc = new Association('belongsToMany', this, target, { ...options, ...throughInfo, foreignKey: fkAttr, otherKey });
     this._storeAssociation(assoc, target);
     return this;
+  }
+
+  static _associationForeignKey(target, options, belongsTo) {
+    const parent = belongsTo ? target : this;
+    const child = belongsTo ? this : target;
+    const keys = primaryAttributes(parent).length ? primaryAttributes(parent) : ['id'];
+    const supplied = options.foreignKey;
+    const defaultKeys = !belongsTo && keys.length === 1 ? [target.primaryKeyAttribute || 'id'] : keys;
+    const fields = supplied === undefined ? defaultKeys.map(key => this._defaultForeignKeyName(parent.modelName || parent.name, key))
+      : (Array.isArray(supplied) ? [...supplied] : [supplied]);
+    if (fields.length !== keys.length || new Set(fields).size !== fields.length || fields.some(field => typeof field !== 'string' || !field)) {
+      throw new ModelError('foreignKey must contain one distinct attribute for each referenced primary-key component, in order', { code: 'SEQ_ASSOCIATION_INVALID_FOREIGN_KEY' });
+    }
+    for (const field of fields) {
+      if (child.rawAttributes && (!child.rawAttributes[field] || child._isVirtualAttribute(child.rawAttributes[field]))) {
+        throw new ModelError(`Model "${child.modelName}" must have a "${field}" attribute for association`, { code: 'SEQ_ASSOCIATION_MISSING_FK' });
+      }
+    }
+    return fields.length === 1 ? fields[0] : fields;
   }
 
   static _storeAssociation(association, target) {
@@ -1340,7 +1349,7 @@ class Model {
 
   /**
    * Returns this model's associations as include descriptors.
-   * @returns {Array<{ model: typeof Model, name: string, as: string, foreignKey: string|null, otherKey?: string|null }>}
+   * @returns {Array<{ model: typeof Model, name: string, as: string, foreignKey: string|string[]|null, otherKey?: string|null }>}
    */
   static getAssociationIncludes() {
     const seen = new Set();
@@ -1504,14 +1513,13 @@ class Model {
     const nestedValue = sourceValues[alias];
     if (nestedValue === undefined) return;
 
-    const parentPK = assoc.source.primaryKeyAttribute || 'id';
-    const parentPKValue = parent.getDataValue(parentPK);
+    const foreignValues = keyObject(assoc.foreignKeys, valuesFor(parent, assoc.referencedKeys));
     const childOptions = { ...options, include: include.include || [] };
 
     if (assoc.type === 'hasMany') {
       if (!Array.isArray(nestedValue)) throw new ModelError(`Nested create include "${alias}" must be an array for hasMany association`, {code: 'SEQ_NESTED_CREATE_INVALID_VALUE', details: { model: this.modelName, include: alias, associationType: assoc.type }});
       const children = [];
-      for (const childValue of nestedValue) children.push(await assoc.target.create({ ...childValue, [assoc.foreignKey]: parentPKValue }, childOptions));
+      for (const childValue of nestedValue) children.push(await assoc.target.create({ ...childValue, ...foreignValues }, childOptions));
       parent.setDataValue(alias, children);
       return;
     }
@@ -1526,7 +1534,7 @@ class Model {
         details: { model: this.modelName, include: alias, associationType: assoc.type }
       });
     }
-    const child = await assoc.target.create({ ...nestedValue, [assoc.foreignKey]: parentPKValue }, childOptions);
+    const child = await assoc.target.create({ ...nestedValue, ...foreignValues }, childOptions);
     parent.setDataValue(alias, child);
   }
 
@@ -1597,15 +1605,14 @@ class Model {
     const nestedValue = sourceValues[alias];
     if (nestedValue === undefined) return;
 
-    const parentPK = assoc.source.primaryKeyAttribute || 'id';
-    const parentPKValue = parent.getDataValue(parentPK);
+    const foreignValues = keyObject(assoc.foreignKeys, valuesFor(parent, assoc.referencedKeys));
     const childOptions = { ...options, include: include.include || [] };
 
     if (assoc.type === 'hasMany') {
       if (!Array.isArray(nestedValue)) throw new ModelError(`Nested upsert include "${alias}" must be an array for hasMany association`, { code: 'SEQ_NESTED_UPSERT_INVALID_VALUE', details: { model: this.modelName, include: alias, associationType: assoc.type } });
       const children = [];
       for (const childValue of nestedValue) {
-        const [child] = await assoc.target.upsert({ ...childValue, [assoc.foreignKey]: parentPKValue }, childOptions);
+        const [child] = await assoc.target.upsert({ ...childValue, ...foreignValues }, childOptions);
         children.push(child);
       }
       parent.setDataValue(alias, children);
@@ -1622,7 +1629,7 @@ class Model {
         details: { model: this.modelName, include: alias, associationType: assoc.type }
       });
     }
-    const [child] = await assoc.target.upsert({ ...nestedValue, [assoc.foreignKey]: parentPKValue }, childOptions);
+    const [child] = await assoc.target.upsert({ ...nestedValue, ...foreignValues }, childOptions);
     parent.setDataValue(alias, child);
   }
 
@@ -1636,8 +1643,18 @@ class Model {
    */
   static async findByPk(id, options = {}) {
     //this._log('trace', `${this.modelName}.findByPk`, id);
-    if (!this.primaryKeyAttribute) throw new Error(`Model "${this.modelName}" has no primary key`);
-    const where = { [this.primaryKeyAttribute]: id };
+    const keys = primaryAttributes(this);
+    if (!keys.length) throw new Error(`Model "${this.modelName}" has no primary key`);
+    let where;
+    if (keys.length === 1) where = { [keys[0]]: id };
+    else {
+      const valid = value => typeof value === 'string' || typeof value === 'boolean' || typeof value === 'bigint'
+        || (typeof value === 'number' && Number.isFinite(value)) || (value instanceof Date && Number.isFinite(value.getTime()));
+      if (!id || typeof id !== 'object' || Array.isArray(id) || Object.keys(id).length !== keys.length || keys.some(key => !Object.hasOwn(id, key) || !valid(id[key]))) {
+        throw new ModelError('findByPk requires an object with every primary-key component', { code: 'SEQ_MODEL_INVALID_PRIMARY_KEY' });
+      }
+      where = keyObject(keys, valuesFor(id, keys));
+    }
     return this.findOne({ ...options, where });
   }
 
@@ -1835,7 +1852,9 @@ class Model {
     const mutationOptions = { ...options, where };
     delete mutationOptions.include;
     if (options.hooks !== false) await this._runHooks('beforeUpdate', parentValues, mutationOptions);
-    const result = await this._adapter.dml.update(this, parentValues, mutationOptions);
+    const result = Object.keys(parentValues).length || this.options.timestamps
+      ? await this._adapter.dml.update(this, parentValues, mutationOptions)
+      : await this._adapter.dml.selectAll(this, mutationOptions);
     for (const parent of result) for (const include of includes) await this._replaceIncludedAssociation(parent, values, include, mutationOptions);
     if (options.hooks !== false) await this._runHooks('afterUpdate', result, mutationOptions);
     await this._invalidateCache(mutationOptions);
@@ -1844,12 +1863,12 @@ class Model {
 
   static _resolveNestedUpdateWhere(values, options) {
     if (options.where) return options.where;
-    const pk = this.primaryKeyAttribute || 'id';
-    const pkValue = values?.[pk];
-    if (pkValue === undefined || pkValue === null) {
+    const keys = primaryAttributes(this).length ? primaryAttributes(this) : ['id'];
+    const pk = keys.join(', ');
+    if (keys.some(key => values?.[key] === undefined || values[key] === null)) {
       throw new ModelError(`Nested update for model "${this.modelName}" requires options.where or a "${pk}" value`, {code: 'SEQ_NESTED_UPDATE_MISSING_TARGET',details: { model: this.modelName, primaryKey: pk }});
     }
-    return { [pk]: pkValue };
+    return keyObject(keys, valuesFor(values, keys));
   }
 
   static async _replaceIncludedAssociation(parent, sourceValues, include, options) {
@@ -1858,15 +1877,14 @@ class Model {
     const nestedValue = sourceValues[alias];
     if (nestedValue === undefined) return;
 
-    const parentPK = assoc.source.primaryKeyAttribute || 'id';
-    const parentPKValue = parent.getDataValue(parentPK);
+    const foreignValues = keyObject(assoc.foreignKeys, valuesFor(parent, assoc.referencedKeys));
     const childOptions = { ...options, include: include.include || [] };
 
     if (assoc.type === 'hasMany') {
       if (!Array.isArray(nestedValue)) throw new ModelError(`Nested update include "${alias}" must be an array for hasMany association`, {code: 'SEQ_NESTED_UPDATE_INVALID_VALUE', details: { model: this.modelName, include: alias, associationType: assoc.type }});
-      await assoc.target.destroy({ ...options, where: { [assoc.foreignKey]: parentPKValue } });
+      await assoc.target.destroy({ ...options, where: { ...foreignValues } });
       const children = [];
-      for (const childValue of nestedValue) children.push(await assoc.target.create({ ...childValue, [assoc.foreignKey]: parentPKValue }, childOptions));
+      for (const childValue of nestedValue) children.push(await assoc.target.create({ ...childValue, ...foreignValues }, childOptions));
       parent.setDataValue(alias, children);
       return;
     }
@@ -1875,12 +1893,12 @@ class Model {
       throw new ModelError(`Nested update include "${alias}" must be an object or null for hasOne association`, {code: 'SEQ_NESTED_UPDATE_INVALID_VALUE', details: { model: this.modelName, include: alias, associationType: assoc.type }});
     }
 
-    await assoc.target.destroy({ ...options, where: { [assoc.foreignKey]: parentPKValue } });
+    await assoc.target.destroy({ ...options, where: { ...foreignValues } });
     if (nestedValue === null) {
       parent.setDataValue(alias, null);
       return;
     }
-    const child = await assoc.target.create({ ...nestedValue, [assoc.foreignKey]: parentPKValue }, childOptions);
+    const child = await assoc.target.create({ ...nestedValue, ...foreignValues }, childOptions);
     parent.setDataValue(alias, child);
   }
 
@@ -1993,11 +2011,14 @@ class Model {
       await Ctor._runHooks('beforeSave', this, options);
       await Ctor._runHooks(isNew ? 'beforeCreate' : 'beforeUpdate', this, options);
     }
+    const values = { ...this.dataValues };
+    for (const assoc of Object.values(Ctor.associations || {})) delete values[assoc.as];
 
     if (this._isNew) {
-      const result = await Ctor._adapter.dml.insert(Ctor, this.dataValues, options);
+      const result = await Ctor._adapter.dml.insert(Ctor, values, options);
       Object.assign(this.dataValues, result.dataValues);
       this._isNew = false;
+      this._originalPrimaryKey = keyObject(primaryAttributes(Ctor), valuesFor(this.dataValues, primaryAttributes(Ctor)));
       this._changed = {};
       if (options.hooks !== false) {
         await Ctor._runHooks('afterCreate', this, options);
@@ -2006,11 +2027,12 @@ class Model {
       await Ctor._invalidateCache(options);
       return this;
     }
-    const pk = Ctor.primaryKeyAttribute;
-    if (!pk) throw new ModelError(`Model "${Ctor.modelName}" has no primary key`, { code: 'SEQ_MODEL_NO_PRIMARY_KEY' });
-    const where = { [pk]: this.dataValues[pk] };
-    const result = await Ctor._adapter.dml.update(Ctor, this.dataValues, { ...options, where });
-    if (result && result.length > 0) Object.assign(this.dataValues, result[0].dataValues);
+    const where = this._instancePrimaryKeyWhere();
+    const result = await Ctor._adapter.dml.update(Ctor, values, { ...options, where });
+    if (result && result.length > 0) {
+      Object.assign(this.dataValues, result[0].dataValues);
+      this._originalPrimaryKey = keyObject(primaryAttributes(Ctor), valuesFor(this.dataValues, primaryAttributes(Ctor)));
+    }
     this._changed = {};
     if (options.hooks !== false) {
       await Ctor._runHooks('afterUpdate', this, options);
@@ -2040,10 +2062,17 @@ class Model {
   async destroy(options = {}) {
     const Ctor = this.constructor;
     if (options.hooks !== false) await Ctor._runHooks('beforeDestroy', this, options);
-    const pk = Ctor.primaryKeyAttribute;
-    const where = { [pk]: this.dataValues[pk] };
+    const where = this._instancePrimaryKeyWhere();
     await Ctor.destroy({ ...options, where, hooks: false });
     if (options.hooks !== false) await Ctor._runHooks('afterDestroy', this, options);
+  }
+
+  _instancePrimaryKeyWhere() {
+    const keys = primaryAttributes(this.constructor);
+    if (!keys.length) throw new ModelError(`Model "${this.constructor.modelName}" has no primary key`, { code: 'SEQ_MODEL_NO_PRIMARY_KEY' });
+    const values = keys.map(key => this._originalPrimaryKey[key] ?? this.dataValues[key]);
+    if (values.some(value => value === null || value === undefined)) throw new ModelError('Instance requires every primary-key component', { code: 'SEQ_MODEL_INVALID_PRIMARY_KEY' });
+    return keyObject(keys, values);
   }
 }
 
@@ -3055,7 +3084,7 @@ class BaseAdapter {
         type: def.type,
         primaryKey: def.primaryKey || false,
         autoIncrement: def.autoIncrement || false,
-        allowNull: def.allowNull !== undefined ? def.allowNull : true,
+        allowNull: def.primaryKey ? false : (def.allowNull !== undefined ? def.allowNull : true),
         defaultValue: def.defaultValue,
         defaultCurrentTimestamp: def.defaultCurrentTimestamp === true,
         validate: def.validate,
@@ -3084,6 +3113,8 @@ class BaseAdapter {
       primaryKey: pkAttr ? attrToColumn[pkAttr] : null,
       autoIncrement: aiAttr ? attrToColumn[aiAttr] : null,
       primaryKeyAttribute: pkAttr || null,
+      primaryKeyAttributes: [...primaryAttributes(modelClass)],
+      primaryKeys: primaryAttributes(modelClass).map(attr => attrToColumn[attr]),
       autoIncrementAttribute: aiAttr || null,
       timestamps: modelClass.options?.timestamps || false,
       createdAt: modelClass.options?.createdAt || 'createdAt',
@@ -3187,79 +3218,48 @@ class BaseAdapter {
   buildForeignKeys(modelClass, attrToColumn, context) {
     const fkMap = new Map();
     const sourceTable = modelClass._resolvedTableName || this.resolveTableName(modelClass);
-    const upsertFK = (fkCol, entry) => {
-      const existing = fkMap.get(fkCol);
-      if (!existing) {
-        fkMap.set(fkCol, entry);
-      } else {
-        if (entry.onDelete && entry.onDelete !== 'RESTRICT') existing.onDelete = entry.onDelete;
-        if (entry.onUpdate && entry.onUpdate !== 'RESTRICT') existing.onUpdate = entry.onUpdate;
-        if (entry.constraintName) existing.constraintName = entry.constraintName;
+    const add = (attrs, parent, keys, options) => {
+      const columnNames = attrs.map(attr => attrToColumn[attr] || attr);
+      const refTable = parent._resolvedTableName || this.resolveTableName(parent);
+      const refColumns = keys.map(key => this.resolveColumnName(parent.rawAttributes[key] || {}, key));
+      const entry = {
+        attributeNames: attrs, columnNames,
+        attributeName: attrs.length === 1 ? attrs[0] : null,
+        columnName: columnNames.length === 1 ? columnNames[0] : null,
+        constraintName: options.constraintName || this.foreignKeyConstraintName(sourceTable, refTable, columnNames.join('_')),
+        references: { model: parent.modelName, table: refTable, keys, columns: refColumns,
+          key: keys.length === 1 ? keys[0] : null, column: refColumns.length === 1 ? refColumns[0] : null },
+        onDelete: options.onDelete || 'RESTRICT', onUpdate: options.onUpdate || 'RESTRICT'
+      };
+      const identity = JSON.stringify([columnNames, refTable, refColumns]);
+      const existing = fkMap.get(identity);
+      if (!existing) fkMap.set(identity, entry);
+      else {
+        if (options.onDelete && options.onDelete !== 'RESTRICT') existing.onDelete = options.onDelete;
+        if (options.onUpdate && options.onUpdate !== 'RESTRICT') existing.onUpdate = options.onUpdate;
+        if (options.constraintName) existing.constraintName = options.constraintName;
       }
     };
-
-    for (const [attrName, def] of Object.entries(modelClass.rawAttributes || {})) {
-      if (modelClass._isVirtualAttribute?.(def)) continue;
-      if (def.references) {
-        const refModel = context.getModel(def.references.model);
-        if (!refModel) continue;
-        const refPkAttr = def.references.key || refModel.primaryKeyAttribute || 'id';
-        const refTable = refModel._resolvedTableName || this.resolveTableName(refModel);
-        const refPkCol = this.resolveColumnName(refModel.rawAttributes[refPkAttr] || {}, refPkAttr);
-        const fkCol = attrToColumn[attrName] || attrName;
-        const constraintName = def.references.constraintName || this.foreignKeyConstraintName(sourceTable, refTable, fkCol);
-        upsertFK(fkCol, {
-          attributeName: attrName,
-          columnName: fkCol,
-          constraintName,
-          references: { model: def.references.model, table: refTable, key: refPkAttr, column: refPkCol },
-          onDelete: def.onDelete || 'RESTRICT',
-          onUpdate: def.onUpdate || 'RESTRICT'
-        });
+    for (const [attr, def] of Object.entries(modelClass.rawAttributes || {})) {
+      if (modelClass._isVirtualAttribute?.(def) || !def.references) continue;
+      const parent = context.getModel(def.references.model);
+      if (!parent) continue;
+      if (!def.references.key && primaryAttributes(parent).length > 1) {
+        throw new ModelError('Composite references must be defined with an association and foreignKey attributes', { code: 'SEQ_ASSOCIATION_INVALID_FOREIGN_KEY' });
       }
+      add([attr], parent, [def.references.key || parent.primaryKeyAttribute || 'id'], { ...def, constraintName: def.references.constraintName });
     }
-
     for (const assoc of Object.values(modelClass.associations || {})) {
-      if (assoc.type !== 'belongsTo') continue;
-      const fkAttr = assoc.foreignKey;
-      const refPkAttr = assoc.target.primaryKeyAttribute || 'id';
-      const refTable = assoc.target._resolvedTableName || this.resolveTableName(assoc.target);
-      const refPkCol = this.resolveColumnName(assoc.target.rawAttributes[refPkAttr] || {}, refPkAttr);
-      const fkCol = attrToColumn[fkAttr] || fkAttr;
-      const constraintName = assoc.constraintName || this.foreignKeyConstraintName(sourceTable, refTable, fkCol);
-      upsertFK(fkCol, {
-        attributeName: fkAttr,
-        columnName: fkCol,
-        constraintName,
-        references: { model: assoc.target.modelName, table: refTable, key: refPkAttr, column: refPkCol },
-        onDelete: assoc.onDelete,
-        onUpdate: assoc.onUpdate
-      });
+      if (assoc.type === 'belongsTo') add(assoc.foreignKeys, assoc.target, assoc.referencedKeys, assoc);
     }
-
-    for (const otherModel of context.models) {
-      if (otherModel === modelClass) continue;
-      for (const assoc of Object.values(otherModel.associations || {})) {
-        if (assoc.type !== 'hasMany' && assoc.type !== 'hasOne') continue;
-        if (assoc.target !== modelClass) continue;
-        const fkAttr = assoc.foreignKey;
-        if (!modelClass.rawAttributes || !modelClass.rawAttributes[fkAttr]) continue;
-        const refPkAttr = assoc.source.primaryKeyAttribute || 'id';
-        const refTable = assoc.source._resolvedTableName || this.resolveTableName(assoc.source);
-        const refPkCol = this.resolveColumnName(assoc.source.rawAttributes[refPkAttr] || {}, refPkAttr);
-        const fkCol = attrToColumn[fkAttr] || fkAttr;
-        const constraintName = assoc.constraintName || this.foreignKeyConstraintName(sourceTable, refTable, fkCol);
-        upsertFK(fkCol, {
-          attributeName: fkAttr,
-          columnName: fkCol,
-          constraintName,
-          references: { model: assoc.source.modelName, table: refTable, key: refPkAttr, column: refPkCol },
-          onDelete: assoc.onDelete,
-          onUpdate: assoc.onUpdate
-        });
+    for (const other of context.models) {
+      for (const assoc of Object.values(other.associations || {})) {
+        if ((assoc.type === 'hasMany' || assoc.type === 'hasOne') && assoc.target === modelClass) {
+          add(assoc.foreignKeys, assoc.source, assoc.referencedKeys, assoc);
+        }
       }
     }
-    return Array.from(fkMap.values());
+    return [...fkMap.values()];
   }
 
   _constraintTableName(tableName) {
@@ -3635,6 +3635,8 @@ class DDLAbstract extends BaseAbstract {
       primaryKey: definition.primaryKey || null,
       autoIncrement: definition.autoIncrement || null,
       primaryKeyAttribute: definition.primaryKeyAttribute || null,
+      primaryKeyAttributes: definition.primaryKeyAttributes || (definition.primaryKeyAttribute ? [definition.primaryKeyAttribute] : []),
+      primaryKeys: definition.primaryKeys || (definition.primaryKey ? [definition.primaryKey] : []),
       autoIncrementAttribute: definition.autoIncrementAttribute || null,
       timestamps: definition.timestamps || false,
       createdAt: definition.createdAt || 'createdAt',
@@ -3770,6 +3772,8 @@ function resolveWhereValue(value) {
   return { op: Op.eq, value };
 }
 
+const requiredPageIncludes = Symbol('requiredPageIncludes');
+
 /**
  * Base DML abstract.
  * Provides SQL-based default implementations for selectAll, count, update, delete.
@@ -3820,6 +3824,51 @@ class DMLAbstract extends BaseAbstract {
 
   _tableWithAlias(tableName, alias) {
     return `${this._q(tableName)}${alias ? ` AS ${this._q(alias)}` : ''}`;
+  }
+
+  _requiredIncludeConditions(includes, model, parentAlias, aliases = { next: 0, used: new Set([parentAlias]) }) {
+    const conditions = [];
+    const params = [];
+    if (!includes?.length) return { conditions, params };
+    parentAlias ||= this._getTableName(model);
+    aliases.used.add(parentAlias);
+    const { schema: parentSchema } = this._schema(model);
+    const nextAlias = () => {
+      let alias;
+      do { alias = `seq_req_${++aliases.next}`; } while (aliases.used.has(alias));
+      aliases.used.add(alias);
+      return alias;
+    };
+    for (const inc of includes || []) {
+      if (!inc.required || !inc.model) continue;
+      const assoc = resolveAssociation(model, inc);
+      if (!assoc) continue;
+      const { tableName, schema } = this._schema(inc.model);
+      const alias = nextAlias();
+      let from = this._tableWithAlias(tableName, alias);
+      let links;
+      if (assoc.type === 'belongsToMany') {
+        const through = this._adapter.getAssociationThroughTable(assoc);
+        const junction = this._adapter.schemas.get(through);
+        const joinAlias = nextAlias();
+        const source = primaryAttributes(model)[0] || 'id';
+        const target = primaryAttributes(inc.model)[0] || 'id';
+        from += ` JOIN ${this._tableWithAlias(through, joinAlias)} ON ${this._colRef(junction.attrToColumn[assoc.otherKey] || assoc.otherKey, joinAlias)} = ${this._colRef(schema.attrToColumn[target] || target, alias)}`;
+        links = [`${this._colRef(parentSchema.attrToColumn[source] || source, parentAlias)} = ${this._colRef(junction.attrToColumn[assoc.foreignKey] || assoc.foreignKey, joinAlias)}`];
+      } else {
+        links = assoc.sourceKeys.map((key, index) => `${this._colRef(parentSchema.attrToColumn[key] || key, parentAlias)} = ${this._colRef(schema.attrToColumn[assoc.targetKeys[index]] || assoc.targetKeys[index], alias)}`);
+      }
+      if (inc.where) {
+        const where = this._buildConditions(inc.where, schema, alias);
+        links.push(...where.conditions);
+        params.push(...where.params);
+      }
+      const nested = this._requiredIncludeConditions(inc.include, inc.model, alias, aliases);
+      links.push(...nested.conditions);
+      params.push(...nested.params);
+      conditions.push(`EXISTS (SELECT 1 FROM ${from} WHERE ${links.join(' AND ')})`);
+    }
+    return { conditions, params };
   }
 
   _applyLimitOffset(sql, options) {
@@ -4027,15 +4076,15 @@ class DMLAbstract extends BaseAbstract {
 
   _requiredSourceAttributesForLazyIncludes(model, includes) {
     const required = [];
-    const pkAttr = model.primaryKeyAttribute || 'id';
+    const pkAttrs = primaryAttributes(model).length ? primaryAttributes(model) : ['id'];
     for (const inc of includes || []) {
       if (!inc.model) continue;
       const assoc = resolveAssociation(model, inc);
       if (!assoc) continue;
       if (assoc.type === 'belongsTo') {
-        required.push(assoc.foreignKey);
+        required.push(...assoc.foreignKeys);
       } else {
-        required.push(pkAttr);
+        required.push(...pkAttrs);
       }
     }
     return [...new Set(required)];
@@ -4083,7 +4132,7 @@ class DMLAbstract extends BaseAbstract {
       const { schema: incSchema } = this._schema(inc.model);
       const incAliasPrefix = includeSqlAliases.get(inc) || this._getTableName(inc.model);
       const selected = Array.isArray(inc.attributes) && inc.attributes.length > 0
-        ? new Set([...inc.attributes, inc.model.primaryKeyAttribute || 'id'])
+        ? new Set([...inc.attributes, ...primaryAttributes(inc.model)])
         : null;
       for (const [attrName, colDef] of Object.entries(incSchema.columns || {})) {
         if (selected && !selected.has(attrName)) continue;
@@ -4137,18 +4186,12 @@ class DMLAbstract extends BaseAbstract {
         }
         sql += ` ${joinType} ${this._tableWithAlias(targetTable, joinAlias)} ON ${onClause}`;
       } else {
-        let onClause;
-        if (assoc.type === 'belongsTo') {
-          const fkCol = parentSchema.attrToColumn[fkAttr] || fkAttr;
-          const targetPKAttr = assoc.target.primaryKeyAttribute || 'id';
-          const targetPKCol = targetSchema.attrToColumn[targetPKAttr] || targetPKAttr;
-          onClause = `${this._colRef(fkCol, parentAlias)} = ${this._colRef(targetPKCol, joinAlias)}`;
-        } else {
-          const pkAttr = model.primaryKeyAttribute || 'id';
-          const pkCol = parentSchema.attrToColumn[pkAttr] || pkAttr;
-          const fkCol = targetSchema.attrToColumn[fkAttr] || fkAttr;
-          onClause = `${this._colRef(pkCol, parentAlias)} = ${this._colRef(fkCol, joinAlias)}`;
-        }
+        let onClause = assoc.sourceKeys.map((sourceKey, index) => {
+          const sourceCol = parentSchema.attrToColumn[sourceKey] || sourceKey;
+          const targetKey = assoc.targetKeys[index];
+          const targetCol = targetSchema.attrToColumn[targetKey] || targetKey;
+          return this._colRef(sourceCol, parentAlias) + ' = ' + this._colRef(targetCol, joinAlias);
+        }).join(' AND ');
         if (inc.where) {
           const where = this._buildConditions(inc.where, targetSchema, joinAlias);
           onClause += ` AND ${where.conditions.join(' AND ')}`;
@@ -4271,11 +4314,11 @@ class DMLAbstract extends BaseAbstract {
       }
     }
     let queryOptions = options;
-    if (eagerIncludes.length > 0 && (options.limit !== undefined || options.offset !== undefined) && model.primaryKeyAttribute) {
-      const page = await this.selectAll(model, { ...options, include: [], attributes: [model.primaryKeyAttribute] });
-      const ids = page.map(instance => instance.getDataValue(model.primaryKeyAttribute));
+    if ((eagerIncludes.length > 0 || includes.some(inc => inc.required)) && (options.limit !== undefined || options.offset !== undefined) && primaryAttributes(model).length) {
+      const page = await this.selectAll(model, { ...options, include: [], attributes: primaryAttributes(model), [requiredPageIncludes]: includes.filter(inc => inc.required) });
+      const ids = page.map(instance => valuesFor(instance, primaryAttributes(model)));
       if (ids.length === 0) return [];
-      const pageWhere = { [model.primaryKeyAttribute]: { [Op.in]: ids } };
+      const pageWhere = tuplesWhere(primaryAttributes(model), ids);
       queryOptions = {
         ...options,
         where: options.where ? { [Op.and]: [options.where, pageWhere] } : pageWhere,
@@ -4312,6 +4355,11 @@ class DMLAbstract extends BaseAbstract {
     const where = this._buildWhere(queryOptions.where, schema, alias);
     sql += where.sql;
     params.push(...where.params);
+    const required = this._requiredIncludeConditions(queryOptions[requiredPageIncludes], model, alias);
+    if (required.conditions.length) {
+      sql += `${where.sql ? ' AND ' : ' WHERE '}${required.conditions.join(' AND ')}`;
+      params.push(...required.params);
+    }
     sql += this._buildOrderBy(queryOptions.order, schema, alias);
     sql = this._applyLimitOffset(sql, queryOptions);
     const rows = await this._executeQueryAll(sql, params);
@@ -4325,9 +4373,7 @@ class DMLAbstract extends BaseAbstract {
     if (lazyIncludes.length > 0) {
       instances = await loadIncludes(instances, lazyIncludes, model, this, queryOptions);
     }
-    if (requestedAttributes && requiredLazyAttributes.length > 0) {
-      trimProjection(instances, requestedAttributes, includes, model);
-    }
+    if (requestedAttributes) trimProjection(instances, requestedAttributes, includes, model);
     return instances;
   }
 
@@ -4366,9 +4412,10 @@ class DMLAbstract extends BaseAbstract {
     this._validateMutationValues(colValues, schema, model.modelName);
     if (Object.keys(colValues).length === 0) return [];
     let primaryKeys = null;
-    if (schema.primaryKeyAttribute) {
-      const matches = await this.selectAll(model, { where: options.where, attributes: [schema.primaryKeyAttribute], transaction: options.transaction });
-      primaryKeys = matches.map(instance => instance.getDataValue(schema.primaryKeyAttribute));
+    const pkAttrs = primaryAttributes(schema);
+    if (pkAttrs.length) {
+      const matches = await this.selectAll(model, { where: options.where, attributes: pkAttrs, transaction: options.transaction });
+      primaryKeys = matches.map(instance => pkAttrs.map(key => Object.hasOwn(values, key) ? values[key] : instance.getDataValue(key)));
       if (primaryKeys.length === 0) return [];
     }
     const setClauses = Object.keys(colValues).map(k => `${this._q(k)} = ?`);
@@ -4378,7 +4425,7 @@ class DMLAbstract extends BaseAbstract {
     params.push(...where.params);
     await this._execute(sql, params);
     if (primaryKeys) {
-      return this.selectAll(model, { ...options, where: { [schema.primaryKeyAttribute]: { [Op.in]: primaryKeys } } });
+      return this.selectAll(model, { ...options, where: tuplesWhere(pkAttrs, primaryKeys) });
     }
     if (options.where) return await this.selectAll(model, options);
     return [];
@@ -4435,8 +4482,8 @@ class DMLAbstract extends BaseAbstract {
     const sql = `INSERT INTO ${this._q(tableName)} (${colNames}) VALUES (${placeholders})`;
     const params = cols.map(c => this._serializeValue(colRecord[c]));
     const info = await this._execute(sql, params);
-    if (schema.primaryKey && !colRecord[schema.primaryKey]) {
-      colRecord[schema.primaryKey] = Number(info.lastInsertRowid);
+    if (schema.autoIncrement && colRecord[schema.autoIncrement] == null) {
+      colRecord[schema.autoIncrement] = Number(info.lastInsertRowid);
     }
     const attrRecord = this._toAttrNames(colRecord, schema);
     return new model(attrRecord, { _isNew: false });
@@ -4472,8 +4519,8 @@ class DMLAbstract extends BaseAbstract {
     const existing = await this.selectOne(model, { where, transaction: options.transaction });
 
     if (existing) {
-      const pkAttr = schema.primaryKeyAttribute;
-      const updateWhere = pkAttr ? { [pkAttr]: existing.getDataValue(pkAttr) } : where;
+      const pkAttrs = primaryAttributes(schema);
+      const updateWhere = pkAttrs.length ? keyObject(pkAttrs, valuesFor(existing, pkAttrs)) : where;
       const updated = await this.update(model, values, { ...options, where: updateWhere });
       return [updated[0] || existing, false];
     }
@@ -4544,8 +4591,8 @@ class DMLAbstract extends BaseAbstract {
       return [...options.conflictFields];
     }
 
-    const pkAttr = upsertSchema.primaryKeyAttribute;
-    if (pkAttr && values[pkAttr] !== undefined && values[pkAttr] !== null) return [pkAttr];
+    const pkAttrs = primaryAttributes(upsertSchema);
+    if (pkAttrs.length && pkAttrs.every(key => values[key] !== undefined && values[key] !== null)) return pkAttrs;
 
     for (const unique of upsertSchema.uniqueConstraints || []) {
       const fields = unique.columns.map(column => upsertSchema.columnToAttr[column] || column);
@@ -4880,8 +4927,8 @@ class MapDML extends DMLAbstract {
 
     this._validateRecord(colRecord, schema, model.modelName);
 
-    if (schema.primaryKey) {
-      const pkValue = colRecord[schema.primaryKey];
+    if (schema.primaryKeys?.length || schema.primaryKey) {
+      const pkValue = this._recordKey(schema, colRecord);
       if (pkValue !== null && pkValue !== undefined && table.has(pkValue)) {
         throw new AdapterError(
           `Duplicate primary key value "${pkValue}" for model "${model.modelName}"`,
@@ -4894,8 +4941,8 @@ class MapDML extends DMLAbstract {
     this._checkForeignKeyConstraint(schema, colRecord);
 
     const storedRecord = clone(colRecord);
-    if (schema.primaryKey) {
-      table.set(colRecord[schema.primaryKey], storedRecord);
+    if (schema.primaryKeys?.length || schema.primaryKey) {
+      table.set(this._recordKey(schema, colRecord), storedRecord);
     } else {
       table.set(table.size, storedRecord);
     }
@@ -4934,8 +4981,14 @@ class MapDML extends DMLAbstract {
    */
   async selectAll(model, options = {}) {
     this._assertTransaction(options);
-    let instances = await this._select(model, options);
+    const required = this._requiredSourceAttributesForLazyIncludes(model, options.include);
+    const filterBeforePaging = options.include?.some(include => include.required) && (options.limit !== undefined || options.offset !== undefined);
+    const selection = { ...options, attributes: this._attributesWithRequired(options.attributes, required) };
+    if (filterBeforePaging) { selection.limit = undefined; selection.offset = undefined; }
+    let instances = await this._select(model, selection);
     if (options.include?.length) instances = await loadIncludes(instances, options.include, model, this, options);
+    if (filterBeforePaging) instances = instances.slice(options.offset || 0, options.limit === undefined ? undefined : (options.offset || 0) + options.limit);
+    trimProjection(instances, options.attributes, options.include, model);
     return instances;
   }
 
@@ -5109,6 +5162,7 @@ class MapDML extends DMLAbstract {
 
     try {
       for (const { key, record } of toUpdate) {
+      const oldRecord = clone(record);
       for (const [colName, value] of Object.entries(colValues)) {
         record[colName] = value;
       }
@@ -5118,7 +5172,7 @@ class MapDML extends DMLAbstract {
         record[updatedCol] = now;
       }
 
-      const newKey = schema.primaryKey ? record[schema.primaryKey] : key;
+      const newKey = schema.primaryKeys?.length || schema.primaryKey ? this._recordKey(schema, record) : key;
       if (newKey !== key && table.has(newKey)) {
         throw new ValidationError(`Duplicate primary key value "${newKey}" for model "${model.modelName}"`, {
           code: 'SEQ_VALIDATION_DUPLICATE_PK'
@@ -5126,7 +5180,7 @@ class MapDML extends DMLAbstract {
       }
       this._checkUniqueConstraint(tableName, schema, record, key);
       this._checkForeignKeyConstraint(schema, record);
-      this._handleCascadeOnUpdate(model, schema, record, key);
+      this._handleCascadeOnUpdate(model, schema, record, oldRecord);
 
       if (schema) {
         this._validateRecord(record, schema, model.modelName);
@@ -5176,8 +5230,8 @@ class MapDML extends DMLAbstract {
     try {
       for (const key of keysToDelete) {
         const record = table.get(key);
-        const deletedPkValue = schema.primaryKey ? record[schema.primaryKey] : key;
-        this._handleCascadeOnDelete(model, schema, deletedPkValue);
+        if (!record) continue;
+        this._handleCascadeOnDelete(model, schema, record);
         table.delete(key);
         count++;
       }
@@ -5226,99 +5280,76 @@ class MapDML extends DMLAbstract {
     }
   }
 
-  _checkForeignKeyConstraint(schema, colRecord) {
-    const foreignKeys = schema.foreignKeys || [];
-    for (const fk of foreignKeys) {
-      const value = colRecord[fk.columnName];
-      if (value === null || value === undefined) continue;
+  _recordKey(schema, record) {
+    const columns = schema.primaryKeys?.length ? schema.primaryKeys : [schema.primaryKey];
+    return columns.length === 1 ? record[columns[0]] : tupleKey(valuesFor(record, columns));
+  }
 
-      const refTable = this._adapter.database.get(fk.references.table);
-      if (!refTable) continue;
-
-      this._adapter.schemas.get(fk.references.table);
-      const refPkCol = fk.references.column;
-      let found = false;
-      for (const [, existing] of refTable) {
-        if (existing[refPkCol] === value) {
-          found = true;
-          break;
-        }
-      }
-      if (!found) {
-        throw new ValidationError(
-          `Foreign key constraint "${fk.constraintName}": value "${value}" for "${fk.attributeName}" does not exist in "${fk.references.model}.${fk.references.key}"`,
-          {
-            code: 'SEQ_VALIDATION_FK',
-            details: { model: schema.modelName, field: fk.attributeName, value, constraintName: fk.constraintName, referencesModel: fk.references.model, referencesKey: fk.references.key }
-          }
-        );
+  _checkForeignKeyConstraint(schema, record) {
+    for (const fk of schema.foreignKeys || []) {
+      const columns = fk.columnNames || [fk.columnName];
+      const values = valuesFor(record, columns);
+      if (values.some(value => value === null || value === undefined)) continue;
+      const referenced = this._adapter.database.get(fk.references.table);
+      if (!referenced) continue;
+      const refColumns = fk.references.columns || [fk.references.column];
+      if (![...referenced.values()].some(row => refColumns.every((column, index) => row[column] === values[index]))) {
+        throw new ValidationError('Foreign key constraint "' + fk.constraintName + '": referenced record does not exist', {
+          code: 'SEQ_VALIDATION_FK', details: { model: schema.modelName, field: fk.attributeName, value: values.length === 1 ? values[0] : values, constraintName: fk.constraintName, referencesModel: fk.references.model, referencesKey: fk.references.key }
+        });
       }
     }
   }
 
-  _handleCascadeOnDelete(model, schema, deletedPkValue) {
-    const fkTableName = this._getTableName(model);
-    for (const otherTableName of this._adapter.database.keys()) {
-      if (otherTableName === fkTableName) continue;
-      const otherSchema = this._adapter.schemas.get(otherTableName);
-      if (!otherSchema) continue;
-      const otherTable = this._adapter.database.get(otherTableName);
-
-      for (const fk of (otherSchema.foreignKeys || [])) {
-        if (fk.references.table !== fkTableName) continue;
-
-        const pkCol = schema.primaryKey;
-        if (!pkCol) continue;
-
-        for (const [pk, record] of otherTable) {
-          if (record[fk.columnName] === deletedPkValue) {
-            if (fk.onDelete === 'CASCADE') {
-              otherTable.delete(pk);
-            } else if (fk.onDelete === 'SET NULL') {
-              record[fk.columnName] = null;
-            } else {
-              throw new ValidationError(
-                `Cannot delete: record is referenced by "${otherSchema.modelName}" via constraint "${fk.constraintName}" on "${fk.attributeName}"`,
-                { code: 'SEQ_VALIDATION_FK_RESTRICT', details: { model: otherSchema.modelName, field: fk.attributeName, constraintName: fk.constraintName } }
-              );
-            }
-          }
-        }
-      }
-    }
-  }
-
-  _handleCascadeOnUpdate(model, schema, record, pkValue) {
-    const pkCol = schema.primaryKey;
-    if (!pkCol) return;
-
-    const oldPkValue = pkValue;
-    const newPkValue = record[pkCol];
-    if (oldPkValue === newPkValue) return;
-
+  _handleCascadeOnDelete(model, schema, record, visited = new Set()) {
     const tableName = this._getTableName(model);
-    for (const otherTableName of this._adapter.database.keys()) {
-      if (otherTableName === tableName) continue;
-      const otherSchema = this._adapter.schemas.get(otherTableName);
-      if (!otherSchema) continue;
+    const identity = tupleKey([tableName, this._recordKey(schema, record)]);
+    if (visited.has(identity)) return;
+    visited.add(identity);
+    for (const [otherTableName, otherSchema] of this._adapter.schemas) {
       const otherTable = this._adapter.database.get(otherTableName);
-
-      for (const fk of (otherSchema.foreignKeys || [])) {
+      for (const fk of otherSchema.foreignKeys || []) {
         if (fk.references.table !== tableName) continue;
+        const refs = fk.references.columns || [fk.references.column];
+        const columns = fk.columnNames || [fk.columnName];
+        for (const [key, child] of [...otherTable]) {
+          if (!columns.every((column, index) => child[column] != null && child[column] === record[refs[index]])) continue;
+          if (fk.onDelete === 'CASCADE') {
+            this._handleCascadeOnDelete({ tableName: otherTableName }, otherSchema, child, visited);
+            otherTable.delete(key);
+          } else if (fk.onDelete === 'SET NULL') {
+            for (const column of columns) child[column] = null;
+            this._validateRecord(child, otherSchema, otherSchema.modelName);
+          } else throw new ValidationError('Cannot delete: record is referenced via constraint "' + fk.constraintName + '"', { code: 'SEQ_VALIDATION_FK_RESTRICT', details: { model: otherSchema.modelName, field: fk.attributeName, constraintName: fk.constraintName } });
+        }
+      }
+    }
+  }
 
-        for (const [, otherRecord] of otherTable) {
-          if (otherRecord[fk.columnName] === oldPkValue) {
-            if (fk.onUpdate === 'CASCADE') {
-              otherRecord[fk.columnName] = newPkValue;
-            } else if (fk.onUpdate === 'SET NULL') {
-              otherRecord[fk.columnName] = null;
-            } else {
-              throw new ValidationError(
-                `Cannot update: record is referenced by "${otherSchema.modelName}" via constraint "${fk.constraintName}" on "${fk.attributeName}"`,
-                { code: 'SEQ_VALIDATION_FK_RESTRICT', details: { model: otherSchema.modelName, field: fk.attributeName, constraintName: fk.constraintName } }
-              );
-            }
-          }
+  _handleCascadeOnUpdate(model, schema, record, oldRecord, visited = new Set()) {
+    const tableName = this._getTableName(model);
+    const identity = tupleKey([tableName, this._recordKey(schema, oldRecord)]);
+    if (visited.has(identity)) return;
+    visited.add(identity);
+    for (const [otherTableName, otherSchema] of this._adapter.schemas) {
+      const otherTable = this._adapter.database.get(otherTableName);
+      for (const fk of otherSchema.foreignKeys || []) {
+        if (fk.references.table !== tableName) continue;
+        const refs = fk.references.columns || [fk.references.column];
+        if (refs.every(column => record[column] === oldRecord[column])) continue;
+        const columns = fk.columnNames || [fk.columnName];
+        for (const [key, child] of [...otherTable]) {
+          if (!columns.every((column, index) => child[column] != null && child[column] === oldRecord[refs[index]])) continue;
+          if (fk.onUpdate !== 'CASCADE' && fk.onUpdate !== 'SET NULL') throw new ValidationError('Cannot update: record is referenced via constraint "' + fk.constraintName + '"', { code: 'SEQ_VALIDATION_FK_RESTRICT', details: { model: otherSchema.modelName, field: fk.attributeName, constraintName: fk.constraintName } });
+          const previous = clone(child);
+          columns.forEach((column, index) => { child[column] = fk.onUpdate === 'CASCADE' ? record[refs[index]] : null; });
+          this._validateRecord(child, otherSchema, otherSchema.modelName);
+          this._checkUniqueConstraint(otherTableName, otherSchema, child, key);
+          this._checkForeignKeyConstraint(otherSchema, child);
+          const nextKey = otherSchema.primaryKeys?.length || otherSchema.primaryKey ? this._recordKey(otherSchema, child) : key;
+          if (nextKey !== key && otherTable.has(nextKey)) throw new ValidationError('Duplicate primary key value', { code: 'SEQ_VALIDATION_DUPLICATE_PK' });
+          this._handleCascadeOnUpdate({ tableName: otherTableName }, otherSchema, child, previous, visited);
+          if (nextKey !== key) { otherTable.delete(key); otherTable.set(nextKey, child); }
         }
       }
     }
@@ -5625,7 +5656,7 @@ class SQLiteDDL extends DDLAbstract {
       const fkName = fk.constraintName;
       const onDelete = fk.onDelete || 'RESTRICT';
       const onUpdate = fk.onUpdate || 'RESTRICT';
-      colDefs.push(`CONSTRAINT ${this._q(fkName)} FOREIGN KEY (${this._q(colName)}) REFERENCES ${this._q(refTable)} (${this._q(refCol)}) ON DELETE ${onDelete} ON UPDATE ${onUpdate}`);
+      colDefs.push(`CONSTRAINT ${this._q(fkName)} FOREIGN KEY (${(fk.columnNames || [colName]).map(column => this._q(column)).join(', ')}) REFERENCES ${this._q(refTable)} (${(fk.references.columns || [refCol]).map(column => this._q(column)).join(', ')}) ON DELETE ${onDelete} ON UPDATE ${onUpdate}`);
       const schema = this._adapter.schemas.get(def.tableName);
       schema.foreignKeys.push({ ...fk });
     }
@@ -5698,9 +5729,12 @@ class SQLiteDDL extends DDLAbstract {
 
     const foreignKeySql = `PRAGMA foreign_key_list(${this._q(def.tableName)})`;
     const physicalFKs = this._measureSql(foreignKeySql, [], () => this._db().prepare(foreignKeySql).all());
-    const foreignKeys = def.foreignKeys.filter(fk => physicalFKs.some(row =>
-      row.from === fk.columnName && row.table === fk.references.table && row.to === fk.references.column
-    ));
+    const foreignKeys = def.foreignKeys.filter(fk => {
+      const columns = fk.columnNames || [fk.columnName];
+      const references = fk.references.columns || [fk.references.column];
+      return physicalFKs.some(first => first.seq === 0 && columns.every((column, index) =>
+        physicalFKs.some(row => row.id === first.id && row.seq === index && row.from === column && row.table === fk.references.table && row.to === references[index])));
+    });
 
     return { ...def, columns, attrToColumn, columnToAttr, uniqueConstraints, indexes, foreignKeys };
   }
@@ -5927,7 +5961,7 @@ class SQLiteDML extends DMLAbstract {
       const params = cols.map(c => this._serializeValue(colRecord[c]));
       const info = this._execute(sql, params);
 
-      if (schema.primaryKey && !colRecord[schema.primaryKey]) colRecord[schema.primaryKey] = Number(info.lastInsertRowid);
+      if (schema.autoIncrement && colRecord[schema.autoIncrement] == null) colRecord[schema.autoIncrement] = Number(info.lastInsertRowid);
       const attrRecord = this._toAttrNames(colRecord, schema);
       return new model(attrRecord, { _isNew: false });
     };
@@ -6452,7 +6486,7 @@ class MySQLDDL extends DDLAbstract {
   }
 
   async addForeignKey(tableName, fk) {
-    const sql = `ALTER TABLE ${this._q(tableName)} ADD CONSTRAINT ${this._q(fk.constraintName)} FOREIGN KEY (${this._q(fk.columnName)}) REFERENCES ${this._q(fk.references.table)} (${this._q(fk.references.column)}) ON DELETE ${fk.onDelete || 'RESTRICT'} ON UPDATE ${fk.onUpdate || 'RESTRICT'}`;
+    const sql = `ALTER TABLE ${this._q(tableName)} ADD CONSTRAINT ${this._q(fk.constraintName)} FOREIGN KEY (${(fk.columnNames || [fk.columnName]).map(column => this._q(column)).join(', ')}) REFERENCES ${this._q(fk.references.table)} (${(fk.references.columns || [fk.references.column]).map(column => this._q(column)).join(', ')}) ON DELETE ${fk.onDelete || 'RESTRICT'} ON UPDATE ${fk.onUpdate || 'RESTRICT'}`;
     await this._execute(sql);
     const schema = this._adapter.schemas.get(tableName);
     schema.foreignKeys.push({ ...fk });
@@ -6564,7 +6598,7 @@ class MySQLDML extends DMLAbstract {
     const sql = `INSERT INTO ${this._q(tableName)} (${colNames}) VALUES (${placeholders})`;
     const params = cols.map(c => this._serializeValue(colRecord[c]));
     const info = await this._execute(sql, params);
-    if (schema.primaryKey && !colRecord[schema.primaryKey]) colRecord[schema.primaryKey] = Number(info.lastInsertRowid);
+    if (schema.autoIncrement && colRecord[schema.autoIncrement] == null) colRecord[schema.autoIncrement] = Number(info.lastInsertRowid);
     return new model(this._toAttrNames(colRecord, schema), { _isNew: false });
   }
 
@@ -7075,7 +7109,8 @@ class Oracle11DDL extends DDLAbstract {
 
   async addForeignKey(tableName, fk) {
     const deleteClause = fk.onDelete === 'CASCADE' || fk.onDelete === 'SET NULL' ? ` ON DELETE ${fk.onDelete}` : '';
-    await this._execute(`ALTER TABLE ${this._q(tableName)} ADD CONSTRAINT ${this._q(fk.constraintName)} FOREIGN KEY (${this._q(fk.columnName)}) REFERENCES ${this._q(fk.references.table)} (${this._q(fk.references.column)})${deleteClause}`);
+    const deferred = ['CASCADE', 'SET NULL'].includes(fk.onUpdate) ? ' DEFERRABLE INITIALLY IMMEDIATE' : '';
+    await this._execute(`ALTER TABLE ${this._q(tableName)} ADD CONSTRAINT ${this._q(fk.constraintName)} FOREIGN KEY (${(fk.columnNames || [fk.columnName]).map(column => this._q(column)).join(', ')}) REFERENCES ${this._q(fk.references.table)} (${(fk.references.columns || [fk.references.column]).map(column => this._q(column)).join(', ')})${deleteClause}${deferred}`);
     this._adapter.schemas.get(tableName).foreignKeys.push({ ...fk });
   }
   _formatDefaultValue(value, column) {
@@ -7181,40 +7216,55 @@ class Oracle11DML extends DMLAbstract {
   async update(model, values, options = {}) {
     this._assertTransaction(options);
     const { tableName, schema } = this._schema(model);
-    const pkAttr = schema.primaryKeyAttribute;
-    if (!pkAttr || !Object.prototype.hasOwnProperty.call(values, pkAttr)) return super.update(model, values, options);
-
-    const pkCol = schema.attrToColumn[pkAttr] || pkAttr;
-    const newPk = values[pkAttr];
-    const matches = await this.selectAll(model, { where: options.where, attributes: [pkAttr], transaction: options.transaction });
-    const oldPks = matches.map(instance => instance.getDataValue(pkAttr));
-    if (oldPks.length === 0) return [];
-
+    const keys = primaryAttributes(model);
+    const changed = keys.filter(key => Object.hasOwn(values, key));
+    if (!changed.length) return super.update(model, values, options);
+    const matches = await this.selectAll(model, { where: options.where, attributes: keys, transaction: options.transaction });
+    if (!matches.length) return [];
     const cascadeFks = [];
     for (const [childTable, childSchema] of this._adapter.schemas) {
       for (const fk of childSchema.foreignKeys || []) {
-        if (fk.references?.table === tableName && fk.references?.column === pkCol && fk.onUpdate === 'CASCADE') {
-          cascadeFks.push({ childTable, fk });
+        const refs = fk.references.columns || [fk.references.column];
+        if (fk.references.table === tableName && ['CASCADE', 'SET NULL'].includes(fk.onUpdate)
+          && changed.some(key => refs.includes(schema.attrToColumn[key] || key))
+          && matches.some(row => changed.some(key => row.getDataValue(key) !== values[key]))) {
+          cascadeFks.push({ childTable, childSchema, fk });
         }
       }
     }
-    if (cascadeFks.length === 0) return super.update(model, values, options);
-
+    if (!cascadeFks.length) return super.update(model, values, options);
+    const ownTransaction = !options.transaction;
+    const transaction = options.transaction || await this._adapter.tcl.begin();
+    const mutationOptions = { ...options, transaction };
     try {
-      for (const { childTable, fk } of cascadeFks) {
-        await this._execute(`ALTER TABLE ${this._q(childTable)} DISABLE CONSTRAINT ${this._q(fk.constraintName)}`, []);
-      }
-      const updated = await super.update(model, values, options);
-      for (const oldPk of oldPks) {
-        for (const { childTable, fk } of cascadeFks) {
-          await this._execute(`UPDATE ${this._q(childTable)} SET ${this._q(fk.columnName)} = ? WHERE ${this._q(fk.columnName)} = ?`, [newPk, oldPk]);
+      for (const { fk } of cascadeFks) await this._execute('SET CONSTRAINTS ' + this._q(fk.constraintName) + ' DEFERRED');
+      const updated = await super.update(model, values, mutationOptions);
+      for (const previous of matches) {
+        for (const { childTable, childSchema, fk } of cascadeFks) {
+          const refs = fk.references.columns || [fk.references.column];
+          const columns = fk.columnNames || [fk.columnName];
+          const oldValues = refs.map(col => previous.getDataValue(schema.columnToAttr[col] || col));
+          const newValues = refs.map(col => {
+            const attr = schema.columnToAttr[col] || col;
+            return fk.onUpdate === 'SET NULL' ? null : Object.hasOwn(values, attr) ? values[attr] : previous.getDataValue(attr);
+          });
+          const childModel = this._adapter._seq?.getModel(childSchema.modelName);
+          if (childModel) {
+            const attrs = columns.map(col => childSchema.columnToAttr[col] || col);
+            await this.update(childModel, keyObject(attrs, newValues), { ...mutationOptions, where: keyObject(attrs, oldValues), include: undefined });
+          } else {
+            const set = columns.map(col => this._q(col) + ' = ?').join(', ');
+            const where = columns.map(col => this._q(col) + ' = ?').join(' AND ');
+            await this._execute('UPDATE ' + this._q(childTable) + ' SET ' + set + ' WHERE ' + where, [...newValues, ...oldValues]);
+          }
         }
       }
+      for (const { fk } of cascadeFks) await this._execute('SET CONSTRAINTS ' + this._q(fk.constraintName) + ' IMMEDIATE');
+      if (ownTransaction) await this._adapter.tcl.commit(transaction);
       return updated;
-    } finally {
-      for (const { childTable, fk } of cascadeFks) {
-        await this._execute(`ALTER TABLE ${this._q(childTable)} ENABLE CONSTRAINT ${this._q(fk.constraintName)}`, []);
-      }
+    } catch (error) {
+      if (ownTransaction) await this._adapter.tcl.rollback(transaction);
+      throw error;
     }
   }
 

@@ -280,6 +280,8 @@ export class DDLAbstract extends BaseAbstract {
       primaryKey: definition.primaryKey || null,
       autoIncrement: definition.autoIncrement || null,
       primaryKeyAttribute: definition.primaryKeyAttribute || null,
+      primaryKeyAttributes: definition.primaryKeyAttributes || (definition.primaryKeyAttribute ? [definition.primaryKeyAttribute] : []),
+      primaryKeys: definition.primaryKeys || (definition.primaryKey ? [definition.primaryKey] : []),
       autoIncrementAttribute: definition.autoIncrementAttribute || null,
       timestamps: definition.timestamps || false,
       createdAt: definition.createdAt || 'createdAt',

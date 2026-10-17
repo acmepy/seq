@@ -144,7 +144,8 @@ export class Oracle11DDL extends DDLAbstract {
 
   async addForeignKey(tableName, fk) {
     const deleteClause = fk.onDelete === 'CASCADE' || fk.onDelete === 'SET NULL' ? ` ON DELETE ${fk.onDelete}` : '';
-    await this._execute(`ALTER TABLE ${this._q(tableName)} ADD CONSTRAINT ${this._q(fk.constraintName)} FOREIGN KEY (${this._q(fk.columnName)}) REFERENCES ${this._q(fk.references.table)} (${this._q(fk.references.column)})${deleteClause}`);
+    const deferred = ['CASCADE', 'SET NULL'].includes(fk.onUpdate) ? ' DEFERRABLE INITIALLY IMMEDIATE' : '';
+    await this._execute(`ALTER TABLE ${this._q(tableName)} ADD CONSTRAINT ${this._q(fk.constraintName)} FOREIGN KEY (${(fk.columnNames || [fk.columnName]).map(column => this._q(column)).join(', ')}) REFERENCES ${this._q(fk.references.table)} (${(fk.references.columns || [fk.references.column]).map(column => this._q(column)).join(', ')})${deleteClause}${deferred}`);
     this._adapter.schemas.get(tableName).foreignKeys.push({ ...fk });
   }
   _formatDefaultValue(value, column) {

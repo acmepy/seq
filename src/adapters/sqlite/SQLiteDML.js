@@ -127,7 +127,7 @@ export class SQLiteDML extends DMLAbstract {
       const params = cols.map(c => this._serializeValue(colRecord[c]));
       const info = this._execute(sql, params);
 
-      if (schema.primaryKey && !colRecord[schema.primaryKey]) colRecord[schema.primaryKey] = Number(info.lastInsertRowid);
+      if (schema.autoIncrement && colRecord[schema.autoIncrement] == null) colRecord[schema.autoIncrement] = Number(info.lastInsertRowid);
       const attrRecord = this._toAttrNames(colRecord, schema);
       return new model(attrRecord, { _isNew: false });
     };

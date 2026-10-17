@@ -75,7 +75,7 @@ export class MySQLDML extends DMLAbstract {
     const sql = `INSERT INTO ${this._q(tableName)} (${colNames}) VALUES (${placeholders})`;
     const params = cols.map(c => this._serializeValue(colRecord[c]));
     const info = await this._execute(sql, params);
-    if (schema.primaryKey && !colRecord[schema.primaryKey]) colRecord[schema.primaryKey] = Number(info.lastInsertRowid);
+    if (schema.autoIncrement && colRecord[schema.autoIncrement] == null) colRecord[schema.autoIncrement] = Number(info.lastInsertRowid);
     return new model(this._toAttrNames(colRecord, schema), { _isNew: false });
   }
 

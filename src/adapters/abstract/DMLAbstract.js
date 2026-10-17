@@ -1,9 +1,12 @@
+import { primaryAttributes, valuesFor, keyObject, tuplesWhere } from '../../utils/keys.js';
 import { BaseAbstract } from './BaseAbstract.js';
 import { AdapterError } from '../../core/errors/AdapterError.js';
 import { ValidationError } from '../../core/errors/ValidationError.js';
 import { Op } from '../../operators.js';
 import { resolveWhereValue } from '../../utils/where.js';
 import { buildIncludeSqlAliasMap, chunks, eagerNestedIncludes, loadIncludes, loadNestedLazyIncludes, processJoinedRows, resolveIncludeAlias, resolveEager, resolveAssociation, trimProjection } from '../../utils/include.js';
+
+const requiredPageIncludes = Symbol('requiredPageIncludes');
 
 /**
  * Base DML abstract.
@@ -55,6 +58,51 @@ export class DMLAbstract extends BaseAbstract {
 
   _tableWithAlias(tableName, alias) {
     return `${this._q(tableName)}${alias ? ` AS ${this._q(alias)}` : ''}`;
+  }
+
+  _requiredIncludeConditions(includes, model, parentAlias, aliases = { next: 0, used: new Set([parentAlias]) }) {
+    const conditions = [];
+    const params = [];
+    if (!includes?.length) return { conditions, params };
+    parentAlias ||= this._getTableName(model);
+    aliases.used.add(parentAlias);
+    const { schema: parentSchema } = this._schema(model);
+    const nextAlias = () => {
+      let alias;
+      do { alias = `seq_req_${++aliases.next}`; } while (aliases.used.has(alias));
+      aliases.used.add(alias);
+      return alias;
+    };
+    for (const inc of includes || []) {
+      if (!inc.required || !inc.model) continue;
+      const assoc = resolveAssociation(model, inc);
+      if (!assoc) continue;
+      const { tableName, schema } = this._schema(inc.model);
+      const alias = nextAlias();
+      let from = this._tableWithAlias(tableName, alias);
+      let links;
+      if (assoc.type === 'belongsToMany') {
+        const through = this._adapter.getAssociationThroughTable(assoc);
+        const junction = this._adapter.schemas.get(through);
+        const joinAlias = nextAlias();
+        const source = primaryAttributes(model)[0] || 'id';
+        const target = primaryAttributes(inc.model)[0] || 'id';
+        from += ` JOIN ${this._tableWithAlias(through, joinAlias)} ON ${this._colRef(junction.attrToColumn[assoc.otherKey] || assoc.otherKey, joinAlias)} = ${this._colRef(schema.attrToColumn[target] || target, alias)}`;
+        links = [`${this._colRef(parentSchema.attrToColumn[source] || source, parentAlias)} = ${this._colRef(junction.attrToColumn[assoc.foreignKey] || assoc.foreignKey, joinAlias)}`];
+      } else {
+        links = assoc.sourceKeys.map((key, index) => `${this._colRef(parentSchema.attrToColumn[key] || key, parentAlias)} = ${this._colRef(schema.attrToColumn[assoc.targetKeys[index]] || assoc.targetKeys[index], alias)}`);
+      }
+      if (inc.where) {
+        const where = this._buildConditions(inc.where, schema, alias);
+        links.push(...where.conditions);
+        params.push(...where.params);
+      }
+      const nested = this._requiredIncludeConditions(inc.include, inc.model, alias, aliases);
+      links.push(...nested.conditions);
+      params.push(...nested.params);
+      conditions.push(`EXISTS (SELECT 1 FROM ${from} WHERE ${links.join(' AND ')})`);
+    }
+    return { conditions, params };
   }
 
   _applyLimitOffset(sql, options) {
@@ -262,15 +310,15 @@ export class DMLAbstract extends BaseAbstract {
 
   _requiredSourceAttributesForLazyIncludes(model, includes) {
     const required = [];
-    const pkAttr = model.primaryKeyAttribute || 'id';
+    const pkAttrs = primaryAttributes(model).length ? primaryAttributes(model) : ['id'];
     for (const inc of includes || []) {
       if (!inc.model) continue;
       const assoc = resolveAssociation(model, inc);
       if (!assoc) continue;
       if (assoc.type === 'belongsTo') {
-        required.push(assoc.foreignKey);
-      } else if (pkAttr) {
-        required.push(pkAttr);
+        required.push(...assoc.foreignKeys);
+      } else {
+        required.push(...pkAttrs);
       }
     }
     return [...new Set(required)];
@@ -318,7 +366,7 @@ export class DMLAbstract extends BaseAbstract {
       const { schema: incSchema } = this._schema(inc.model);
       const incAliasPrefix = includeSqlAliases.get(inc) || this._getTableName(inc.model);
       const selected = Array.isArray(inc.attributes) && inc.attributes.length > 0
-        ? new Set([...inc.attributes, inc.model.primaryKeyAttribute || 'id'])
+        ? new Set([...inc.attributes, ...primaryAttributes(inc.model)])
         : null;
       for (const [attrName, colDef] of Object.entries(incSchema.columns || {})) {
         if (selected && !selected.has(attrName)) continue;
@@ -372,18 +420,12 @@ export class DMLAbstract extends BaseAbstract {
         }
         sql += ` ${joinType} ${this._tableWithAlias(targetTable, joinAlias)} ON ${onClause}`;
       } else {
-        let onClause;
-        if (assoc.type === 'belongsTo') {
-          const fkCol = parentSchema.attrToColumn[fkAttr] || fkAttr;
-          const targetPKAttr = assoc.target.primaryKeyAttribute || 'id';
-          const targetPKCol = targetSchema.attrToColumn[targetPKAttr] || targetPKAttr;
-          onClause = `${this._colRef(fkCol, parentAlias)} = ${this._colRef(targetPKCol, joinAlias)}`;
-        } else {
-          const pkAttr = model.primaryKeyAttribute || 'id';
-          const pkCol = parentSchema.attrToColumn[pkAttr] || pkAttr;
-          const fkCol = targetSchema.attrToColumn[fkAttr] || fkAttr;
-          onClause = `${this._colRef(pkCol, parentAlias)} = ${this._colRef(fkCol, joinAlias)}`;
-        }
+        let onClause = assoc.sourceKeys.map((sourceKey, index) => {
+          const sourceCol = parentSchema.attrToColumn[sourceKey] || sourceKey;
+          const targetKey = assoc.targetKeys[index];
+          const targetCol = targetSchema.attrToColumn[targetKey] || targetKey;
+          return this._colRef(sourceCol, parentAlias) + ' = ' + this._colRef(targetCol, joinAlias);
+        }).join(' AND ');
         if (inc.where) {
           const where = this._buildConditions(inc.where, targetSchema, joinAlias);
           onClause += ` AND ${where.conditions.join(' AND ')}`;
@@ -506,11 +548,11 @@ export class DMLAbstract extends BaseAbstract {
       }
     }
     let queryOptions = options;
-    if (eagerIncludes.length > 0 && (options.limit !== undefined || options.offset !== undefined) && model.primaryKeyAttribute) {
-      const page = await this.selectAll(model, { ...options, include: [], attributes: [model.primaryKeyAttribute] });
-      const ids = page.map(instance => instance.getDataValue(model.primaryKeyAttribute));
+    if ((eagerIncludes.length > 0 || includes.some(inc => inc.required)) && (options.limit !== undefined || options.offset !== undefined) && primaryAttributes(model).length) {
+      const page = await this.selectAll(model, { ...options, include: [], attributes: primaryAttributes(model), [requiredPageIncludes]: includes.filter(inc => inc.required) });
+      const ids = page.map(instance => valuesFor(instance, primaryAttributes(model)));
       if (ids.length === 0) return [];
-      const pageWhere = { [model.primaryKeyAttribute]: { [Op.in]: ids } };
+      const pageWhere = tuplesWhere(primaryAttributes(model), ids);
       queryOptions = {
         ...options,
         where: options.where ? { [Op.and]: [options.where, pageWhere] } : pageWhere,
@@ -547,6 +589,11 @@ export class DMLAbstract extends BaseAbstract {
     const where = this._buildWhere(queryOptions.where, schema, alias);
     sql += where.sql;
     params.push(...where.params);
+    const required = this._requiredIncludeConditions(queryOptions[requiredPageIncludes], model, alias);
+    if (required.conditions.length) {
+      sql += `${where.sql ? ' AND ' : ' WHERE '}${required.conditions.join(' AND ')}`;
+      params.push(...required.params);
+    }
     sql += this._buildOrderBy(queryOptions.order, schema, alias);
     sql = this._applyLimitOffset(sql, queryOptions);
     const rows = await this._executeQueryAll(sql, params);
@@ -560,9 +607,7 @@ export class DMLAbstract extends BaseAbstract {
     if (lazyIncludes.length > 0) {
       instances = await loadIncludes(instances, lazyIncludes, model, this, queryOptions);
     }
-    if (requestedAttributes && requiredLazyAttributes.length > 0) {
-      trimProjection(instances, requestedAttributes, includes, model);
-    }
+    if (requestedAttributes) trimProjection(instances, requestedAttributes, includes, model);
     return instances;
   }
 
@@ -601,9 +646,10 @@ export class DMLAbstract extends BaseAbstract {
     this._validateMutationValues(colValues, schema, model.modelName);
     if (Object.keys(colValues).length === 0) return [];
     let primaryKeys = null;
-    if (schema.primaryKeyAttribute) {
-      const matches = await this.selectAll(model, { where: options.where, attributes: [schema.primaryKeyAttribute], transaction: options.transaction });
-      primaryKeys = matches.map(instance => instance.getDataValue(schema.primaryKeyAttribute));
+    const pkAttrs = primaryAttributes(schema);
+    if (pkAttrs.length) {
+      const matches = await this.selectAll(model, { where: options.where, attributes: pkAttrs, transaction: options.transaction });
+      primaryKeys = matches.map(instance => pkAttrs.map(key => Object.hasOwn(values, key) ? values[key] : instance.getDataValue(key)));
       if (primaryKeys.length === 0) return [];
     }
     const setClauses = Object.keys(colValues).map(k => `${this._q(k)} = ?`);
@@ -613,7 +659,7 @@ export class DMLAbstract extends BaseAbstract {
     params.push(...where.params);
     await this._execute(sql, params);
     if (primaryKeys) {
-      return this.selectAll(model, { ...options, where: { [schema.primaryKeyAttribute]: { [Op.in]: primaryKeys } } });
+      return this.selectAll(model, { ...options, where: tuplesWhere(pkAttrs, primaryKeys) });
     }
     if (options.where) return await this.selectAll(model, options);
     return [];
@@ -670,8 +716,8 @@ export class DMLAbstract extends BaseAbstract {
     const sql = `INSERT INTO ${this._q(tableName)} (${colNames}) VALUES (${placeholders})`;
     const params = cols.map(c => this._serializeValue(colRecord[c]));
     const info = await this._execute(sql, params);
-    if (schema.primaryKey && !colRecord[schema.primaryKey]) {
-      colRecord[schema.primaryKey] = Number(info.lastInsertRowid);
+    if (schema.autoIncrement && colRecord[schema.autoIncrement] == null) {
+      colRecord[schema.autoIncrement] = Number(info.lastInsertRowid);
     }
     const attrRecord = this._toAttrNames(colRecord, schema);
     return new model(attrRecord, { _isNew: false });
@@ -707,8 +753,8 @@ export class DMLAbstract extends BaseAbstract {
     const existing = await this.selectOne(model, { where, transaction: options.transaction });
 
     if (existing) {
-      const pkAttr = schema.primaryKeyAttribute;
-      const updateWhere = pkAttr ? { [pkAttr]: existing.getDataValue(pkAttr) } : where;
+      const pkAttrs = primaryAttributes(schema);
+      const updateWhere = pkAttrs.length ? keyObject(pkAttrs, valuesFor(existing, pkAttrs)) : where;
       const updated = await this.update(model, values, { ...options, where: updateWhere });
       return [updated[0] || existing, false];
     }
@@ -779,8 +825,8 @@ export class DMLAbstract extends BaseAbstract {
       return [...options.conflictFields];
     }
 
-    const pkAttr = upsertSchema.primaryKeyAttribute;
-    if (pkAttr && values[pkAttr] !== undefined && values[pkAttr] !== null) return [pkAttr];
+    const pkAttrs = primaryAttributes(upsertSchema);
+    if (pkAttrs.length && pkAttrs.every(key => values[key] !== undefined && values[key] !== null)) return pkAttrs;
 
     for (const unique of upsertSchema.uniqueConstraints || []) {
       const fields = unique.columns.map(column => upsertSchema.columnToAttr[column] || column);

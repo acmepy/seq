@@ -267,7 +267,7 @@ Opciones de atributo:
 | Opcion | Descripcion |
 | --- | --- |
 | `type` | Tipo de `DataTypes`. Requerido. |
-| `primaryKey` | Marca la llave primaria. Solo se admite una por modelo. |
+| `primaryKey` | Marca una columna de la PK. Varias columnas forman una clave compuesta, en el orden de declaración; sus componentes no admiten `null`. |
 | `autoIncrement` | Autoincremento. Solo se admite uno por modelo. |
 | `allowNull` | Permite `null`. Por defecto es `true`. |
 | `defaultValue` | Valor por defecto o funcion `() => value`. |
@@ -278,6 +278,52 @@ Opciones de atributo:
 | `onUpdate` | Accion FK: `RESTRICT`, `CASCADE` o `SET NULL`. |
 | `validate.len` | Valida longitud con `[min, max]`. |
 | `validate.isEmail` | Valida formato de email basico. |
+
+### Claves primarias compuestas y maestro/detalle
+
+Puedes marcar varias columnas con `primaryKey: true`, tanto en el maestro como en el detalle:
+
+```js
+class Pedido extends Model {}
+Pedido.init({
+  empresaId: { type: DataTypes.INTEGER, primaryKey: true },
+  numero: { type: DataTypes.INTEGER, primaryKey: true },
+  nombre: { type: DataTypes.STRING(30) }
+}, { modelName: 'Pedido', timestamps: false });
+
+class Detalle extends Model {}
+Detalle.init({
+  empresaId: { type: DataTypes.INTEGER, primaryKey: true },
+  numeroPedido: { type: DataTypes.INTEGER, primaryKey: true },
+  linea: { type: DataTypes.INTEGER, primaryKey: true },
+  descripcion: { type: DataTypes.STRING(30) }
+}, { modelName: 'Detalle', timestamps: false });
+
+Pedido.hasMany(Detalle, {
+  as: 'detalles',
+  foreignKey: ['empresaId', 'numeroPedido'],
+  onDelete: 'CASCADE',
+  onUpdate: 'CASCADE'
+});
+Detalle.belongsTo(Pedido, {
+  as: 'pedido',
+  foreignKey: ['empresaId', 'numeroPedido']
+});
+
+// Después de registrar los modelos e inicializar seq:
+const pedido = await Pedido.findByPk({ empresaId: 1, numero: 100 }, {
+  include: [{ model: Detalle, as: 'detalles', eager: true }]
+});
+const detalle = await Detalle.findByPk({ empresaId: 1, numeroPedido: 100, linea: 2 });
+```
+
+`foreignKey` enumera los atributos del modelo hijo en el mismo orden que las columnas PK del maestro. La relación genera una sola restricción FK compuesta; no varias restricciones independientes. `hasMany`, `hasOne` y `belongsTo` admiten estas relaciones en carga lazy o eager, con filtros, proyecciones, paginación y includes anidados. También puede tener PK compuesta solo el detalle y mantener una FK simple hacia su maestro.
+
+`findByPk()` exige un objeto con todos los componentes de una PK compuesta. Para PK simples se mantiene `findByPk(valor)`. `primaryKeyAttributes` contiene la lista ordenada; `primaryKeyAttribute` conserva el nombre para PK simples y es `null` para las compuestas.
+
+`save()`, `update()`, `destroy()` y `upsert()` identifican los registros por la clave completa. Al cambiar un componente mediante una instancia, `save()` utiliza la clave anterior para localizar la fila. Sin un `where` o `conflictFields` explícito, `upsert()` requiere la PK completa o una restricción única con valores completos. Las mutaciones anidadas `hasMany`/`hasOne` asignan todos los componentes de la FK y conservan su comportamiento transaccional.
+
+En SQLite no se admite `AUTOINCREMENT` dentro de una PK compuesta. En Oracle, las cascadas de actualización usan FK `DEFERRABLE` para permitir el rollback; `seq` crea así las nuevas FK con `onUpdate: 'CASCADE'` o `'SET NULL'`. No convierte automáticamente las restricciones existentes. `belongsToMany` con PK compuesta en el origen o destino todavía se rechaza explícitamente.
 
 ## Compatibilidad con `sequelize.define`
 
@@ -966,7 +1012,9 @@ Implementado:
 
 Limitaciones conocidas:
 
-- Sin llaves primarias compuestas
+- `belongsToMany` no admite claves primarias compuestas en el modelo de origen o destino.
+- SQLite no admite `AUTOINCREMENT` en columnas de una PK compuesta.
+- En Oracle, las FK existentes deben ser `DEFERRABLE` para actualizar la PK referenciada con `onUpdate: 'CASCADE'` o `'SET NULL'`. Las nuevas FK con esas opciones ya se generan así; las existentes no se convierten automáticamente.
 - Sin migraciones versionadas
 - Sin scopes
 - Sin pool de conexiones
