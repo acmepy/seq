@@ -181,6 +181,7 @@ export class BaseAdapter {
         autoIncrement: def.autoIncrement || false,
         allowNull: def.allowNull !== undefined ? def.allowNull : true,
         defaultValue: def.defaultValue,
+        defaultCurrentTimestamp: def.defaultCurrentTimestamp === true,
         validate: def.validate,
         field: columnName
       };

@@ -1,6 +1,7 @@
 import { DDLAbstract } from '../abstract/DDLAbstract.js';
 import { AdapterError } from '../../core/errors/AdapterError.js';
 import { MySQLError } from './MySQLError.js';
+import { createHash } from 'crypto';
 
 export class MySQLDDL extends DDLAbstract {
   constructor(adapter) {
@@ -11,10 +12,10 @@ export class MySQLDDL extends DDLAbstract {
     return this._adapter._connection();
   }
 
-  async _execute(sql, params = []) {
+  async _execute(sql, params = [], prepared = true) {
     return this._measureSql(sql.replaceAll('\n  ', ' '), params, async () => {
       try {
-        const [result] = await this._adapter._withConnection(connection => connection.execute(sql, params));
+        const [result] = await this._adapter._withConnection(connection => prepared ? connection.execute(sql, params) : connection.query(sql, params));
         return result;
       } catch (error) {
         throw MySQLError.from(error);
@@ -25,13 +26,25 @@ export class MySQLDDL extends DDLAbstract {
   async createTableStructure(def) {
     const colDefs = [];
     const primaryKeys = [];
+    const timestampColumns = Object.entries(def.columns).filter(([, column]) => column.defaultCurrentTimestamp);
+    let supportsTimestampDefaults = true;
+    if (timestampColumns.length) {
+      const row = await this._adapter.dml._executeGet('SELECT VERSION() AS version', []);
+      const version = String(row.version);
+      const maria = version.match(/(\d+)\.(\d+)\.(\d+)-MariaDB/i);
+      const match = maria || version.match(/^(\d+)\.(\d+)\.(\d+)/);
+      const [major, minor, patch] = match ? match.slice(1, 4).map(Number) : [];
+      supportsTimestampDefaults = maria ? major >= 10 : major > 5 || major === 5 && (minor > 6 || minor === 6 && patch >= 5);
+    }
 
     for (const [attrName, colDef] of Object.entries(def.columns)) {
       const colName = colDef.field || attrName;
       const parts = [this._q(colName), this._adapter.mapDataType(colDef.type)];
       if (!colDef.allowNull && !colDef.primaryKey) parts.push('NOT NULL');
       if (colDef.autoIncrement) parts.push('AUTO_INCREMENT');
-      if (colDef.defaultValue !== undefined && colDef.defaultValue !== null && typeof colDef.defaultValue !== 'function') {
+      if (colDef.defaultCurrentTimestamp && supportsTimestampDefaults) {
+        parts.push('DEFAULT CURRENT_TIMESTAMP(3)');
+      } else if (colDef.defaultValue !== undefined && colDef.defaultValue !== null && typeof colDef.defaultValue !== 'function') {
         parts.push(`DEFAULT ${this._formatDefaultValue(colDef.defaultValue)}`);
       }
       colDefs.push(parts.join(' '));
@@ -44,6 +57,23 @@ export class MySQLDDL extends DDLAbstract {
 
     const sql = `CREATE TABLE ${this._q(def.tableName)} (\n  ${colDefs.join(',\n  ')}\n)`;
     await this._execute(sql);
+    if (timestampColumns.length && !supportsTimestampDefaults) {
+      const trigger = `seq_ts_${createHash('sha256').update(def.tableName).digest('hex').slice(0, 24)}`;
+      const assignments = timestampColumns.map(([name, column]) => {
+        const field = `NEW.${this._q(column.field || name)}`;
+        return `${field} = COALESCE(${field}, CURRENT_TIMESTAMP)`;
+      });
+      try {
+        await this._execute(`CREATE TRIGGER ${this._q(trigger)} BEFORE INSERT ON ${this._q(def.tableName)} FOR EACH ROW SET ${assignments.join(', ')}`, [], false);
+      } catch (error) {
+        try {
+          await this._execute(`DROP TABLE ${this._q(def.tableName)}`);
+        } catch (cleanupError) {
+          error.cleanupError = cleanupError;
+        }
+        throw error;
+      }
+    }
   }
 
   async dropTable(tableName, options = {}) {

@@ -1,4 +1,4 @@
-import crypto from 'crypto';
+import crypto, { createHash } from 'crypto';
 import util from 'node:util';
 
 /**
@@ -1224,10 +1224,10 @@ class Model {
       const updatedAtField = options.updatedAt || 'updatedAt';
 
       if (!this.rawAttributes[createdAtField]) {
-        this.rawAttributes[createdAtField] = {type: DataTypes.DATE, allowNull: true, defaultValue: () => new Date()};
+        this.rawAttributes[createdAtField] = {type: DataTypes.DATE, allowNull: true, defaultValue: () => new Date(), defaultCurrentTimestamp: true};
       }
       if (!this.rawAttributes[updatedAtField]) {
-        this.rawAttributes[updatedAtField] = {type: DataTypes.DATE, allowNull: true, defaultValue: () => new Date()};
+        this.rawAttributes[updatedAtField] = {type: DataTypes.DATE, allowNull: true, defaultValue: () => new Date(), defaultCurrentTimestamp: true};
       }
     }
 
@@ -3057,6 +3057,7 @@ class BaseAdapter {
         autoIncrement: def.autoIncrement || false,
         allowNull: def.allowNull !== undefined ? def.allowNull : true,
         defaultValue: def.defaultValue,
+        defaultCurrentTimestamp: def.defaultCurrentTimestamp === true,
         validate: def.validate,
         field: columnName
       };
@@ -5597,7 +5598,9 @@ class SQLiteDDL extends DDLAbstract {
       if (colDef.primaryKey && !def.autoIncrement) parts.push('PRIMARY KEY');
       if (colDef.autoIncrement) parts.push('PRIMARY KEY AUTOINCREMENT');
       if (!colDef.allowNull && !colDef.primaryKey) parts.push('NOT NULL');
-      if (colDef.defaultValue !== undefined && colDef.defaultValue !== null && typeof colDef.defaultValue !== 'function') {
+      if (colDef.defaultCurrentTimestamp) {
+        parts.push('DEFAULT CURRENT_TIMESTAMP');
+      } else if (colDef.defaultValue !== undefined && colDef.defaultValue !== null && typeof colDef.defaultValue !== 'function') {
         parts.push(`DEFAULT ${this._literal(colDef.defaultValue)}`);
       }
       colDefs.push(parts.join(' '));
@@ -6225,10 +6228,10 @@ class MySQLDDL extends DDLAbstract {
     return this._adapter._connection();
   }
 
-  async _execute(sql, params = []) {
+  async _execute(sql, params = [], prepared = true) {
     return this._measureSql(sql.replaceAll('\n  ', ' '), params, async () => {
       try {
-        const [result] = await this._adapter._withConnection(connection => connection.execute(sql, params));
+        const [result] = await this._adapter._withConnection(connection => prepared ? connection.execute(sql, params) : connection.query(sql, params));
         return result;
       } catch (error) {
         throw MySQLError.from(error);
@@ -6239,13 +6242,25 @@ class MySQLDDL extends DDLAbstract {
   async createTableStructure(def) {
     const colDefs = [];
     const primaryKeys = [];
+    const timestampColumns = Object.entries(def.columns).filter(([, column]) => column.defaultCurrentTimestamp);
+    let supportsTimestampDefaults = true;
+    if (timestampColumns.length) {
+      const row = await this._adapter.dml._executeGet('SELECT VERSION() AS version', []);
+      const version = String(row.version);
+      const maria = version.match(/(\d+)\.(\d+)\.(\d+)-MariaDB/i);
+      const match = maria || version.match(/^(\d+)\.(\d+)\.(\d+)/);
+      const [major, minor, patch] = match ? match.slice(1, 4).map(Number) : [];
+      supportsTimestampDefaults = maria ? major >= 10 : major > 5 || major === 5 && (minor > 6 || minor === 6 && patch >= 5);
+    }
 
     for (const [attrName, colDef] of Object.entries(def.columns)) {
       const colName = colDef.field || attrName;
       const parts = [this._q(colName), this._adapter.mapDataType(colDef.type)];
       if (!colDef.allowNull && !colDef.primaryKey) parts.push('NOT NULL');
       if (colDef.autoIncrement) parts.push('AUTO_INCREMENT');
-      if (colDef.defaultValue !== undefined && colDef.defaultValue !== null && typeof colDef.defaultValue !== 'function') {
+      if (colDef.defaultCurrentTimestamp && supportsTimestampDefaults) {
+        parts.push('DEFAULT CURRENT_TIMESTAMP(3)');
+      } else if (colDef.defaultValue !== undefined && colDef.defaultValue !== null && typeof colDef.defaultValue !== 'function') {
         parts.push(`DEFAULT ${this._formatDefaultValue(colDef.defaultValue)}`);
       }
       colDefs.push(parts.join(' '));
@@ -6258,6 +6273,23 @@ class MySQLDDL extends DDLAbstract {
 
     const sql = `CREATE TABLE ${this._q(def.tableName)} (\n  ${colDefs.join(',\n  ')}\n)`;
     await this._execute(sql);
+    if (timestampColumns.length && !supportsTimestampDefaults) {
+      const trigger = `seq_ts_${createHash('sha256').update(def.tableName).digest('hex').slice(0, 24)}`;
+      const assignments = timestampColumns.map(([name, column]) => {
+        const field = `NEW.${this._q(column.field || name)}`;
+        return `${field} = COALESCE(${field}, CURRENT_TIMESTAMP)`;
+      });
+      try {
+        await this._execute(`CREATE TRIGGER ${this._q(trigger)} BEFORE INSERT ON ${this._q(def.tableName)} FOR EACH ROW SET ${assignments.join(', ')}`, [], false);
+      } catch (error) {
+        try {
+          await this._execute(`DROP TABLE ${this._q(def.tableName)}`);
+        } catch (cleanupError) {
+          error.cleanupError = cleanupError;
+        }
+        throw error;
+      }
+    }
   }
 
   async dropTable(tableName, options = {}) {
@@ -6935,7 +6967,8 @@ class Oracle11DDL extends DDLAbstract {
     for (const [attr, column] of Object.entries(def.columns)) {
       const name = column.field || attr;
       const parts = [this._q(name), this._adapter.mapDataType(column.type, column)];
-      if (column.defaultValue !== undefined && column.defaultValue !== null && typeof column.defaultValue !== 'function') parts.push(`DEFAULT ${this._formatDefaultValue(column.defaultValue, column)}`);
+      if (column.defaultCurrentTimestamp) parts.push('DEFAULT SYSDATE');
+      else if (column.defaultValue !== undefined && column.defaultValue !== null && typeof column.defaultValue !== 'function') parts.push(`DEFAULT ${this._formatDefaultValue(column.defaultValue, column)}`);
       if (!column.allowNull && !column.primaryKey) parts.push(`CONSTRAINT ${this._q(this._constraintName('nn', def.tableName, [name]))} NOT NULL`);
       columns.push(parts.join(' ')); if (column.primaryKey) primaryKeys.push(name);
     }

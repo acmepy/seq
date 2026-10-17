@@ -58,6 +58,19 @@ describe('Seq.sync', () => {
     assert.deepEqual(result.existing, []);
   });
 
+  it('assigns timestamp defaults in the database for raw inserts', async () => {
+    await seq.sync();
+    const table = physicalTableName(User);
+    const schema = adapter.schemas.get(table);
+    const q = name => adapter._quoteIdentifier(name);
+    await adapter.dml._execute(`INSERT INTO ${q(table)} (${q(schema.attrToColumn.id)}, ${q(schema.attrToColumn.name)}) VALUES (?, ?)`, [900, 'Raw insert']);
+    const row = await User.findByPk(900, { plain: true });
+    assert.ok(row.createdAt instanceof Date);
+    assert.ok(row.updatedAt instanceof Date);
+    assert.ok(Number.isFinite(row.createdAt.getTime()));
+    assert.ok(Number.isFinite(row.updatedAt.getTime()));
+  });
+
   it('does not recreate existing tables without force', async () => {
     await seq.sync();
     const result = await seq.sync();

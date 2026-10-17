@@ -47,7 +47,8 @@ export class Oracle11DDL extends DDLAbstract {
     for (const [attr, column] of Object.entries(def.columns)) {
       const name = column.field || attr;
       const parts = [this._q(name), this._adapter.mapDataType(column.type, column)];
-      if (column.defaultValue !== undefined && column.defaultValue !== null && typeof column.defaultValue !== 'function') parts.push(`DEFAULT ${this._formatDefaultValue(column.defaultValue, column)}`);
+      if (column.defaultCurrentTimestamp) parts.push('DEFAULT SYSDATE');
+      else if (column.defaultValue !== undefined && column.defaultValue !== null && typeof column.defaultValue !== 'function') parts.push(`DEFAULT ${this._formatDefaultValue(column.defaultValue, column)}`);
       if (!column.allowNull && !column.primaryKey) parts.push(`CONSTRAINT ${this._q(this._constraintName('nn', def.tableName, [name]))} NOT NULL`);
       columns.push(parts.join(' ')); if (column.primaryKey) primaryKeys.push(name);
     }

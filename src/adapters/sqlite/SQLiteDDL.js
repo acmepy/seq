@@ -23,7 +23,9 @@ export class SQLiteDDL extends DDLAbstract {
       if (colDef.primaryKey && !def.autoIncrement) parts.push('PRIMARY KEY');
       if (colDef.autoIncrement) parts.push('PRIMARY KEY AUTOINCREMENT');
       if (!colDef.allowNull && !colDef.primaryKey) parts.push('NOT NULL');
-      if (colDef.defaultValue !== undefined && colDef.defaultValue !== null && typeof colDef.defaultValue !== 'function') {
+      if (colDef.defaultCurrentTimestamp) {
+        parts.push('DEFAULT CURRENT_TIMESTAMP');
+      } else if (colDef.defaultValue !== undefined && colDef.defaultValue !== null && typeof colDef.defaultValue !== 'function') {
         parts.push(`DEFAULT ${this._literal(colDef.defaultValue)}`);
       }
       colDefs.push(parts.join(' '));

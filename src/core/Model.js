@@ -90,10 +90,10 @@ export class Model {
       const updatedAtField = options.updatedAt || 'updatedAt';
 
       if (!this.rawAttributes[createdAtField]) {
-        this.rawAttributes[createdAtField] = {type: DataTypes.DATE, allowNull: true, defaultValue: () => new Date()};
+        this.rawAttributes[createdAtField] = {type: DataTypes.DATE, allowNull: true, defaultValue: () => new Date(), defaultCurrentTimestamp: true};
       }
       if (!this.rawAttributes[updatedAtField]) {
-        this.rawAttributes[updatedAtField] = {type: DataTypes.DATE, allowNull: true, defaultValue: () => new Date()};
+        this.rawAttributes[updatedAtField] = {type: DataTypes.DATE, allowNull: true, defaultValue: () => new Date(), defaultCurrentTimestamp: true};
       }
     }
 

@@ -4,6 +4,36 @@ import { Seq, Model, DataTypes, MySQLAdapter, MySQLError } from '../src/index.js
 import { ErrorAbstract } from '../src/adapters/abstract/ErrorAbstract.js';
 
 describe('MySQL Adapter', () => {
+  for (const [version, trigger] of [['5.5.68-MariaDB', true], ['5.7.44', false], ['8.0.36', false], ['5.5.5-10.11.2-MariaDB', false]]) {
+    it(`generates timestamp default SQL for ${version}`, async (t) => {
+      const adapter = new MySQLAdapter();
+      const statements = [];
+      t.mock.method(adapter.dml, '_executeGet', async () => ({ version }));
+      t.mock.method(adapter.ddl, '_execute', async (sql, params, prepared) => { statements.push({ sql, prepared }); });
+      await adapter.ddl.createTableStructure({
+        tableName: 'timestamps',
+        columns: {
+          created: { type: DataTypes.DATE, field: 'created_on', allowNull: true, defaultCurrentTimestamp: true, defaultValue: () => new Date() },
+          updated: { type: DataTypes.DATE, field: 'updated_on', allowNull: true, defaultCurrentTimestamp: true, defaultValue: () => new Date() },
+          explicit: { type: DataTypes.DATE, field: 'explicit_date', allowNull: true, defaultValue: null },
+        },
+      });
+      assert.match(statements[0].sql, /`explicit_date` DATETIME\(3\)(?:,|\n)/);
+      if (trigger) {
+        assert.doesNotMatch(statements[0].sql, /DEFAULT CURRENT_TIMESTAMP/);
+        assert.equal(statements.length, 2);
+        assert.match(statements[1].sql, /BEFORE INSERT/);
+        for (const column of ['created_on', 'updated_on']) {
+          assert.ok(statements[1].sql.includes(`NEW.\`${column}\` = COALESCE(NEW.\`${column}\`, CURRENT_TIMESTAMP)`));
+        }
+        assert.equal(statements[1].prepared, false);
+      } else {
+        assert.equal(statements.length, 1);
+        assert.equal(statements[0].sql.match(/DEFAULT CURRENT_TIMESTAMP\(3\)/g).length, 2);
+      }
+    });
+  }
+
   describe('adapter contract', () => {
     it('validates mysql2 dependency and reports when it is missing', async () => {
       const originalLoadClient = MySQLAdapter._loadClient;
