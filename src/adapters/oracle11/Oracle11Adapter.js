@@ -166,5 +166,23 @@ export class Oracle11Adapter extends BaseAdapter {
     return 0;
   }
   _dependencyWarning(message) { if (this._seq) this._log('error', message); else console.error(`[Seq] ${message}`); }
-  _normalizeConnectionOptions(options) { const { naming, fkStrategy, eager, booleanValues, connectString, user, password, poolMin, poolMax, poolIncrement, ...rest } = options; return { user, password, connectString, poolMin: poolMin ?? 0, poolMax: poolMax ?? 4, poolIncrement: poolIncrement ?? 1, ...rest }; }
+  _normalizeConnectionOptions(options) {
+    const { naming, fkStrategy, eager, booleanValues, afterConnect, connectString, user, password, poolMin, poolMax, poolIncrement, ...rest } = options;
+    if (afterConnect !== undefined) {
+      if (typeof afterConnect !== 'function') {
+        throw new ConfigurationError('afterConnect must be a function', { code: 'SEQ_ORACLE_INVALID_AFTER_CONNECT' });
+      }
+      if (rest.sessionCallback !== undefined) {
+        throw new ConfigurationError('afterConnect cannot be combined with sessionCallback', { code: 'SEQ_ORACLE_INVALID_AFTER_CONNECT' });
+      }
+      // oracledb 5.5 invokes sessionCallback for new sessions and awaits done().
+      rest.sessionCallback = (connection, requestedTag, done) => {
+        Promise.resolve().then(() => afterConnect(connection)).then(
+          () => done(),
+          error => done(error instanceof Error ? error : new Error('Oracle afterConnect failed', { cause: error }))
+        );
+      };
+    }
+    return { user, password, connectString, poolMin: poolMin ?? 0, poolMax: poolMax ?? 4, poolIncrement: poolIncrement ?? 1, ...rest };
+  }
 }

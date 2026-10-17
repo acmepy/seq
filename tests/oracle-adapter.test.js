@@ -3,6 +3,23 @@ import test from 'node:test';
 import { DataTypes, Model, Oracle11Adapter, Oracle11Error, Oracle12Adapter, Seq } from '../src/index.js';
 import { ErrorAbstract } from '../src/adapters/abstract/ErrorAbstract.js';
 
+test('Oracle afterConnect configuration', async () => {
+  for (const Adapter of [Oracle11Adapter, Oracle12Adapter]) {
+    assert.throws(() => new Adapter({ afterConnect: 'invalid' }), { code: 'SEQ_ORACLE_INVALID_AFTER_CONNECT' });
+    assert.throws(() => new Adapter({ afterConnect() {}, sessionCallback() {} }), { code: 'SEQ_ORACLE_INVALID_AFTER_CONNECT' });
+    const nativeCallback = () => {};
+    assert.equal(new Adapter({ sessionCallback: nativeCallback })._connectionOptions.sessionCallback, nativeCallback);
+    assert.equal(new Adapter()._connectionOptions.sessionCallback, undefined);
+    for (const hook of [() => { throw new Error('sync failure'); }, async () => { throw new Error('async failure'); }]) {
+      const adapter = new Adapter({ afterConnect: hook });
+      assert.ok(!Object.hasOwn(adapter._connectionOptions, 'afterConnect'));
+      await assert.rejects(new Promise((resolve, reject) => {
+        adapter._connectionOptions.sessionCallback({}, '', error => error ? reject(error) : resolve());
+      }), /failure/);
+    }
+  }
+});
+
 test('Oracle boolean configuration validation', () => {
   for (const Adapter of [Oracle11Adapter, Oracle12Adapter]) {
     for (const values of [null, {}, { true: 'S' }, { true: '', false: 'N' },

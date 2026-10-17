@@ -31,6 +31,61 @@ async function cleanupOracle({ adapter }) {
 
 await assertOracleAuthentication();
 
+it('initializes Oracle pool sessions with afterConnect before use', async () => {
+  const initialized = [];
+  const adapter = new Adapter({
+    ...oracleTestOptions(), poolMin: 0, poolMax: 2, poolIncrement: 1,
+    afterConnect: async connection => {
+      await connection.execute("ALTER SESSION SET NLS_DATE_FORMAT = 'DD/MM/YYYY HH24:MI:SS'");
+      initialized.push(connection);
+    }
+  });
+  const held = [];
+  try {
+    await adapter.authenticate();
+    assert.equal(initialized.length, 1);
+    const query = "SELECT VALUE FROM NLS_SESSION_PARAMETERS WHERE PARAMETER = 'NLS_DATE_FORMAT'";
+    for (let i = 0; i < 2; i++) {
+      const connection = await adapter._pool.getConnection();
+      held.push(connection);
+      const result = await connection.execute(query, [], { outFormat: adapter._client.OUT_FORMAT_OBJECT });
+      assert.equal(result.rows[0].VALUE, 'DD/MM/YYYY HH24:MI:SS');
+    }
+    assert.equal(initialized.length, 2);
+    await held.pop().close();
+    await adapter._withConnection(async connection => {
+      const result = await connection.execute(query, [], { outFormat: adapter._client.OUT_FORMAT_OBJECT });
+      assert.equal(result.rows[0].VALUE, 'DD/MM/YYYY HH24:MI:SS');
+    });
+    assert.equal(initialized.length, 2, 'Reusing a session must not run the hook again');
+    await held.pop().close({ drop: true });
+    for (let i = 0; i < 2; i++) held.push(await adapter._pool.getConnection());
+    assert.equal(initialized.length, 3, 'Replacement sessions must also be initialized');
+  } finally {
+    await Promise.all(held.map(connection => connection.close()));
+    await adapter.close();
+  }
+});
+
+it('rejects Oracle connections when afterConnect fails', async () => {
+  let attempts = 0;
+  const failure = new Error('Session initialization failed');
+  const adapter = new Adapter({
+    ...oracleTestOptions(), poolMin: 0, poolMax: 1,
+    afterConnect() {
+      attempts++;
+      if (attempts === 1) throw failure;
+    }
+  });
+  try {
+    await assert.rejects(() => adapter.authenticate(), error => error === failure);
+    await adapter.authenticate();
+    assert.equal(attempts, 2, 'A failed session must be dropped and initialized again');
+  } finally {
+    await adapter.close();
+  }
+});
+
 it('reads Oracle boolean flags from VARCHAR2 columns', async () => {
   class Flag extends Model {}
   Flag.init({

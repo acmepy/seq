@@ -276,6 +276,8 @@ export class MySQLError extends ErrorAbstract {}
 export type BooleanValues = { true: string; false: string } | { true: number; false: number };
 
 export interface OracleAdapterOptions extends AdapterOptions {
+  /** Initializes each new pool session with the native oracledb connection before use. */
+  afterConnect?: (connection: any) => void | Promise<void>;
   booleanValues?: BooleanValues;
   user?: string;
   password?: string;

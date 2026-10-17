@@ -812,6 +812,27 @@ Instala `oracledb` para usar Oracle. Oracle 11 pagina con `ROWNUM` y genera IDs 
 
 Los ejemplos aceptan `SEQ_EXAMPLE_ADAPTER=oracle11` o `oracle12`; por defecto usan SQLite. Las suites de integración se ejecutan con `npm run test:oracle11` y `npm run test:oracle12` usando las variables `ORACLE_USER`, `ORACLE_PASSWORD` y `ORACLE_CONNECT_STRING` de `.env.example`.
 
+#### Inicialización de sesiones Oracle
+
+`afterConnect` recibe la conexión nativa de `oracledb` y puede ser síncrono o devolver una promesa:
+
+```js
+const adapter = new Oracle11Adapter({
+  user: process.env.ORACLE_USER,
+  password: process.env.ORACLE_PASSWORD,
+  connectString: process.env.ORACLE_CONNECT_STRING,
+  afterConnect: async connection => {
+    await connection.execute(
+      "ALTER SESSION SET NLS_DATE_FORMAT = 'DD/MM/YYYY HH24:MI:SS'"
+    );
+  }
+});
+```
+
+También funciona con `Oracle12Adapter`. El hook usa `sessionCallback` del driver para inicializar cada sesión física antes de su primer uso, incluidas las conexiones nuevas que el pool abra después. Reutilizar una sesión no vuelve a ejecutar el hook. Si falla, la conexión se descarta y la operación que la solicitó recibe el error. No se puede combinar `afterConnect` con un `sessionCallback` explícito.
+
+`NLS_DATE_FORMAT` afecta las conversiones entre fechas y texto dentro de Oracle; no cambia la representación de los valores `Date` de JavaScript.
+
 #### Valores booleanos en Oracle
 
 Por defecto, Oracle guarda los booleanos como `1` y `0`. Puedes configurar otro par en `Oracle11Adapter` o `Oracle12Adapter`:
