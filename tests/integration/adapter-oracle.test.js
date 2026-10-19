@@ -205,3 +205,31 @@ runAdapterSuite({
   },
   cleanup: cleanupOracle
 });
+
+
+it('includes failing Oracle SQL in DDL and DML errors', async () => {
+  const adapter = new Adapter(oracleTestOptions());
+  const table = 'SEQ_ERROR_SQL_TEST';
+  const createSql = 'CREATE TABLE "' + table + '" ("ID" NUMBER)';
+  try {
+    await adapter.authenticate();
+    await adapter.ddl._execute(createSql);
+    await assert.rejects(adapter.ddl._execute(createSql), error => {
+      assert.equal(error.errorNum, 955);
+      assert.equal(error.sql, createSql);
+      assert.ok(error.message.includes(createSql));
+      assert.ok(error.stack.includes(createSql));
+      return true;
+    });
+    const query = 'SELECT "MISSING_COLUMN" FROM "' + table + '" WHERE "ID" = ?';
+    await assert.rejects(adapter.dml._executeQueryAll(query, [123456789]), error => {
+      assert.equal(error.errorNum, 904);
+      assert.equal(error.sql, query.replace('?', ':1'));
+      assert.ok(!error.message.includes('123456789'));
+      return true;
+    });
+  } finally {
+    await adapter.ddl.dropTable(table, { ifExists: true });
+    await adapter.close();
+  }
+});

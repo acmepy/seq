@@ -17,7 +17,7 @@ export class Oracle11DDL extends DDLAbstract {
       try {
         return await this._adapter._withConnection(connection => connection.execute(this._oracleSql(sql), params, { autoCommit: !this._adapter._activeTransaction }));
       } catch (error) {
-        throw Oracle11Error.from(error);
+        throw Oracle11Error.from(error, this._oracleSql(sql));
       }
     });
   }
@@ -26,7 +26,7 @@ export class Oracle11DDL extends DDLAbstract {
       try {
         return await this._adapter._withConnection(async connection => (await connection.execute(this._oracleSql(sql), params, { outFormat: this._adapter._client.OUT_FORMAT_OBJECT })).rows || []);
       } catch (error) {
-        throw Oracle11Error.from(error);
+        throw Oracle11Error.from(error, this._oracleSql(sql));
       }
     });
   }

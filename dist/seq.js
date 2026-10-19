@@ -6957,14 +6957,22 @@ Oracle11Adapter requiere la dependencia "oracledb" en version menor o igual a 5.
     });
   }
 
-  static from(error) {
+  static from(error, sql) {
+    if (sql !== undefined && error.sql === undefined) {
+      const message = error.message;
+      error.sql = sql;
+      error.message = `${message}\nSQL: ${sql}`;
+      if (error.stack) error.stack = error.stack.replace(message, error.message);
+    }
     const oracleCode = error?.code || (error?.errorNum ? `ORA-${String(error.errorNum).padStart(5, '0')}` : undefined);
     if (!['ORA-00001', 'ORA-02291', 'ORA-02292', 'ORA-01400'].includes(oracleCode)) return error;
     const type = oracleCode === 'ORA-00001' ? 'unique' : oracleCode === 'ORA-01400' ? 'notNull' : oracleCode === 'ORA-02291' ? 'foreignKey' : 'referenced';
-    return new Oracle11Error(error.message, {
+    const mapped = new Oracle11Error(error.message, {
       status: 409, code: 'CONFLICT',
       details: { constraint: { adapter: 'oracle', type }, oracleCode }, cause: error
     });
+    if (error.sql !== undefined) mapped.sql = error.sql;
+    return mapped;
   }
 }
 
@@ -6982,7 +6990,7 @@ class Oracle11DDL extends DDLAbstract {
       try {
         return await this._adapter._withConnection(connection => connection.execute(this._oracleSql(sql), params, { autoCommit: !this._adapter._activeTransaction }));
       } catch (error) {
-        throw Oracle11Error.from(error);
+        throw Oracle11Error.from(error, this._oracleSql(sql));
       }
     });
   }
@@ -6991,7 +6999,7 @@ class Oracle11DDL extends DDLAbstract {
       try {
         return await this._adapter._withConnection(async connection => (await connection.execute(this._oracleSql(sql), params, { outFormat: this._adapter._client.OUT_FORMAT_OBJECT })).rows || []);
       } catch (error) {
-        throw Oracle11Error.from(error);
+        throw Oracle11Error.from(error, this._oracleSql(sql));
       }
     });
   }
@@ -7128,7 +7136,7 @@ class Oracle11DDL extends DDLAbstract {
 class Oracle11DML extends DMLAbstract {
   _connection() { return this._adapter._connection(); }
   _tableWithAlias(tableName, alias) { return `${this._q(tableName)}${alias ? ` ${this._q(alias)}` : ''}`; }
-  _toError(error) { return Oracle11Error.from(error); }
+  _toError(error, sql) { return Oracle11Error.from(error, sql); }
 
   _oracleSql(sql) { let index = 0; return sql.replaceAll('?', () => `:${++index}`); }
   async _executeQueryAll(sql, params = []) {
@@ -7136,7 +7144,7 @@ class Oracle11DML extends DMLAbstract {
       try {
         return await this._adapter._withConnection(async connection => (await connection.execute(this._oracleSql(sql), params, { outFormat: this._adapter._client.OUT_FORMAT_OBJECT })).rows || []);
       } catch (error) {
-        throw this._toError(error);
+        throw this._toError(error, this._oracleSql(sql));
       }
     });
   }
@@ -7149,7 +7157,7 @@ class Oracle11DML extends DMLAbstract {
           return { changes: result.rowsAffected || 0 };
         });
       } catch (error) {
-        throw this._toError(error);
+        throw this._toError(error, this._oracleSql(sql));
       }
     });
   }
@@ -7206,7 +7214,7 @@ class Oracle11DML extends DMLAbstract {
       try {
         return await this._adapter._withConnection(connection => connection.execute(sql, bindParams, { autoCommit: !this._adapter._activeTransaction }));
       } catch (error) {
-        throw this._toError(error);
+        throw this._toError(error, this._oracleSql(sql));
       }
     });
     if (generatedPk) record[pk] = result.outBinds?.[0]?.[0] ?? result.outBinds?.[bindParams.length - 1]?.[0];

@@ -6,7 +6,7 @@ import { Oracle11Error } from './Oracle11Error.js';
 export class Oracle11DML extends DMLAbstract {
   _connection() { return this._adapter._connection(); }
   _tableWithAlias(tableName, alias) { return `${this._q(tableName)}${alias ? ` ${this._q(alias)}` : ''}`; }
-  _toError(error) { return Oracle11Error.from(error); }
+  _toError(error, sql) { return Oracle11Error.from(error, sql); }
 
   _oracleSql(sql) { let index = 0; return sql.replaceAll('?', () => `:${++index}`); }
   async _executeQueryAll(sql, params = []) {
@@ -14,7 +14,7 @@ export class Oracle11DML extends DMLAbstract {
       try {
         return await this._adapter._withConnection(async connection => (await connection.execute(this._oracleSql(sql), params, { outFormat: this._adapter._client.OUT_FORMAT_OBJECT })).rows || []);
       } catch (error) {
-        throw this._toError(error);
+        throw this._toError(error, this._oracleSql(sql));
       }
     });
   }
@@ -27,7 +27,7 @@ export class Oracle11DML extends DMLAbstract {
           return { changes: result.rowsAffected || 0 };
         });
       } catch (error) {
-        throw this._toError(error);
+        throw this._toError(error, this._oracleSql(sql));
       }
     });
   }
@@ -84,7 +84,7 @@ export class Oracle11DML extends DMLAbstract {
       try {
         return await this._adapter._withConnection(connection => connection.execute(sql, bindParams, { autoCommit: !this._adapter._activeTransaction }));
       } catch (error) {
-        throw this._toError(error);
+        throw this._toError(error, this._oracleSql(sql));
       }
     });
     if (generatedPk) record[pk] = result.outBinds?.[0]?.[0] ?? result.outBinds?.[bindParams.length - 1]?.[0];

@@ -204,3 +204,18 @@ test('Oracle adapters', async t => {
     assert.equal(new Oracle12Adapter().dml._usesSequenceForAutoIncrement(), false);
   });
 });
+
+
+test('Oracle errors retain SQL and native diagnostics', () => {
+  for (const errorNum of [955, 1]) {
+    const native = Object.assign(new Error('ORA-' + String(errorNum).padStart(5, '0') + ': failure'), { errorNum, offset: 12 });
+    const sql = 'CREATE TABLE "EXISTING_TABLE" ("ID" NUMBER)';
+    const error = Oracle11Error.from(native, sql);
+    assert.equal(error.sql, sql);
+    assert.ok(error.message.includes('SQL: ' + sql));
+    assert.ok(error.stack.includes('SQL: ' + sql));
+    assert.equal((error.cause || error).errorNum, errorNum);
+    assert.equal((error.cause || error).offset, 12);
+    assert.equal(Oracle11Error.from(error).sql, sql);
+  }
+});

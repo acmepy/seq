@@ -300,7 +300,7 @@ export class Oracle12Adapter extends Oracle11Adapter {
   constructor(options?: OracleAdapterOptions);
 }
 
-export class Oracle11Error extends ErrorAbstract {}
+export class Oracle11Error extends ErrorAbstract { sql?: string; }
 
 export class MapAdapter extends BaseAdapter {
   constructor(options?: AdapterOptions);
