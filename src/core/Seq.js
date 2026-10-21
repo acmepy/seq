@@ -1,3 +1,4 @@
+import { logPrefix, logOperation, singleLine } from '../utils/logging.js';
 import { ModelRegistry } from './ModelRegistry.js';
 import { Model } from './Model.js';
 import { ConfigurationError } from './errors/ConfigurationError.js';
@@ -14,6 +15,10 @@ export class Seq {
     if (!options.adapter) throw new ConfigurationError('An adapter is required', {code: 'SEQ_MISSING_ADAPTER'});
     this._adapter = options.adapter;
     this._adapter._seq = this;
+    if (options.getContext !== undefined && typeof options.getContext !== 'function') {
+      throw new ConfigurationError('getContext must be a function', { code: 'SEQ_INVALID_GET_CONTEXT' });
+    }
+    this._getContext = options.getContext;
     this._logging = this._normalizeLogging(options.logging);
     this._slowQueryMs = this._normalizeSlowThreshold(options.slowQueryMs, 'slowQueryMs');
     this._slowOperationMs = this._normalizeSlowThreshold(options.slowOperationMs, 'slowOperationMs');
@@ -451,6 +456,7 @@ export class Seq {
   }
 
   _formatLogValue(value) {
+    if (typeof value === 'string') return singleLine(value);
     if (value === null || typeof value !== 'object') return value;
     let output;
     try {
@@ -476,7 +482,10 @@ export class Seq {
     if (args.length > 1 && levels.has(args[0])) [level, ...payload] = args;
     const logger = this._logging?.[level];
     const target = typeof logger === 'function' ? this._logging : undefined;
-    if (typeof logger === 'function') logger.call(target, '[Seq]', ...payload.map(value => this._formatLogValue(value)));
+    if (typeof logger !== 'function') return;
+    const txId = this._getContext?.()?.txId;
+    if (txId) payload = [...payload, { txId }];
+    logger.call(target, logPrefix(level, logOperation(payload)), ...payload.map(value => this._formatLogValue(value)));
   }
 }
 

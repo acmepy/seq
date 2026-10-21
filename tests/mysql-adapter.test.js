@@ -77,7 +77,7 @@ describe('MySQL Adapter', () => {
 
       assert.equal(loadCalls, 1);
       assert.equal(errors.length, 1);
-      assert.equal(errors[0][0], '[Seq]');
+      assert.match(errors[0][0], /^\[\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\] \[ERROR\] \[SEQ\] \[dependency\]$/);
       assert.match(errors[0][1], /mysql2/);
     });
 
@@ -224,7 +224,7 @@ describe('MySQL Adapter', () => {
 
       assert.equal(errors.length, 1);
       assert.equal(errors[0][1], 'INSERT INTO `sessions` () VALUES ()');
-      assert.match(errors[0][3], /type:sql/);
+      assert.match(errors[0][3], /"type":"sql"/);
       assert.match(errors[0][3], /Column token cannot be null/);
     });
 

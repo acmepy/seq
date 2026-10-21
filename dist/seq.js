@@ -1,6 +1,32 @@
 import crypto, { createHash } from 'crypto';
 import util from 'node:util';
 
+/** Formats local time consistently for console and configured log handlers. */
+function logPrefix(level, operation, now = new Date()) {
+  const pad = value => String(value).padStart(2, '0');
+  const date = [now.getFullYear(), pad(now.getMonth() + 1), pad(now.getDate())].join('-');
+  const time = [pad(now.getHours()), pad(now.getMinutes()), pad(now.getSeconds())].join(':');
+  return `[${date} ${time}] [${level.toUpperCase()}] [SEQ] [${operation}]`;
+}
+
+function logOperation(payload) {
+  const metadata = payload.find(value => value && typeof value === 'object' && !Array.isArray(value) && value.type);
+  if (metadata?.type === 'sql') return 'sql';
+  if (metadata?.type === 'model-operation') return `${metadata.model}.${metadata.operation}`;
+  if (payload.some(value => value?.operation === 'dependency')) return 'dependency';
+  const message = String(payload[0] ?? '');
+  if (message.startsWith('Cache ')) return 'cache';
+  if (message.startsWith('Sync ')) return 'sync';
+  if (message === 'Seq initialized') return 'init';
+  if (message === 'conectado') return 'connect';
+  if (message === 'desconectado') return 'close';
+  return 'log';
+}
+
+function singleLine(value) {
+  return value.replace(/\r\n|\r|\n/g, '\\n');
+}
+
 /**
  * Base error class for all Seq ORM errors.
  */
@@ -2353,6 +2379,10 @@ class Seq {
     if (!options.adapter) throw new ConfigurationError('An adapter is required', {code: 'SEQ_MISSING_ADAPTER'});
     this._adapter = options.adapter;
     this._adapter._seq = this;
+    if (options.getContext !== undefined && typeof options.getContext !== 'function') {
+      throw new ConfigurationError('getContext must be a function', { code: 'SEQ_INVALID_GET_CONTEXT' });
+    }
+    this._getContext = options.getContext;
     this._logging = this._normalizeLogging(options.logging);
     this._slowQueryMs = this._normalizeSlowThreshold(options.slowQueryMs, 'slowQueryMs');
     this._slowOperationMs = this._normalizeSlowThreshold(options.slowOperationMs, 'slowOperationMs');
@@ -2790,6 +2820,7 @@ class Seq {
   }
 
   _formatLogValue(value) {
+    if (typeof value === 'string') return singleLine(value);
     if (value === null || typeof value !== 'object') return value;
     let output;
     try {
@@ -2815,7 +2846,10 @@ class Seq {
     if (args.length > 1 && levels.has(args[0])) [level, ...payload] = args;
     const logger = this._logging?.[level];
     const target = typeof logger === 'function' ? this._logging : undefined;
-    if (typeof logger === 'function') logger.call(target, '[Seq]', ...payload.map(value => this._formatLogValue(value)));
+    if (typeof logger !== 'function') return;
+    const txId = this._getContext?.()?.txId;
+    if (txId) payload = [...payload, { txId }];
+    logger.call(target, logPrefix(level, logOperation(payload)), ...payload.map(value => this._formatLogValue(value)));
   }
 }
 
@@ -6144,10 +6178,10 @@ class SQLiteAdapter extends BaseAdapter {
 
   _dependencyWarning(message) {
     if (this._seq) {
-      this._log('error', message);
+      this._log('error', message, { operation: 'dependency' });
       return;
     }
-    console.error(`[Seq] ${message}`);
+    console.error(logPrefix('error', 'dependency'), singleLine(message));
   }
 
   async close() {
@@ -6888,10 +6922,10 @@ class MySQLAdapter extends BaseAdapter {
 
   _dependencyWarning(message) {
     if (this._seq) {
-      this._log('error', message);
+      this._log('error', message, { operation: 'dependency' });
       return;
     }
-    console.error(`[Seq] ${message}`);
+    console.error(logPrefix('error', 'dependency'), singleLine(message));
   }
 
   _normalizeConnectionOptions(options) {
@@ -7492,7 +7526,7 @@ class Oracle11Adapter extends BaseAdapter {
     }
     return 0;
   }
-  _dependencyWarning(message) { if (this._seq) this._log('error', message); else console.error(`[Seq] ${message}`); }
+  _dependencyWarning(message) { if (this._seq) this._log('error', message, { operation: 'dependency' }); else console.error(logPrefix('error', 'dependency'), singleLine(message)); }
   _normalizeConnectionOptions(options) {
     const { naming, fkStrategy, eager, booleanValues, afterConnect, connectString, user, password, poolMin, poolMax, poolIncrement, ...rest } = options;
     if (afterConnect !== undefined) {

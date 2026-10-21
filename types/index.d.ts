@@ -130,6 +130,8 @@ export interface SeqOptions {
   adapter: BaseAdapter;
   models?: ModelStatic[];
   logging?: boolean | Logger;
+  /** Reads the current request context at log emission time. Only txId is logged. */
+  getContext?: () => { txId?: string | null } | null | undefined;
   /** Milliseconds after which a SQL log is emitted as warn instead of trace. Defaults to 1000. */
   slowQueryMs?: number;
   /** Milliseconds after which a model-operation log is emitted as warn instead of trace. Defaults to 1000. */

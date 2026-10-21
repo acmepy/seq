@@ -1,3 +1,4 @@
+import { logPrefix, singleLine } from '../../utils/logging.js';
 import { BaseAdapter } from '../BaseAdapter.js';
 import { SQLiteDDL } from './SQLiteDDL.js';
 import { SQLiteDML } from './SQLiteDML.js';
@@ -65,10 +66,10 @@ export class SQLiteAdapter extends BaseAdapter {
 
   _dependencyWarning(message) {
     if (this._seq) {
-      this._log('error', message);
+      this._log('error', message, { operation: 'dependency' });
       return;
     }
-    console.error(`[Seq] ${message}`);
+    console.error(logPrefix('error', 'dependency'), singleLine(message));
   }
 
   async close() {
