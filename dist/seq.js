@@ -4128,10 +4128,14 @@ class DMLAbstract extends BaseAbstract {
    * @param {object[]} includes - Normalized include descriptors
    * @returns {string}
    */
-  _buildQualifiedSelect(model, schema, alias, includes, includeSqlAliases = buildIncludeSqlAliasMap(includes, model, this), globalEager = false) {
+  _buildQualifiedSelect(model, schema, alias, includes, includeSqlAliases = buildIncludeSqlAliasMap(includes, model, this), globalEager = false, attributes = null) {
     const parts = [];
     const aliasPrefix = alias || this._getTableName(model);
+    const selected = Array.isArray(attributes) && attributes.length > 0
+      ? new Set([...attributes, ...primaryAttributes(model)])
+      : null;
     for (const [attrName, colDef] of Object.entries(schema.columns || {})) {
+      if (selected && !selected.has(attrName)) continue;
       const colName = schema.attrToColumn[attrName] || attrName;
       parts.push(`${this._colRef(colName, alias)} AS ${this._q(`${aliasPrefix}.${attrName}`)}`);
     }
@@ -4356,7 +4360,7 @@ class DMLAbstract extends BaseAbstract {
     let eagerIncludeSqlAliases = null;
     if (eagerIncludes.length > 0) {
       eagerIncludeSqlAliases = buildIncludeSqlAliasMap(eagerIncludes, model, this, globalEager);
-      const qualifiedSelect = this._buildQualifiedSelect(model, schema, alias, eagerIncludes, eagerIncludeSqlAliases, globalEager);
+      const qualifiedSelect = this._buildQualifiedSelect(model, schema, alias, eagerIncludes, eagerIncludeSqlAliases, globalEager, queryOptions.attributes);
       sql = `SELECT ${qualifiedSelect} FROM ${this._tableWithAlias(tableName, alias)}`;
       const joins = this._buildJoinClause(eagerIncludes, model, alias, resolveIncludeAlias, eagerIncludeSqlAliases, globalEager);
       sql += joins.sql;

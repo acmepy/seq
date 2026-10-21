@@ -1055,7 +1055,7 @@ describe('belongsToMany with through model', () => {
   });
 });
 
-describe('IAM-style lazy include projection', () => {
+describe('IAM-style include projection', () => {
   it('loads required belongsTo includes when root attributes omit a foreign key', async () => {
     class _IamUser extends Model {}
     _IamUser.init(
@@ -1114,7 +1114,10 @@ describe('IAM-style lazy include projection', () => {
     _IamRolePermission.belongsTo(_IamRole, { foreignKey: 'roleId', as: 'role' });
     _IamRolePermission.belongsTo(_IamPermission, { foreignKey: 'permissionId', as: 'permission' });
 
-    const localContext = await createTestContext({ models: [_IamUser, _IamRole, _IamPermission, _IamUserRole, _IamRolePermission] });
+    const sqlLogs = [];
+    const localContext = await createTestContext({ models: [_IamUser, _IamRole, _IamPermission, _IamUserRole, _IamRolePermission],
+      logging: { info: false, trace: (...args) => sqlLogs.push(args), warn: false, error: false },
+      slowQueryMs: Number.MAX_VALUE, slowOperationMs: Number.MAX_VALUE });
     const localSeq = localContext.seq;
     await localSeq.sync();
 
@@ -1130,40 +1133,52 @@ describe('IAM-style lazy include projection', () => {
       await _IamRolePermission.create({ roleId: portalRole.getDataValue('id'), permissionId: permission.getDataValue('id') });
       await _IamRolePermission.create({ roleId: otherRole.getDataValue('id'), permissionId: permission.getDataValue('id') });
 
-      const rolePermissions = await _IamRolePermission.findAll({
-        where: { active: true },
-        attributes: ['permissionId'],
-        eager: false,
-        include: [
-          {
-            model: _IamPermission,
-            as: 'permission',
-            where: { active: true, permission: 'portal.fes.list' },
-            required: true,
-          },
-          {
-            model: _IamRole,
-            as: 'role',
-            where: { active: true },
-            attributes: ['id'],
-            required: true,
-            include: {
-              model: _IamUserRole,
-              as: 'userRoles',
-              where: { userId: ana.getDataValue('id'), active: true },
-              attributes: ['id'],
+      for (const eager of [false, true]) {
+        sqlLogs.length = 0;
+        const rolePermissions = await _IamRolePermission.findAll({
+          where: { active: true },
+          attributes: ['permissionId'],
+          eager,
+          include: [
+            {
+              model: _IamPermission,
+              as: 'permission',
+              attributes: ['id', 'permission'],
+              where: { active: true, permission: 'portal.fes.list' },
               required: true,
             },
-          },
-        ],
-      });
+            {
+              model: _IamRole,
+              as: 'role',
+              where: { active: true },
+              attributes: ['id'],
+              required: true,
+              include: {
+                model: _IamUserRole,
+                as: 'userRoles',
+                where: { userId: ana.getDataValue('id'), active: true },
+                attributes: ['id'],
+                required: true,
+              },
+            },
+          ],
+        });
 
-      assert.equal(rolePermissions.length, 1);
-      assert.deepEqual(Object.keys(rolePermissions[0].toJSON()).sort(), ['permission', 'permissionId', 'role']);
-      assert.equal(rolePermissions[0].getDataValue('permission').getDataValue('permission'), 'portal.fes.list');
-      assert.equal(rolePermissions[0].getDataValue('role').getDataValue('userRoles').length, 1);
-    } finally {
-      await cleanupTestContext(localContext);
-    }
+        assert.equal(rolePermissions.length, 1);
+        assert.deepEqual(Object.keys(rolePermissions[0].toJSON()).sort(), ['permission', 'permissionId', 'role']);
+        assert.equal(rolePermissions[0].getDataValue('permission').getDataValue('permission'), 'portal.fes.list');
+        assert.equal(rolePermissions[0].getDataValue('role').getDataValue('userRoles').length, 1);
+        if (eager) {
+          const sql = sqlLogs.find(args => args.some(value => typeof value === 'string' && value.startsWith('SELECT ')))[1];
+          const select = sql.slice(0, sql.indexOf(' FROM '));
+          assert.doesNotMatch(select, /\.active["`]/i);
+          assert.doesNotMatch(select, /\.roleId["`]/i);
+          assert.match(select, /\.permissionId["`]/i);
+          assert.match(select, /\.id["`]/i);
+        }
+        }
+      } finally {
+        await cleanupTestContext(localContext);
+      }
+    });
   });
-});
