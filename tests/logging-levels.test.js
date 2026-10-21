@@ -24,13 +24,13 @@ describe('Logging levels', () => {
       }
     })));
     seq._log('info', 'outside-after');
-    assertLogEqual(calls[0].args, ['[Seq]', 'outside-before']);
-    assertLogEqual(calls.at(-1).args, ['[Seq]', 'outside-after']);
+    assert.deepEqual(calls[0].args, ['[SEQ]', 'outside-before']);
+    assert.deepEqual(calls.at(-1).args, ['[SEQ]', 'outside-after']);
     for (const { args } of calls.slice(1, -1)) {
-      assertLogEqual(args, ['[Seq]', args[1], '{"value":1}', JSON.stringify({ txId: args[1] })]);
+      assert.deepEqual(args, ['[SEQ]', args[1], args[1], '{"value":1}']);
     }
     storage.run({}, () => seq._log('info', 'no-id'));
-    assertLogEqual(calls.at(-1).args, ['[Seq]', 'no-id']);
+    assert.deepEqual(calls.at(-1).args, ['[SEQ]', 'no-id']);
   });
 
   it('includes the request txId in SQL and model logs using the active adapter', async () => {
@@ -48,15 +48,15 @@ describe('Logging levels', () => {
       await Promise.all(['tx-query-a', 'tx-query-b'].map((txId, index) => storage.run({ txId }, async () => {
         await ContextUser.findAll({ where: { id: index + 1 } });
       })));
-      const sql = calls.filter(args => args[1]?.startsWith?.('SELECT') && /\bWHERE\b/i.test(args[1]));
+      const sql = calls.filter(args => args[2]?.startsWith?.('SELECT') && /\bWHERE\b/i.test(args[2]));
       assert.equal(sql.length, 2);
-      assertLogEqual(sql.map(args => JSON.parse(args.at(-1)).txId).sort(), ['tx-query-a', 'tx-query-b']);
+      assert.deepEqual(sql.map(args => args[1]).sort(), ['tx-query-a', 'tx-query-b']);
       for (const args of sql) {
-        assert.match(JSON.parse(args.at(-1)).txId, JSON.parse(args[2])[0] === 1 ? /tx-query-a/ : /tx-query-b/);
+        assert.match(args[1], JSON.parse(args[3])[0] === 1 ? /tx-query-a/ : /tx-query-b/);
       }
-      const operations = calls.filter(args => args[1] === 'ContextUser.findAll');
+      const operations = calls.filter(args => args[2] === 'ContextUser.findAll');
       assert.equal(operations.length, 2);
-      assertLogEqual(operations.map(args => JSON.parse(args.at(-1)).txId).sort(), ['tx-query-a', 'tx-query-b']);
+      assert.deepEqual(operations.map(args => args[1]).sort(), ['tx-query-a', 'tx-query-b']);
       calls.length = 0;
       await ContextUser.findAll();
       assert.ok(calls.length > 0);
@@ -85,12 +85,12 @@ describe('Logging levels', () => {
       console.error = originalError;
     }
 
-    assertLogEqual(logCalls, [
-      ['[Seq]', 'ready'],
-      ['[Seq]', 'hidden'],
-      ['[Seq]', 'hidden']
+    assert.deepEqual(logCalls, [
+      ['[SEQ]', 'ready'],
+      ['[SEQ]', 'hidden'],
+      ['[SEQ]', 'hidden']
     ]);
-    assertLogEqual(errorCalls, [['[Seq]', 'failed']]);
+    assert.deepEqual(errorCalls, [['[SEQ]', 'failed']]);
   });
 
   it('keeps logging false fully silent', () => {
@@ -100,7 +100,7 @@ describe('Logging levels', () => {
     seq._log('info', 'hidden');
     seq._log('error', 'hidden');
 
-    assertLogEqual(calls, []);
+    assert.deepEqual(calls, []);
   });
 
   it('does not support function logging', () => {
@@ -121,7 +121,7 @@ describe('Logging levels', () => {
       console.log = originalLog;
     }
 
-    assertLogEqual(logCalls, []);
+    assert.deepEqual(logCalls, []);
   });
 
   it('supports per-level logger objects', () => {
@@ -141,10 +141,10 @@ describe('Logging levels', () => {
     seq._log('warn', 'heads up');
     seq._log('error', 'boom');
 
-    assertLogEqual(calls, [
-      ['trace', '[Seq]', 'sql'],
-      ['warn', '[Seq]', 'heads up'],
-      ['error', '[Seq]', 'boom']
+    assert.deepEqual(calls, [
+      ['trace', '[SEQ]', 'sql'],
+      ['warn', '[SEQ]', 'heads up'],
+      ['error', '[SEQ]', 'boom']
     ]);
   });
 
@@ -168,7 +168,7 @@ describe('Logging levels', () => {
 
     seq._log('trace', 'sql');
 
-    assertLogEqual(logger.calls, [['trace', '[Seq]', 'sql']]);
+    assert.deepEqual(logger.calls, [['trace', '[SEQ]', 'sql']]);
   });
 
   it('accepts console handlers in a per-level configuration', () => {
@@ -188,7 +188,7 @@ describe('Logging levels', () => {
       console.debug = originalDebug;
     }
 
-    assertLogEqual(calls, [{ target: console, args: ['[Seq]', 'sql'] }]);
+    assert.deepEqual(calls, [{ target: console, args: ['[SEQ]', 'sql'] }]);
   });
 
   it('stringifies object and array payloads as valid JSON', () => {
@@ -200,8 +200,8 @@ describe('Logging levels', () => {
 
     seq._log('info', 'payload', { name: 'Ana', meta: { role: 'admin' } }, ['one', 'two']);
 
-    assertLogEqual(calls, [[
-      '[Seq]',
+    assert.deepEqual(calls, [[
+      '[SEQ]',
       'payload',
       '{"name":"Ana","meta":{"role":"admin"}}',
       '["one","two"]'
@@ -307,7 +307,7 @@ describe('Logging levels', () => {
 
       const operationLog = trace.find(args => args[1] === 'TimedUser.create');
       assert.ok(operationLog, 'expected create operation trace');
-      assertLogEqual(JSON.parse(operationLog[2]), {
+      assert.deepEqual(JSON.parse(operationLog[2]), {
         type: 'model-operation',
         operation: 'create',
         model: 'TimedUser',
@@ -352,21 +352,7 @@ describe('Logging levels', () => {
   });
 });
 
-function assertLogEqual(actual, expected) {
-  function normalize(value) {
-    if (typeof value === 'string' && /^\[\d{4}-/.test(value)) {
-      assert.match(value, /^\[\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\] \[(INFO|TRACE|WARN|ERROR)\] \[SEQ\] \[[^\]\r\n]+\]$/);
-      return '[Seq]';
-    }
-    if (Array.isArray(value)) return value.map(normalize);
-    if (value && Object.getPrototypeOf(value) === Object.prototype) return Object.fromEntries(Object.entries(value).map(([key, nested]) => [key, normalize(nested)]));
-    return value;
-  }
-  assert.deepEqual(normalize(actual), expected);
-}
-
-
-it('formats levels, operations, local timestamps and single-line redacted data consistently', async () => {
+it('delegates timestamps and levels to the logger and keeps single-line redacted data', async () => {
   const calls = [];
   const logging = Object.fromEntries(['info', 'trace', 'warn', 'error'].map(level => [level, (...args) => calls.push({ level, args })]));
   const seq = new Seq({ adapter: new MapAdapter(), logging });
@@ -374,10 +360,8 @@ it('formats levels, operations, local timestamps and single-line redacted data c
   seq._log('warn', 'Sync failed');
   seq._log('error', 'line one\nline two', { token: 'private', nested: { password: 'private' } });
   seq.adapter.ddl._measureSql('SELECT 1', [], () => undefined);
-  const operations = ['init', 'sync', 'log', 'sql'];
-  calls.forEach(({ level, args }, index) => {
-    assert.match(args[0], /^\[\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\]/);
-    assert.ok(args[0].endsWith('[' + level.toUpperCase() + '] [SEQ] [' + operations[index] + ']'));
+  calls.forEach(({ args }) => {
+    assert.equal(args[0], '[SEQ]');
     assert.ok(!args.join(' ').includes('\n'));
     assert.ok(!args.join(' ').includes('private'));
   });

@@ -1,28 +1,7 @@
 import crypto, { createHash } from 'crypto';
 import util from 'node:util';
 
-/** Formats local time consistently for console and configured log handlers. */
-function logPrefix(level, operation, now = new Date()) {
-  const pad = value => String(value).padStart(2, '0');
-  const date = [now.getFullYear(), pad(now.getMonth() + 1), pad(now.getDate())].join('-');
-  const time = [pad(now.getHours()), pad(now.getMinutes()), pad(now.getSeconds())].join(':');
-  return `[${date} ${time}] [${level.toUpperCase()}] [SEQ] [${operation}]`;
-}
-
-function logOperation(payload) {
-  const metadata = payload.find(value => value && typeof value === 'object' && !Array.isArray(value) && value.type);
-  if (metadata?.type === 'sql') return 'sql';
-  if (metadata?.type === 'model-operation') return `${metadata.model}.${metadata.operation}`;
-  if (payload.some(value => value?.operation === 'dependency')) return 'dependency';
-  const message = String(payload[0] ?? '');
-  if (message.startsWith('Cache ')) return 'cache';
-  if (message.startsWith('Sync ')) return 'sync';
-  if (message === 'Seq initialized') return 'init';
-  if (message === 'conectado') return 'connect';
-  if (message === 'desconectado') return 'close';
-  return 'log';
-}
-
+/** Escapes line breaks so each log event occupies one line. */
 function singleLine(value) {
   return value.replace(/\r\n|\r|\n/g, '\\n');
 }
@@ -2848,8 +2827,8 @@ class Seq {
     const target = typeof logger === 'function' ? this._logging : undefined;
     if (typeof logger !== 'function') return;
     const txId = this._getContext?.()?.txId;
-    if (txId) payload = [...payload, { txId }];
-    logger.call(target, logPrefix(level, logOperation(payload)), ...payload.map(value => this._formatLogValue(value)));
+    if (txId) payload = [txId, ...payload];
+    logger.call(target, '[SEQ]', ...payload.map(value => this._formatLogValue(value)));
   }
 }
 
@@ -6181,7 +6160,7 @@ class SQLiteAdapter extends BaseAdapter {
       this._log('error', message, { operation: 'dependency' });
       return;
     }
-    console.error(logPrefix('error', 'dependency'), singleLine(message));
+    console.error('[SEQ]', singleLine(message));
   }
 
   async close() {
@@ -6925,7 +6904,7 @@ class MySQLAdapter extends BaseAdapter {
       this._log('error', message, { operation: 'dependency' });
       return;
     }
-    console.error(logPrefix('error', 'dependency'), singleLine(message));
+    console.error('[SEQ]', singleLine(message));
   }
 
   _normalizeConnectionOptions(options) {
@@ -7526,7 +7505,7 @@ class Oracle11Adapter extends BaseAdapter {
     }
     return 0;
   }
-  _dependencyWarning(message) { if (this._seq) this._log('error', message, { operation: 'dependency' }); else console.error(logPrefix('error', 'dependency'), singleLine(message)); }
+  _dependencyWarning(message) { if (this._seq) this._log('error', message, { operation: 'dependency' }); else console.error('[SEQ]', singleLine(message)); }
   _normalizeConnectionOptions(options) {
     const { naming, fkStrategy, eager, booleanValues, afterConnect, connectString, user, password, poolMin, poolMax, poolIncrement, ...rest } = options;
     if (afterConnect !== undefined) {

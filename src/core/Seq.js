@@ -1,4 +1,4 @@
-import { logPrefix, logOperation, singleLine } from '../utils/logging.js';
+import { singleLine } from '../utils/logging.js';
 import { ModelRegistry } from './ModelRegistry.js';
 import { Model } from './Model.js';
 import { ConfigurationError } from './errors/ConfigurationError.js';
@@ -484,8 +484,8 @@ export class Seq {
     const target = typeof logger === 'function' ? this._logging : undefined;
     if (typeof logger !== 'function') return;
     const txId = this._getContext?.()?.txId;
-    if (txId) payload = [...payload, { txId }];
-    logger.call(target, logPrefix(level, logOperation(payload)), ...payload.map(value => this._formatLogValue(value)));
+    if (txId) payload = [txId, ...payload];
+    logger.call(target, '[SEQ]', ...payload.map(value => this._formatLogValue(value)));
   }
 }
 

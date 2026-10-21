@@ -141,7 +141,7 @@ describe('SQLite Adapter', () => {
 
       assert.equal(loadCalls, 1);
       assert.equal(errors.length, 1);
-      assert.match(errors[0][0], /^\[\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\] \[ERROR\] \[SEQ\] \[dependency\]$/);
+      assert.equal(errors[0][0], '[SEQ]');
       assert.match(errors[0][1], /better-sqlite3/);
     });
 
@@ -423,7 +423,7 @@ describe('SQLite Adapter', () => {
       });
 
       assert.equal(errors.length, 1);
-      assert.match(errors[0][0], /^\[\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\] \[ERROR\] \[SEQ\] \[sql\]$/);
+      assert.equal(errors[0][0], '[SEQ]');
       assert.equal(errors[0][1], 'INSERT INTO users (name) VALUES (?)');
       assert.match(errors[0][3], /NOT NULL constraint failed/);
     });

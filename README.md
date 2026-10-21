@@ -225,15 +225,15 @@ const seq = new Seq({
 });
 ```
 
-Los logs usan fecha y hora local, nivel en mayusculas, componente y operacion:
+Seq entrega `[SEQ]` como primer argumento al handler, seguido del `txId` activo (si existe), el mensaje y los datos JSON. La fecha y el nivel los agrega el logger configurado; Seq no los duplica ni agrega etiquetas de operacion al encabezado.
 
 ```text
-[2026-10-20 11:38:52] [TRACE] [SEQ] [User.findAll] User.findAll {"type":"model-operation","operation":"findAll","model":"User","operationDurationMs":2.4} {"txId":"5208b08d-c3db-4325-b54a-38f4fe7e9a61"}
+[SEQ] 5208b08d-c3db-4325-b54a-38f4fe7e9a61 SELECT ... [] {"type":"sql","sqlDurationMs":2.4}
 ```
 
-Las operaciones incluyen `sql`, `Modelo.operacion`, `cache`, `sync`, `init`, `connect`, `close` y `dependency`. Los mensajes generales usan `log`. El mismo encabezado se entrega como primer argumento a los handlers configurados; los mensajes y datos JSON siguen como argumentos adicionales. Los saltos de linea se escapan como `\n` y los campos sensibles de los objetos se ocultan con `[REDACTED]`.
+Los saltos de linea se escapan como `\n` y los campos sensibles de los objetos se ocultan con `[REDACTED]`.
 
-`getContext` permite correlacionar los logs con la peticion activa. Recibe una funcion sin argumentos que devuelve un contexto con `txId` (o `null`/`undefined`). Se consulta al emitir cada log SQL, de modelo o de cache, y se agrega un objeto JSON `{"txId":"..."}` al final del mensaje. Los demas campos del contexto no se registran. Fuera de una peticion, o sin `txId`, el formato permanece igual. Con logging desactivado no se consulta el contexto.
+`getContext` permite correlacionar los logs con la peticion activa. Recibe una funcion sin argumentos que devuelve un contexto con `txId` (o `null`/`undefined`). Se consulta al emitir cada log SQL, de modelo o de cache, y se agrega el `txId` despues de `[SEQ]` y antes del mensaje. Los demas campos del contexto no se registran. Fuera de una peticion, o sin `txId`, el formato permanece igual. Con logging desactivado no se consulta el contexto.
 
 ```js
 const seq = new Seq({ adapter, logging: logger, getContext });
