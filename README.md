@@ -868,9 +868,15 @@ const adapter = new Oracle12Adapter({
 });
 ```
 
-Instala `oracledb` para usar Oracle. Oracle 11 pagina con `ROWNUM` y genera IDs mediante secuencias; Oracle 12 extiende esa implementación con columnas identity y `OFFSET … FETCH`.
+Instala `oracledb` para usar Oracle. Oracle 11 y Oracle 12 paginan con `ROWNUM` y generan IDs mediante secuencias.
 
 Los ejemplos aceptan `SEQ_EXAMPLE_ADAPTER=oracle11` o `oracle12`; por defecto usan SQLite. Las suites de integración se ejecutan con `npm run test:oracle11` y `npm run test:oracle12` usando las variables `ORACLE_USER`, `ORACLE_PASSWORD` y `ORACLE_CONNECT_STRING` de `.env.example`.
+
+#### Secuencias para autoIncrement
+
+En los adaptadores Oracle 11 y Oracle 12, `autoIncrement: true` utiliza secuencias. El nombre aplica `naming.caseStyle` y `naming.maxLength`, truncando por el medio cuando es necesario; por defecto, `REP_FACTURAS_DET` usa `SEQ_REP_FACTURAS_DET`.
+
+Al crear una tabla, `sync()` comprueba si existe la secuencia con el nombre configurado: la reutiliza si existe y la crea si falta. No reinicia ni ajusta su contador a los IDs de la tabla. Las secuencias con otros nombres no se consultan ni se renombran.
 
 #### Inicialización de sesiones Oracle
 

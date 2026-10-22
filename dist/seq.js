@@ -6977,9 +6977,10 @@ Oracle11Adapter requiere la dependencia "oracledb" en version menor o igual a 5.
   static from(error, sql) {
     if (sql !== undefined && error.sql === undefined) {
       const message = error.message;
+      const stack = error.stack;
       error.sql = sql;
-      error.message = `${message}\nSQL: ${sql}`;
-      if (error.stack) error.stack = error.stack.replace(message, error.message);
+      error.message = message.includes(`SQL: ${sql}`) ? message : `${message}\nSQL: ${sql}`;
+      if (stack) error.stack = stack.replace(message, error.message);
     }
     const oracleCode = error?.code || (error?.errorNum ? `ORA-${String(error.errorNum).padStart(5, '0')}` : undefined);
     if (!['ORA-00001', 'ORA-02291', 'ORA-02292', 'ORA-01400'].includes(oracleCode)) return error;
@@ -7026,6 +7027,21 @@ class Oracle11DDL extends DDLAbstract {
   
   _usesSequenceForAutoIncrement() { return true; }
 
+  async _hasSequence(name) {
+    return !!await this._executeGet('SELECT SEQUENCE_NAME FROM USER_SEQUENCES WHERE SEQUENCE_NAME = ?', [name]);
+  }
+
+  async _ensureSequence(tableName) {
+    const name = this._adapter.sequenceName(tableName);
+    if (await this._hasSequence(name)) return;
+    try {
+      await this._execute(`CREATE SEQUENCE ${this._q(name)} START WITH 1 INCREMENT BY 1`);
+    } catch (error) {
+      // Another sync may have created it after the existence check.
+      if (error.errorNum !== 955 || !(await this._hasSequence(name))) throw error;
+    }
+  }
+
   _constraintName(kind, tableName, columns) {
     const naming = this._adapter.naming;
     const table = naming.prefix ? tableName.replaceAll(naming.prefix, '') : tableName;
@@ -7044,7 +7060,7 @@ class Oracle11DDL extends DDLAbstract {
     }
     if (primaryKeys.length) columns.push(`CONSTRAINT ${this._q(this._constraintName('pk', def.tableName, primaryKeys))} PRIMARY KEY (${primaryKeys.map(key => this._q(key)).join(', ')})`);
     await this._execute(`CREATE TABLE ${this._q(def.tableName)} (\n  ${columns.join(',\n  ')}\n)`);
-    if (def.autoIncrement && this._usesSequenceForAutoIncrement()) await this._execute(`CREATE SEQUENCE ${this._q(this._adapter.sequenceName(def.tableName))} START WITH 1 INCREMENT BY 1`);
+    if (def.autoIncrement && this._usesSequenceForAutoIncrement()) await this._ensureSequence(def.tableName);
   }
 
   async dropTable(tableName, options = {}) {
@@ -7420,7 +7436,10 @@ class Oracle11Adapter extends BaseAdapter {
       await connection.close(); 
     }
   }
-  sequenceName(tableName) { const prefix = 'seq_'; const safe = String(tableName).replace(/[^A-Za-z0-9_$#]/g, '_'); return `${prefix}${safe}`.slice(0, 30); }
+  sequenceName(tableName) {
+    const safe = String(tableName).replace(/[^A-Za-z0-9_$#]/g, '_');
+    return truncateMiddle(applyCase(`seq_${safe}`, this.naming.caseStyle), this.naming.maxLength);
+  }
 
   _validateBooleanValues(values) {
     if (values === undefined) return undefined;

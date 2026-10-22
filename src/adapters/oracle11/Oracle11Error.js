@@ -39,9 +39,10 @@ Oracle11Adapter requiere la dependencia "oracledb" en version menor o igual a 5.
   static from(error, sql) {
     if (sql !== undefined && error.sql === undefined) {
       const message = error.message;
+      const stack = error.stack;
       error.sql = sql;
-      error.message = `${message}\nSQL: ${sql}`;
-      if (error.stack) error.stack = error.stack.replace(message, error.message);
+      error.message = message.includes(`SQL: ${sql}`) ? message : `${message}\nSQL: ${sql}`;
+      if (stack) error.stack = stack.replace(message, error.message);
     }
     const oracleCode = error?.code || (error?.errorNum ? `ORA-${String(error.errorNum).padStart(5, '0')}` : undefined);
     if (!['ORA-00001', 'ORA-02291', 'ORA-02292', 'ORA-01400'].includes(oracleCode)) return error;

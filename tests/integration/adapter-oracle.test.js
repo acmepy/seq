@@ -233,3 +233,67 @@ it('includes failing Oracle SQL in DDL and DML errors', async () => {
     await adapter.close();
   }
 });
+
+
+it('preserves existing Oracle sequence counters without renaming other sequences', async () => {
+  const adapter = new Adapter(oracleTestOptions());
+  const table = 'SEQ_NAMING_TEST';
+  const current = adapter.sequenceName(table);
+  const legacy = 'seq_' + table;
+  try {
+    await adapter.authenticate();
+    await adapter.ddl._execute('CREATE SEQUENCE "' + current + '" START WITH 41 INCREMENT BY 1 NOCACHE');
+    await adapter.ddl.createTableStructure({ tableName: table, autoIncrement: 'ID', columns: { id: { field: 'ID', type: DataTypes.INTEGER, primaryKey: true, allowNull: false } } });
+    let value = await adapter.dml._executeGet('SELECT "' + current + '".NEXTVAL AS "value" FROM DUAL');
+    assert.equal(value.value, 41);
+    await adapter.ddl._ensureSequence(table);
+    value = await adapter.dml._executeGet('SELECT "' + current + '".NEXTVAL AS "value" FROM DUAL');
+    assert.equal(value.value, 42);
+    await adapter.ddl._execute('CREATE SEQUENCE "' + legacy + '" START WITH 80 INCREMENT BY 1 NOCACHE');
+    class SequenceRecord extends Model {}
+    SequenceRecord.init({ id: { type: DataTypes.INTEGER, primaryKey: true, autoIncrement: true } }, { modelName: 'SequenceRecord', tableName: table, timestamps: false });
+    const seq = new Seq({ adapter, models: [SequenceRecord], logging: false });
+    await seq.init();
+    await seq.sync();
+    assert.equal(await adapter.ddl._hasSequence(legacy), true);
+    value = await adapter.dml._executeGet('SELECT "' + current + '".NEXTVAL AS "value" FROM DUAL');
+    assert.equal(value.value, 43);
+    const inserted = await SequenceRecord.create({});
+    assert.equal(inserted.getDataValue('id'), 44);
+    await adapter.ddl._execute('DROP SEQUENCE "' + current + '"');
+    await adapter.ddl._ensureSequence(table);
+    assert.equal((await adapter.dml._executeGet('SELECT "' + current + '".NEXTVAL AS "value" FROM DUAL')).value, 1);
+    assert.equal((await adapter.dml._executeGet('SELECT "' + legacy + '".NEXTVAL AS "value" FROM DUAL')).value, 80);
+    await seq.sync({ force: true });
+    assert.equal((await SequenceRecord.create({})).getDataValue('id'), 1);
+  } finally {
+    for (const sequence of [legacy]) {
+      if (await adapter.ddl._hasSequence(sequence)) await adapter.ddl._execute('DROP SEQUENCE "' + sequence + '"');
+    }
+    await adapter.ddl.dropTable(table, { ifExists: true });
+    if (await adapter.ddl._hasSequence(current)) await adapter.ddl._execute('DROP SEQUENCE "' + current + '"');
+    await adapter.close();
+  }
+});
+
+it('only tolerates sequence creation races when the named sequence exists', async () => {
+  const adapter = new Adapter(oracleTestOptions());
+  const table = 'SEQ_RACE_TEST';
+  const sequence = adapter.sequenceName(table);
+  try {
+    await adapter.authenticate();
+    await Promise.all([adapter.ddl._ensureSequence(table), adapter.ddl._ensureSequence(table)]);
+    assert.equal(await adapter.ddl._hasSequence(sequence), true);
+    await adapter.ddl._execute('DROP SEQUENCE "' + sequence + '"');
+    await adapter.ddl._execute('CREATE TABLE "' + sequence + '" ("ID" NUMBER)');
+    await assert.rejects(adapter.ddl._ensureSequence(table), error => {
+      assert.equal(error.errorNum, 955);
+      assert.equal(error.stack.split('SQL: ').length - 1, 1);
+      return true;
+    });
+  } finally {
+    await adapter.ddl.dropTable(sequence, { ifExists: true });
+    if (await adapter.ddl._hasSequence(sequence)) await adapter.ddl._execute('DROP SEQUENCE "' + sequence + '"');
+    await adapter.close();
+  }
+});

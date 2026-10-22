@@ -36,6 +36,21 @@ export class Oracle11DDL extends DDLAbstract {
   
   _usesSequenceForAutoIncrement() { return true; }
 
+  async _hasSequence(name) {
+    return !!await this._executeGet('SELECT SEQUENCE_NAME FROM USER_SEQUENCES WHERE SEQUENCE_NAME = ?', [name]);
+  }
+
+  async _ensureSequence(tableName) {
+    const name = this._adapter.sequenceName(tableName);
+    if (await this._hasSequence(name)) return;
+    try {
+      await this._execute(`CREATE SEQUENCE ${this._q(name)} START WITH 1 INCREMENT BY 1`);
+    } catch (error) {
+      // Another sync may have created it after the existence check.
+      if (error.errorNum !== 955 || !(await this._hasSequence(name))) throw error;
+    }
+  }
+
   _constraintName(kind, tableName, columns) {
     const naming = this._adapter.naming;
     const table = naming.prefix ? tableName.replaceAll(naming.prefix, '') : tableName;
@@ -54,7 +69,7 @@ export class Oracle11DDL extends DDLAbstract {
     }
     if (primaryKeys.length) columns.push(`CONSTRAINT ${this._q(this._constraintName('pk', def.tableName, primaryKeys))} PRIMARY KEY (${primaryKeys.map(key => this._q(key)).join(', ')})`);
     await this._execute(`CREATE TABLE ${this._q(def.tableName)} (\n  ${columns.join(',\n  ')}\n)`);
-    if (def.autoIncrement && this._usesSequenceForAutoIncrement()) await this._execute(`CREATE SEQUENCE ${this._q(this._adapter.sequenceName(def.tableName))} START WITH 1 INCREMENT BY 1`);
+    if (def.autoIncrement && this._usesSequenceForAutoIncrement()) await this._ensureSequence(def.tableName);
   }
 
   async dropTable(tableName, options = {}) {

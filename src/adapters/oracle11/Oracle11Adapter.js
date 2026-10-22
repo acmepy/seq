@@ -4,7 +4,7 @@ import { Oracle11DDL } from './Oracle11DDL.js';
 import { Oracle11DML } from './Oracle11DML.js';
 import { Oracle11TCL } from './Oracle11TCL.js';
 import { Oracle11Error } from './Oracle11Error.js';
-import { truncateMiddle } from '../../utils/naming.js';
+import { applyCase, truncateMiddle } from '../../utils/naming.js';
 import util from 'node:util';
 import { ConfigurationError } from '../../core/errors/ConfigurationError.js';
 
@@ -77,7 +77,10 @@ export class Oracle11Adapter extends BaseAdapter {
       await connection.close(); 
     }
   }
-  sequenceName(tableName) { const prefix = 'seq_'; const safe = String(tableName).replace(/[^A-Za-z0-9_$#]/g, '_'); return `${prefix}${safe}`.slice(0, 30); }
+  sequenceName(tableName) {
+    const safe = String(tableName).replace(/[^A-Za-z0-9_$#]/g, '_');
+    return truncateMiddle(applyCase(`seq_${safe}`, this.naming.caseStyle), this.naming.maxLength);
+  }
 
   _validateBooleanValues(values) {
     if (values === undefined) return undefined;
