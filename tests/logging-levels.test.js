@@ -276,6 +276,7 @@ describe('Logging levels', () => {
     assert.equal(calls[0][1], 'Sync failed');
     assert.match(calls[0][2], /SEQ_DDL_REQUIRED_COLUMN_NEEDS_DEFAULT/);
     assert.match(calls[0][2], /Cannot add required column/);
+    assert.equal(JSON.parse(calls[0][2]).error.stack, failure.stack);
   });
 
   it('logs SQL and model-operation durations through the active adapter', async () => {
@@ -318,6 +319,13 @@ describe('Logging levels', () => {
       await assert.rejects(() => TimedUser.create({ name: 'Ana' }));
       assert.ok(errors.some(args => args[1]?.startsWith?.('INSERT INTO') && JSON.parse(args[3]).type === 'sql' && JSON.parse(args[3]).error));
       assert.ok(errors.some(args => args[1] === 'TimedUser.create' && JSON.parse(args[2]).type === 'model-operation' && JSON.parse(args[2]).error));
+      for (const args of errors) {
+        const metadata = args.map(value => {
+          try { return JSON.parse(value); } catch { return null; }
+        }).find(value => value?.error);
+        assert.equal(typeof metadata.error.stack, 'string');
+        assert.match(metadata.error.stack, /\bat /);
+      }
     } finally {
       await cleanupTestContext(context);
     }
@@ -367,4 +375,18 @@ it('delegates timestamps and levels to the logger and keeps single-line redacted
   });
   assert.equal(calls[2].args[1], 'line one\\nline two');
   assert.deepEqual(JSON.parse(calls[2].args[2]), { token: '[REDACTED]', nested: { password: '[REDACTED]' } });
+});
+
+
+it('preserves stacks of Error payloads and nested errors while redacting secrets', () => {
+  const calls = [];
+  const seq = new Seq({ adapter: new MapAdapter(), logging: { info: false, trace: false, warn: false, error: (...args) => calls.push(args) } });
+  const failure = Object.assign(new Error('Database failed'), { token: 'private' });
+  seq._log('error', failure, { error: failure });
+  for (const serialized of [JSON.parse(calls[0][1]), JSON.parse(calls[0][2]).error]) {
+    assert.equal(serialized.stack, failure.stack);
+    assert.equal(serialized.message, failure.message);
+    assert.equal(serialized.token, '[REDACTED]');
+  }
+  assert.ok(!calls[0].join(' ').includes('\n'));
 });

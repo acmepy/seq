@@ -178,6 +178,9 @@ Defaults de naming:
 
 La prioridad de `eager` es: include individual, opcion de query, opcion del adapter, y finalmente `false`.
 
+Los nombres automaticos de las claves foraneas siguen `FK_tabla_hija_columnas`, aplicando las mayusculas/minusculas y el limite de longitud configurados. Por ejemplo: `FK_REP_FACTURAS_DET_FACTURA_ID` y `FK_REP_FACTURAS_COB_FACTURA_ID`. La tabla referenciada no forma parte del nombre. Los nombres explicitos mediante `constraintName` se conservan.
+
+
 ## Logging
 
 Por defecto, `seq` registra mensajes `info`, `trace` y `warn` con `console.log`, y mensajes `error` con `console.error`. Los logs SQL del adapter SQLite se emiten en `trace`.

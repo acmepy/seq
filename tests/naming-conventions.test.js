@@ -677,3 +677,29 @@ describe('Naming Conventions', () => {
     });
   });
 });
+
+
+it('creates distinct foreign keys for factura detail and collection tables within 30 characters', async () => {
+  class Cab extends Model {}
+  class Det extends Model {}
+  class Cob extends Model {}
+  Cab.init({ id: { type: DataTypes.INTEGER, primaryKey: true } }, { modelName: 'NamingFacturaCab', tableName: 'REP_FACTURAS_CAB', timestamps: false });
+  for (const [Child, suffix] of [[Det, 'DET'], [Cob, 'COB']]) {
+    Child.init({ id: { type: DataTypes.INTEGER, primaryKey: true }, facturaId: { type: DataTypes.INTEGER } },
+      { modelName: 'NamingFactura' + suffix, tableName: 'REP_FACTURAS_' + suffix, timestamps: false });
+    Child.belongsTo(Cab, { foreignKey: 'facturaId' });
+  }
+  const context = await createTestContext({ models: [Cab, Det, Cob],
+    adapterOptions: { naming: { caseStyle: 'upper', maxLength: 30, prefix: undefined, columns: 'snake_case' } } });
+  try {
+    await context.seq.sync();
+    const names = [Det, Cob].map(model => context.seq._buildTableDefinition(model).foreignKeys[0].constraintName);
+    assert.deepEqual(names, ['FK_REP_FACTURAS_DET_FACTURA_ID', 'FK_REP_FACTURAS_COB_FACTURA_ID']);
+    await Cab.create({ id: 1 });
+    await Det.create({ id: 1, facturaId: 1 });
+    await Cob.create({ id: 1, facturaId: 1 });
+    await assert.rejects(Cob.create({ id: 2, facturaId: 999 }));
+  } finally {
+    await cleanupTestContext(context);
+  }
+});

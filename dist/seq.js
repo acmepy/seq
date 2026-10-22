@@ -1409,7 +1409,7 @@ class Model {
         operation,
         model: this.modelName,
         operationDurationMs,
-        error: { name: error.name, message: error.message, code: error.code }
+        error: { name: error.name, message: error.message, code: error.code, stack: error.stack }
       });
       throw error;
     }
@@ -2804,7 +2804,8 @@ class Seq {
     let output;
     try {
       output = JSON.stringify(value, (key, nestedValue) =>
-        /password|passwd|token|secret|api[_-]?key/i.test(key) ? '[REDACTED]' : nestedValue
+        /password|passwd|token|secret|api[_-]?key/i.test(key) ? '[REDACTED]'
+          : nestedValue instanceof Error ? { ...nestedValue, name: nestedValue.name, message: nestedValue.message, stack: nestedValue.stack } : nestedValue
       );
     } catch {
       output = String(value);
@@ -2837,7 +2838,8 @@ function serializeError(error) {
     name: error?.name || 'Error',
     message: error?.message || String(error),
     code: error?.code ?? null,
-    details: error?.details ?? null
+    details: error?.details ?? null,
+    stack: error?.stack
   };
 }
 
@@ -3064,7 +3066,7 @@ class BaseAdapter {
   }
 
   foreignKeyConstraintName(sourceTable, refTable, fkColumn) {
-    return truncateMiddle(applyCase(`fk_${this._constraintTableName(sourceTable).replaceAll(this.naming.prefix, '')}_${this._constraintTableName(refTable)}_${fkColumn}`, this.naming.caseStyle), this.naming.maxLength);
+    return truncateMiddle(applyCase(`fk_${this._constraintTableName(sourceTable).replaceAll(this.naming.prefix, '')}_${fkColumn}`, this.naming.caseStyle), this.naming.maxLength);
   }
 
   junctionUniqueConstraintName(throughTable, fkColumn, otherKeyColumn) {
@@ -3308,7 +3310,7 @@ class BaseAdapter {
       this._log(level, loggedSql, params, {
         type: 'sql',
         sqlDurationMs,
-        error: error ? { name: error.name, message: error.message, code: error.code } : undefined
+        error: error ? { name: error.name, message: error.message, code: error.code, stack: error.stack } : undefined
       });
     };
     const success = result => {

@@ -461,7 +461,8 @@ export class Seq {
     let output;
     try {
       output = JSON.stringify(value, (key, nestedValue) =>
-        /password|passwd|token|secret|api[_-]?key/i.test(key) ? '[REDACTED]' : nestedValue
+        /password|passwd|token|secret|api[_-]?key/i.test(key) ? '[REDACTED]'
+          : nestedValue instanceof Error ? { ...nestedValue, name: nestedValue.name, message: nestedValue.message, stack: nestedValue.stack } : nestedValue
       );
     } catch {
       output = String(value);
@@ -494,6 +495,7 @@ function serializeError(error) {
     name: error?.name || 'Error',
     message: error?.message || String(error),
     code: error?.code ?? null,
-    details: error?.details ?? null
+    details: error?.details ?? null,
+    stack: error?.stack
   };
 }

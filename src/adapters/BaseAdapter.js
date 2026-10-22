@@ -148,7 +148,7 @@ export class BaseAdapter {
   }
 
   foreignKeyConstraintName(sourceTable, refTable, fkColumn) {
-    return truncateMiddle(applyCase(`fk_${this._constraintTableName(sourceTable).replaceAll(this.naming.prefix, '')}_${this._constraintTableName(refTable)}_${fkColumn}`, this.naming.caseStyle), this.naming.maxLength);
+    return truncateMiddle(applyCase(`fk_${this._constraintTableName(sourceTable).replaceAll(this.naming.prefix, '')}_${fkColumn}`, this.naming.caseStyle), this.naming.maxLength);
   }
 
   junctionUniqueConstraintName(throughTable, fkColumn, otherKeyColumn) {
@@ -392,7 +392,7 @@ export class BaseAdapter {
       this._log(level, loggedSql, params, {
         type: 'sql',
         sqlDurationMs,
-        error: error ? { name: error.name, message: error.message, code: error.code } : undefined
+        error: error ? { name: error.name, message: error.message, code: error.code, stack: error.stack } : undefined
       });
     };
     const success = result => {

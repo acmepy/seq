@@ -284,7 +284,7 @@ export class Model {
         operation,
         model: this.modelName,
         operationDurationMs,
-        error: { name: error.name, message: error.message, code: error.code }
+        error: { name: error.name, message: error.message, code: error.code, stack: error.stack }
       });
       throw error;
     }
