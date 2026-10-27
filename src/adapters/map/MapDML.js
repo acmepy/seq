@@ -229,10 +229,12 @@ export class MapDML extends DMLAbstract {
     const fkCol = schema.attrToColumn[fkAttr] || fkAttr;
     const otherKeyCol = schema.attrToColumn[otherKeyAttr] || otherKeyAttr;
     const sourceSet = new Set(sourceIds);
+    const tenantWhere = this._translateWhere(this._junctionTenantWhere(assoc) || {}, schema);
     const rows = [];
 
     for (const [, record] of table) {
       if (!sourceSet.has(record[fkCol])) continue;
+      if (!this._matchWhere(record, tenantWhere)) continue;
       rows.push({
         [fkAttr]: record[fkCol],
         [otherKeyAttr]: record[otherKeyCol]

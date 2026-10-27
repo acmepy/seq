@@ -20,5 +20,6 @@ export {
   ConfigurationError,
   ModelError,
   ValidationError,
-  AdapterError
+  AdapterError,
+  TenantError
 } from './core/errors/index.js';

@@ -1,4 +1,6 @@
 import { primaryAttributes, valuesFor, keyObject, tuplesWhere } from '../../utils/keys.js';
+import { installTenantDML } from '../../core/TenantDML.js';
+import { tenantWhere } from '../../core/TenantQueryScope.js';
 import { BaseAbstract } from './BaseAbstract.js';
 import { AdapterError } from '../../core/errors/AdapterError.js';
 import { ValidationError } from '../../core/errors/ValidationError.js';
@@ -15,6 +17,11 @@ const requiredPageIncludes = Symbol('requiredPageIncludes');
  * and adapter-specific methods (insert, truncate).
  */
 export class DMLAbstract extends BaseAbstract {
+  constructor(adapter) {
+    super(adapter);
+    installTenantDML(this);
+  }
+
   // ---------------------------------------------------------------------------
   // Shared helpers — reusable by all adapter subclasses
   // ---------------------------------------------------------------------------
@@ -40,6 +47,15 @@ export class DMLAbstract extends BaseAbstract {
       throw new AdapterError(`Table "${tableName}" does not exist`, { code: 'SEQ_ADAPTER_TABLE_NOT_FOUND' });
     }
     return { tableName, schema, alias: model.alias || null };
+  }
+
+  _junctionTenantWhere(assoc) {
+    if (assoc.throughModel) return tenantWhere(assoc.throughModel);
+    const schema = this._adapter.schemas.get(this._adapter.getAssociationThroughTable(assoc));
+    if (!schema?.tenantAttribute) return null;
+    const resolver = this._adapter._seq._tenants;
+    const tenant = resolver.resolve(assoc.source) || resolver.resolve(assoc.target);
+    return { [schema.tenantAttribute]: tenant.value };
   }
 
   /**
@@ -89,6 +105,9 @@ export class DMLAbstract extends BaseAbstract {
         const target = primaryAttributes(inc.model)[0] || 'id';
         from += ` JOIN ${this._tableWithAlias(through, joinAlias)} ON ${this._colRef(junction.attrToColumn[assoc.otherKey] || assoc.otherKey, joinAlias)} = ${this._colRef(schema.attrToColumn[target] || target, alias)}`;
         links = [`${this._colRef(parentSchema.attrToColumn[source] || source, parentAlias)} = ${this._colRef(junction.attrToColumn[assoc.foreignKey] || assoc.foreignKey, joinAlias)}`];
+        const tenant = this._buildConditions(this._junctionTenantWhere(assoc) || {}, junction, joinAlias);
+        links.push(...tenant.conditions);
+        params.push(...tenant.params);
       } else {
         links = assoc.sourceKeys.map((key, index) => `${this._colRef(parentSchema.attrToColumn[key] || key, parentAlias)} = ${this._colRef(schema.attrToColumn[assoc.targetKeys[index]] || assoc.targetKeys[index], alias)}`);
       }
@@ -415,6 +434,11 @@ export class DMLAbstract extends BaseAbstract {
         const targetPKCol = targetSchema.attrToColumn[targetPKAttr] || targetPKAttr;
 
         sql += ` ${joinType} ${this._tableWithAlias(throughTable, junctionAlias)} ON ${this._colRef(pkCol, parentAlias)} = ${this._colRef(junctionFKCol, junctionAlias)}`;
+        const junctionTenant = this._buildConditions(this._junctionTenantWhere(assoc) || {}, junctionSchema, junctionAlias);
+        if (junctionTenant.conditions.length) {
+          sql += ` AND ${junctionTenant.conditions.join(' AND ')}`;
+          params.push(...junctionTenant.params);
+        }
 
         let onClause = `${this._colRef(junctionOtherKeyCol, junctionAlias)} = ${this._colRef(targetPKCol, joinAlias)}`;
         if (inc.where) {
@@ -509,8 +533,9 @@ export class DMLAbstract extends BaseAbstract {
     const otherKeyCol = junctionSchema.attrToColumn[otherKeyAttr] || otherKeyAttr;
     const rows = await Promise.all(chunks(sourceIds).map(ids => {
       const placeholders = ids.map(() => '?').join(', ');
-      const sql = `SELECT ${this._q(fkCol)} AS ${this._q(fkAttr)}, ${this._q(otherKeyCol)} AS ${this._q(otherKeyAttr)} FROM ${this._q(throughTable)} WHERE ${this._q(fkCol)} IN (${placeholders})`;
-      return this._executeQueryAll(sql, ids.map(id => this._serializeValue(id)));
+      const tenant = this._buildConditions(this._junctionTenantWhere(assoc) || {}, junctionSchema);
+      const sql = `SELECT ${this._q(fkCol)} AS ${this._q(fkAttr)}, ${this._q(otherKeyCol)} AS ${this._q(otherKeyAttr)} FROM ${this._q(throughTable)} WHERE ${this._q(fkCol)} IN (${placeholders})${tenant.conditions.length ? ` AND ${tenant.conditions.join(' AND ')}` : ''}`;
+      return this._executeQueryAll(sql, [...ids.map(id => this._serializeValue(id)), ...tenant.params]);
     }));
     return rows.flat();
   }

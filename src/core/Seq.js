@@ -3,6 +3,7 @@ import { ModelRegistry } from './ModelRegistry.js';
 import { Model } from './Model.js';
 import { ConfigurationError } from './errors/ConfigurationError.js';
 import { Cache } from '../cache/Cache.js';
+import { TenantResolver, tenantConfig, modelTenant } from './TenantResolver.js';
 
 /**
  * Main Seq ORM class. Entry point for creating an ORM instance.
@@ -19,6 +20,8 @@ export class Seq {
       throw new ConfigurationError('getContext must be a function', { code: 'SEQ_INVALID_GET_CONTEXT' });
     }
     this._getContext = options.getContext;
+    this._tenantConfig = options.tenant === undefined ? null : tenantConfig(options.tenant);
+    this._tenants = new TenantResolver(this);
     this._logging = this._normalizeLogging(options.logging);
     this._slowQueryMs = this._normalizeSlowThreshold(options.slowQueryMs, 'slowQueryMs');
     this._slowOperationMs = this._normalizeSlowThreshold(options.slowOperationMs, 'slowOperationMs');
@@ -118,6 +121,7 @@ export class Seq {
    * @param {import('../../types/index.d.ts').ModelStatic} modelClass
    */
   registerModel(modelClass) {
+    modelTenant(modelClass);
     if (!modelClass._resolvedTableName) modelClass._resolvedTableName = this._resolveTableName(modelClass);
     this._registry.register(modelClass);
   }
@@ -326,6 +330,10 @@ export class Seq {
    * @returns {Promise<TResult>}
    */
   async transaction(callback) {
+    return this._tenants.run(() => this._transaction(callback));
+  }
+
+  async _transaction(callback) {
     const transaction = await this._adapter.tcl.begin();
     if (!transaction.afterCommitCallbacks) {
       transaction.afterCommitCallbacks = [];

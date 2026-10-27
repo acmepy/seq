@@ -1,5 +1,6 @@
 import { BaseAbstract } from './BaseAbstract.js';
 import { AdapterError } from '../../core/errors/AdapterError.js';
+import { installTenantTransactions } from '../../core/TenantDML.js';
 
 /**
  * Base TCL abstract.
@@ -7,6 +8,11 @@ import { AdapterError } from '../../core/errors/AdapterError.js';
  * Adapter-specific subclasses must override all public methods.
  */
 export class TCLAbstract extends BaseAbstract {
+  constructor(adapter) {
+    super(adapter);
+    installTenantTransactions(this);
+  }
+
   // ---------------------------------------------------------------------------
   // Abstract methods — must be implemented by adapter subclasses
   // ---------------------------------------------------------------------------

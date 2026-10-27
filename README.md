@@ -132,6 +132,40 @@ Opciones principales:
 | `models` | Clases que extienden `Model`. |
 | `logging` | `false`, `true`, funcion u objeto por niveles. |
 | `define` | Opciones por defecto reservadas para definicion de modelos. |
+| `tenant` | `{ attribute: 'tenantId' }`: atributo compartido por los modelos con `tenant: true`. |
+| `getContext` | Funcion que devuelve el contexto actual, incluido `tenantId` para aislamiento y `txId` para logs. |
+
+## Aislamiento multitenant
+
+El aislamiento por columna es optativo. Cada modelo protegido declara `tenant: true` para usar el atributo global o `tenant: { attribute: 'company' }` para indicar otro atributo. Los modelos sin configuracion de tenant o con `tenant: false` son globales.
+
+```js
+class Customer extends Model {}
+Customer.init({
+  id: { type: DataTypes.INTEGER, primaryKey: true, autoIncrement: true },
+  tenantId: { type: DataTypes.INTEGER, field: 'tenant_id' },
+  name: { type: DataTypes.STRING(80) }
+}, { modelName: 'Customer', tableName: 'customers', tenant: true });
+
+const seq = new Seq({
+  adapter,
+  models: [Customer],
+  getContext, // Devuelve { tenantId, txId? } del contexto autenticado de api-kit.
+  tenant: { attribute: 'tenantId' }
+});
+```
+
+`attribute` es el nombre del atributo del modelo; el adaptador resuelve su columna fisica mediante `field` y su estrategia de nombres. Debe declararse como atributo persistente. No hay atributo implicito ni tenant por defecto. El identificador se obtiene exclusivamente de `getContext().tenantId`: `0` es valido, se conserva el tipo y `123` no equivale a `'123'`. Un tipo incompatible con el atributo o un contexto ausente produce `TenantError` antes de acceder a datos protegidos.
+
+Las consultas agregan el tenant con `AND`. Las escrituras lo incorporan desde el contexto y rechazan valores diferentes, incluso con `hooks: false`. Esto incluye `findOrCreate`, `build().save()`, llamadas DML con modelos y escrituras anidadas. Las instancias persistidas y las transacciones no pueden reutilizarse bajo otro tenant. `truncate()` se rechaza en modelos protegidos; `destroy()` permite eliminar los registros del tenant actual.
+
+En asociaciones lazy y eager se filtra cada modelo protegido. Por ejemplo, un pais global puede incluir todas sus ciudades globales y solo los clientes de ese pais que pertenezcan al tenant del contexto. Los filtros de relaciones se conservan y los `LEFT JOIN` mantienen los padres sin hijos accesibles. Las referencias escritas a modelos protegidos se validan con el mismo contexto.
+
+Toda clave de cache incluye en su hash el tenant y su tipo, incluso para modelos globales. Las consultas exclusivamente globales pueden ejecutarse sin tenant y usan una identidad de ausencia separada. Las invalidaciones de modelos protegidos corresponden al tenant de la escritura y se posponen hasta el commit; las escrituras globales invalidan las particiones dependientes de todos los tenants. Tambien se invalidan resultados con includes y dependencias de cascadas.
+
+Las restricciones de negocio deben declararse segun la aplicacion: por ejemplo, un indice UNIQUE sobre `['tenantId', 'code']` permite repetir un codigo entre tenants. Para integridad fisica entre tablas con identidades locales, declara claves y referencias compuestas que incluyan el tenant. Los conflictos con una PK o UNIQUE global de otro tenant fallan sin modificar el registro ajeno. La funcionalidad no reemplaza ni reescribe automaticamente las restricciones existentes. Las tablas intermedias automaticas de asociaciones protegidas incluyen una columna de tenant; las existentes requieren revisar su migracion. Las consultas SQL arbitrarias y cambios directos a la base quedan fuera del aislamiento automatico.
+
+Ejemplo ejecutable con SQLite, modelos globales, detalles con atributo personalizado y consultas concurrentes: `node examples/tenant.js`. La validacion de esta funcionalidad se realizo con SQLite; las pruebas genericas estan incluidas en las suites de MySQL, Oracle 11 y Oracle 12 para su ejecucion posterior.
 
 ## Configuracion de adapters
 

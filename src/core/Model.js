@@ -5,6 +5,8 @@ import { ValidationError, ValidationWhereError, ValidationOrderError, Validation
 import { DataTypes } from '../data-types/index.js';
 import { normalizeInclude, resolveAssociation, resolveIncludeAlias } from '../utils/include.js';
 import { primaryAttributes, keyObject, valuesFor } from '../utils/keys.js';
+import { modelTenant } from './TenantResolver.js';
+import { tenantQuery } from './TenantQueryScope.js';
 
 /**
  * Base Model class. All user-defined models must extend this.
@@ -27,6 +29,8 @@ export class Model {
 
     const Ctor = this.constructor;
     const attrs = Ctor.rawAttributes || {};
+    Ctor.seq?._tenants.remember(this, values);
+    const tenantAttribute = Ctor.options?.tenant ? modelTenant(Ctor)?.attribute : null;
 
     if (options._partial) {
       for (const [key, value] of Object.entries(values)) this.dataValues[key] = value;
@@ -38,6 +42,8 @@ export class Model {
         continue;
       } else if (key in values) {
         this.dataValues[key] = values[key];
+      } else if (key === tenantAttribute) {
+        continue;
       } else if (attrs[key].defaultValue !== undefined) {
         const dv = attrs[key].defaultValue;
         this.dataValues[key] = typeof dv === 'function' ? dv() : dv;
@@ -321,10 +327,12 @@ export class Model {
 
   static async _invalidateCache(options = {}) {
     if (!this.seq || !this.seq.cache) return;
+    const tenantId = this.seq._tenants.current();
+    const invalidate = () => this.seq.cache.invalidate(this.modelName, modelTenant(this) ? { tenantId } : undefined);
     if (options.transaction && typeof options.transaction.afterCommit === 'function') {
-      options.transaction.afterCommit(() => this.seq.cache.invalidate(this.modelName));
+      options.transaction.afterCommit(invalidate);
     } else {
-      await this.seq.cache.invalidate(this.modelName);
+      await invalidate();
     }
   }
 
@@ -582,6 +590,8 @@ export class Model {
   static async findOne(options = {}) {
     //this._log('trace', `${this.modelName}.findOne`, options);
     if (options.hooks !== false) await this._runHooks('beforeFind', options);
+    options = tenantQuery(this, options);
+    this.seq?._tenants.assertTransaction(options.transaction);
     
     const useCache = options.cache !== false && !options.transaction && this.seq?.cache;
     if (useCache) {
@@ -608,6 +618,8 @@ export class Model {
    */
   static async findAll(options = {}) {
     if (options.hooks !== false) await this._runHooks('beforeFind', options);
+    options = tenantQuery(this, options);
+    this.seq?._tenants.assertTransaction(options.transaction);
     if (options.where !== undefined && (typeof options.where !== 'object' || Array.isArray(options.where))) throw new ValidationWhereError();
     if (options.order !== undefined) this._validateOrder(options.order);
     if (options.limit !== undefined && (!Number.isInteger(options.limit) || options.limit < 1))  throw new ValidationLimitError();
@@ -631,7 +643,7 @@ export class Model {
   static _validateIncludes(includes) {
     for (const include of includes || []) {
       if (!include.model) throw new ModelError('include requires a model', { code: 'SEQ_INCLUDE_INVALID_MODEL' });
-      if (include.attributes !== null) include.model._validateAttributes(include.attributes);
+      if (include.attributes != null) include.model._validateAttributes(include.attributes);
       include.model._validateIncludes(include.include || []);
     }
   }
@@ -665,6 +677,8 @@ export class Model {
    */
   static async count(options = {}) {
     if (options.hooks !== false) await this._runHooks('beforeCount', options);
+    options = tenantQuery(this, options);
+    this.seq?._tenants.assertTransaction(options.transaction);
     if (options.where !== undefined && (typeof options.where !== 'object' || Array.isArray(options.where))) throw new ValidationWhereError();
     //this._log('trace', `${this.modelName}.count`, options);
     const useCache = options.cache !== false && !options.transaction && this.seq?.cache;
@@ -886,6 +900,7 @@ export class Model {
    */
   async save(options = {}) {
     const Ctor = this.constructor;
+    Ctor.seq?._tenants.assertInstance(this);
     const isNew = this._isNew;
     if (options.hooks !== false) {
       await Ctor._runHooks('beforeSave', this, options);
@@ -898,6 +913,7 @@ export class Model {
       const result = await Ctor._adapter.dml.insert(Ctor, values, options);
       Object.assign(this.dataValues, result.dataValues);
       this._isNew = false;
+      Ctor.seq?._tenants.remember(this, this.dataValues);
       this._originalPrimaryKey = keyObject(primaryAttributes(Ctor), valuesFor(this.dataValues, primaryAttributes(Ctor)));
       this._changed = {};
       if (options.hooks !== false) {
@@ -929,6 +945,7 @@ export class Model {
    * @returns {Promise<this>}
    */
   async update(values, options = {}) {
+    this.constructor.seq?._tenants.assertInstance(this);
     for (const [key, value] of Object.entries(values)) this.setDataValue(key, value);
     this._isNew = false;
     return this.save(options);
@@ -941,6 +958,7 @@ export class Model {
    */
   async destroy(options = {}) {
     const Ctor = this.constructor;
+    Ctor.seq?._tenants.assertInstance(this);
     if (options.hooks !== false) await Ctor._runHooks('beforeDestroy', this, options);
     const where = this._instancePrimaryKeyWhere();
     await Ctor.destroy({ ...options, where, hooks: false });
@@ -967,7 +985,11 @@ for (const operation of measuredStaticOperations) {
     configurable: true,
     writable: true,
     value: function (...args) {
-      return this._measureOperation(operation, () => original.apply(this, args));
+      const run = () => this._measureOperation(operation, () => {
+        this.seq?._tenants.resolve(this);
+        return original.apply(this, args);
+      });
+      return this.seq?._tenants ? this.seq._tenants.run(run) : run();
     }
   });
 }
@@ -980,7 +1002,8 @@ for (const operation of measuredInstanceOperations) {
     configurable: true,
     writable: true,
     value: function (...args) {
-      return this.constructor._measureOperation(`instance.${operation}`, () => original.apply(this, args));
+      const run = () => this.constructor._measureOperation(`instance.${operation}`, () => original.apply(this, args));
+      return this.constructor.seq?._tenants ? this.constructor.seq._tenants.run(run) : run();
     }
   });
 }

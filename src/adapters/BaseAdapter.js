@@ -1,6 +1,7 @@
 import { applyConvention, applyCase, initCap, truncateMiddle } from '../utils/naming.js';
 import { primaryAttributes } from '../utils/keys.js';
 import { ModelError } from '../core/errors/ModelError.js';
+import { modelTenant } from '../core/TenantResolver.js';
 /**
  * Base adapter class. All adapters must extend this.
  * Defines the contract for DDL, DML, DCL and TCL operations.
@@ -251,6 +252,13 @@ export class BaseAdapter {
     };
 
     const uniqueConstraints = [{ columns: [fkCol, otherKeyCol], constraintName: this.junctionUniqueConstraintName(through, fkCol, otherKeyCol) }];
+    const owner = modelTenant(source) ? source : modelTenant(target) ? target : null;
+    const tenantAttribute = owner ? modelTenant(owner).attribute : null;
+    const tenantColumn = owner ? this.resolveColumnName(owner.rawAttributes[tenantAttribute], tenantAttribute) : null;
+    if (owner) {
+      columns[tenantAttribute] = { type: owner.rawAttributes[tenantAttribute].type, field: tenantColumn, allowNull: false };
+      uniqueConstraints[0].columns.unshift(tenantColumn);
+    }
     const foreignKeys = [
       {
         attributeName: fkAttr,
@@ -273,6 +281,7 @@ export class BaseAdapter {
     return {
       modelName: null,
       tableName: through,
+      tenantAttribute,
       columns,
       uniqueConstraints,
       indexes: [],
@@ -284,8 +293,8 @@ export class BaseAdapter {
       timestamps: false,
       createdAt: 'createdAt',
       updatedAt: 'updatedAt',
-      attrToColumn: { [fkAttr]: fkCol, [otherKeyAttr]: otherKeyCol },
-      columnToAttr: { [fkCol]: fkAttr, [otherKeyCol]: otherKeyAttr }
+      attrToColumn: { [fkAttr]: fkCol, [otherKeyAttr]: otherKeyCol, ...(owner ? { [tenantAttribute]: tenantColumn } : {}) },
+      columnToAttr: { [fkCol]: fkAttr, [otherKeyCol]: otherKeyAttr, ...(owner ? { [tenantColumn]: tenantAttribute } : {}) }
     };
   }
 

@@ -52,6 +52,7 @@ export type AttributeMap = Record<string, AttributeDefinition>;
 export type ModelStatic = typeof Model;
 
 export interface ModelOptions {
+  tenant?: boolean | TenantOptions;
   seq?: Seq;
   modelName?: string;
   tableName?: string;
@@ -127,11 +128,12 @@ export interface Logger {
 }
 
 export interface SeqOptions {
+  tenant?: TenantOptions;
   adapter: BaseAdapter;
   models?: ModelStatic[];
   logging?: boolean | Logger;
-  /** Reads the current request context at log emission time. Only txId is logged. */
-  getContext?: () => { txId?: string | null } | null | undefined;
+  /** Reads the request context. tenantId is used without type coercion. */
+  getContext?: () => { txId?: string | null; tenantId?: string | number | bigint | boolean | null } | null | undefined;
   /** Milliseconds after which a SQL log is emitted as warn instead of trace. Defaults to 1000. */
   slowQueryMs?: number;
   /** Milliseconds after which a model-operation log is emitted as warn instead of trace. Defaults to 1000. */
@@ -322,3 +324,9 @@ export class ConfigurationError extends SeqError {}
 export class ModelError extends SeqError {}
 export class ValidationError extends SeqError {}
 export class AdapterError extends SeqError {}
+export class TenantError extends SeqError {}
+
+export interface TenantOptions {
+  /** Persistent model attribute; the adapter resolves its physical column name. */
+  attribute: string;
+}

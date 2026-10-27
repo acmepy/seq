@@ -1,4 +1,6 @@
-import crypto, { createHash } from 'crypto';
+import { AsyncLocalStorage } from 'node:async_hooks';
+import crypto from 'node:crypto';
+import { createHash } from 'crypto';
 import util from 'node:util';
 
 /** Escapes line breaks so each log event occupies one line. */
@@ -1131,6 +1133,129 @@ function _pickAttributes(values, attributes) {
   return Object.fromEntries(attributes.filter(key => key in values).map(key => [key, values[key]]));
 }
 
+class TenantError extends SeqError {
+  constructor(message, options = {}) {
+    super(message, { code: 'SEQ_TENANT_ERROR', ...options });
+    this.name = 'TenantError';
+  }
+}
+
+const instanceTenants = new WeakMap();
+const transactionTenants = new WeakMap();
+
+function tenantConfig(option) {
+  if (!option || typeof option !== 'object' || Array.isArray(option)
+    || typeof option.attribute !== 'string' || !option.attribute.trim()
+    || Object.keys(option).some(key => key !== 'attribute')) {
+    throw new TenantError('tenant requires an explicit attribute', { code: 'SEQ_TENANT_CONFIG' });
+  }
+  return Object.freeze({ attribute: option.attribute });
+}
+
+function modelTenant(model) {
+  const option = model.options?.tenant;
+  if (option === undefined || option === false) return null;
+  const config = option === true ? model.seq?._tenantConfig : tenantConfig(option);
+  const definition = config && model.rawAttributes?.[config.attribute];
+  if (!definition || model._isVirtualAttribute(definition)) {
+    throw new TenantError(`Model "${model.modelName}" requires a persistent tenant attribute`, { code: 'SEQ_TENANT_CONFIG' });
+  }
+  return config;
+}
+
+function tenantIdentity(value) {
+  return value === null || value === undefined ? ['absent'] : [typeof value, value];
+}
+
+class TenantResolver {
+  constructor(seq) {
+    this.seq = seq;
+    this.storage = new AsyncLocalStorage();
+  }
+
+  current() {
+    const scope = this.storage.getStore();
+    return scope ? scope.tenantId : this.seq._getContext?.()?.tenantId;
+  }
+
+  run(execute) {
+    if (this.storage.getStore()) return execute();
+    return this.storage.run({ tenantId: this.seq._getContext?.()?.tenantId }, execute);
+  }
+
+  resolve(model) {
+    const config = modelTenant(model);
+    if (!config) return null;
+    const value = this.current();
+    if (value === null || value === undefined) {
+      throw new TenantError(`Tenant context is required for model "${model.modelName}"`, { code: 'SEQ_TENANT_CONTEXT_MISSING' });
+    }
+    if (!['string', 'number', 'bigint', 'boolean'].includes(typeof value)
+      || (typeof value === 'string' && !value.length)
+      || (typeof value === 'number' && !Number.isFinite(value))
+      || model.rawAttributes[config.attribute].type.validate?.(value).valid === false) {
+      throw new TenantError(`Invalid tenant context for model "${model.modelName}"`, { code: 'SEQ_TENANT_CONTEXT_INVALID' });
+    }
+    return { attribute: config.attribute, value };
+  }
+
+  remember(instance, values) {
+    const config = modelTenant(instance.constructor);
+    if (!config || instance._isNew) return;
+    instanceTenants.set(instance, Object.hasOwn(values, config.attribute) ? values[config.attribute] : this.current());
+  }
+
+  assertInstance(instance) {
+    const tenant = this.resolve(instance.constructor);
+    if (tenant && instanceTenants.has(instance) && instanceTenants.get(instance) !== tenant.value) {
+      throw new TenantError('Instance belongs to another tenant context', { code: 'SEQ_TENANT_MISMATCH' });
+    }
+  }
+
+  bindTransaction(transaction) {
+    transactionTenants.set(transaction, tenantIdentity(this.current()));
+  }
+
+  assertTransaction(transaction) {
+    if (!transaction) return;
+    const previous = transactionTenants.get(transaction);
+    const current = tenantIdentity(this.current());
+    if (previous && (previous[0] !== current[0] || previous[1] !== current[1])) {
+      throw new TenantError('Transaction belongs to another tenant context', { code: 'SEQ_TENANT_TRANSACTION_MISMATCH' });
+    }
+  }
+}
+
+function tenantWhere(model, where) {
+  const tenant = model.seq?._tenants.resolve(model);
+  if (!tenant) return where;
+  const condition = { [tenant.attribute]: tenant.value };
+  return where == null ? condition : { [Op.and]: [where, condition] };
+}
+
+function tenantQuery(model, options = {}) {
+  const result = { ...options, where: tenantWhere(model, options.where) };
+  if (options.include) {
+    result.include = normalizeInclude(options.include).map(include => {
+      if (!include.model) return include;
+      const assoc = model.associations?.[include.as]
+        || Object.values(model.associations || {}).find(item => item.target === include.model);
+      if (assoc?.throughModel) assoc.throughModel.seq?._tenants.resolve(assoc.throughModel);
+      return { ...include, ...tenantQuery(include.model, include) };
+    });
+  }
+  return result;
+}
+
+function tenantValues(model, values) {
+  const tenant = model.seq?._tenants.resolve(model);
+  if (!tenant) return { ...values };
+  if (Object.hasOwn(values, tenant.attribute) && values[tenant.attribute] !== tenant.value) {
+    throw new TenantError('Tenant attribute must match the current context and cannot be changed', { code: 'SEQ_TENANT_MISMATCH' });
+  }
+  return { ...values, [tenant.attribute]: tenant.value };
+}
+
 /**
  * Base Model class. All user-defined models must extend this.
  * Provides static methods for CRUD operations and instance methods for record manipulation.
@@ -1152,6 +1277,8 @@ class Model {
 
     const Ctor = this.constructor;
     const attrs = Ctor.rawAttributes || {};
+    Ctor.seq?._tenants.remember(this, values);
+    const tenantAttribute = Ctor.options?.tenant ? modelTenant(Ctor)?.attribute : null;
 
     if (options._partial) {
       for (const [key, value] of Object.entries(values)) this.dataValues[key] = value;
@@ -1163,6 +1290,8 @@ class Model {
         continue;
       } else if (key in values) {
         this.dataValues[key] = values[key];
+      } else if (key === tenantAttribute) {
+        continue;
       } else if (attrs[key].defaultValue !== undefined) {
         const dv = attrs[key].defaultValue;
         this.dataValues[key] = typeof dv === 'function' ? dv() : dv;
@@ -1446,10 +1575,12 @@ class Model {
 
   static async _invalidateCache(options = {}) {
     if (!this.seq || !this.seq.cache) return;
+    const tenantId = this.seq._tenants.current();
+    const invalidate = () => this.seq.cache.invalidate(this.modelName, modelTenant(this) ? { tenantId } : undefined);
     if (options.transaction && typeof options.transaction.afterCommit === 'function') {
-      options.transaction.afterCommit(() => this.seq.cache.invalidate(this.modelName));
+      options.transaction.afterCommit(invalidate);
     } else {
-      await this.seq.cache.invalidate(this.modelName);
+      await invalidate();
     }
   }
 
@@ -1707,6 +1838,8 @@ class Model {
   static async findOne(options = {}) {
     //this._log('trace', `${this.modelName}.findOne`, options);
     if (options.hooks !== false) await this._runHooks('beforeFind', options);
+    options = tenantQuery(this, options);
+    this.seq?._tenants.assertTransaction(options.transaction);
     
     const useCache = options.cache !== false && !options.transaction && this.seq?.cache;
     if (useCache) {
@@ -1733,6 +1866,8 @@ class Model {
    */
   static async findAll(options = {}) {
     if (options.hooks !== false) await this._runHooks('beforeFind', options);
+    options = tenantQuery(this, options);
+    this.seq?._tenants.assertTransaction(options.transaction);
     if (options.where !== undefined && (typeof options.where !== 'object' || Array.isArray(options.where))) throw new ValidationWhereError();
     if (options.order !== undefined) this._validateOrder(options.order);
     if (options.limit !== undefined && (!Number.isInteger(options.limit) || options.limit < 1))  throw new ValidationLimitError();
@@ -1756,7 +1891,7 @@ class Model {
   static _validateIncludes(includes) {
     for (const include of includes || []) {
       if (!include.model) throw new ModelError('include requires a model', { code: 'SEQ_INCLUDE_INVALID_MODEL' });
-      if (include.attributes !== null) include.model._validateAttributes(include.attributes);
+      if (include.attributes != null) include.model._validateAttributes(include.attributes);
       include.model._validateIncludes(include.include || []);
     }
   }
@@ -1790,6 +1925,8 @@ class Model {
    */
   static async count(options = {}) {
     if (options.hooks !== false) await this._runHooks('beforeCount', options);
+    options = tenantQuery(this, options);
+    this.seq?._tenants.assertTransaction(options.transaction);
     if (options.where !== undefined && (typeof options.where !== 'object' || Array.isArray(options.where))) throw new ValidationWhereError();
     //this._log('trace', `${this.modelName}.count`, options);
     const useCache = options.cache !== false && !options.transaction && this.seq?.cache;
@@ -2011,6 +2148,7 @@ class Model {
    */
   async save(options = {}) {
     const Ctor = this.constructor;
+    Ctor.seq?._tenants.assertInstance(this);
     const isNew = this._isNew;
     if (options.hooks !== false) {
       await Ctor._runHooks('beforeSave', this, options);
@@ -2023,6 +2161,7 @@ class Model {
       const result = await Ctor._adapter.dml.insert(Ctor, values, options);
       Object.assign(this.dataValues, result.dataValues);
       this._isNew = false;
+      Ctor.seq?._tenants.remember(this, this.dataValues);
       this._originalPrimaryKey = keyObject(primaryAttributes(Ctor), valuesFor(this.dataValues, primaryAttributes(Ctor)));
       this._changed = {};
       if (options.hooks !== false) {
@@ -2054,6 +2193,7 @@ class Model {
    * @returns {Promise<this>}
    */
   async update(values, options = {}) {
+    this.constructor.seq?._tenants.assertInstance(this);
     for (const [key, value] of Object.entries(values)) this.setDataValue(key, value);
     this._isNew = false;
     return this.save(options);
@@ -2066,6 +2206,7 @@ class Model {
    */
   async destroy(options = {}) {
     const Ctor = this.constructor;
+    Ctor.seq?._tenants.assertInstance(this);
     if (options.hooks !== false) await Ctor._runHooks('beforeDestroy', this, options);
     const where = this._instancePrimaryKeyWhere();
     await Ctor.destroy({ ...options, where, hooks: false });
@@ -2092,7 +2233,11 @@ for (const operation of measuredStaticOperations) {
     configurable: true,
     writable: true,
     value: function (...args) {
-      return this._measureOperation(operation, () => original.apply(this, args));
+      const run = () => this._measureOperation(operation, () => {
+        this.seq?._tenants.resolve(this);
+        return original.apply(this, args);
+      });
+      return this.seq?._tenants ? this.seq._tenants.run(run) : run();
     }
   });
 }
@@ -2105,7 +2250,8 @@ for (const operation of measuredInstanceOperations) {
     configurable: true,
     writable: true,
     value: function (...args) {
-      return this.constructor._measureOperation(`instance.${operation}`, () => original.apply(this, args));
+      const run = () => this.constructor._measureOperation(`instance.${operation}`, () => original.apply(this, args));
+      return this.constructor.seq?._tenants ? this.constructor.seq._tenants.run(run) : run();
     }
   });
 }
@@ -2220,20 +2366,24 @@ class MapCacheAdapter extends CacheAdapter {
  * @returns {string}
  */
 function stableStringify(obj) {
-  if (obj === null || typeof obj !== 'object') return JSON.stringify(obj);
-  if (Array.isArray(obj)) return '[' + obj.map(stableStringify).join(',') + ']';
-  const keys = Object.keys(obj).sort();
-  let result = '{';
-  for (let i = 0; i < keys.length; i++) {
-    const key = keys[i];
-    if (obj[key] !== undefined) {
-      result += JSON.stringify(key) + ':' + stableStringify(obj[key]);
-      if (i < keys.length - 1) result += ',';
-    }
+  return JSON.stringify(encode(obj));
+}
+
+function encode(value) {
+  if (value === null) return ['null'];
+  if (value instanceof Date) return ['date', value.toISOString()];
+  if (Array.isArray(value)) return ['array', value.map(encode)];
+  if (typeof value === 'function') return ['model', value.modelName || value.name, value._resolvedTableName || value.tableName];
+  if (typeof value === 'object') {
+    const entries = Reflect.ownKeys(value).filter(key => value[key] !== undefined).map(key => [
+      typeof key === 'symbol' ? ['symbol', Symbol.keyFor(key) || key.description] : ['string', key], encode(value[key])
+    ]);
+    entries.sort((a, b) => JSON.stringify(a[0]).localeCompare(JSON.stringify(b[0])));
+    return ['object', entries];
   }
-  if (result.endsWith(',')) result = result.slice(0, -1);
-  result += '}';
-  return result;
+  if (typeof value === 'bigint') return ['bigint', value.toString()];
+  if (typeof value === 'symbol') return ['symbol', Symbol.keyFor(value) || value.description];
+  return [typeof value, value];
 }
 
 /**
@@ -2243,18 +2393,18 @@ function stableStringify(obj) {
  * @param {object} options
  * @returns {string}
  */
-function generateCacheKey(modelName, operation, options = {}) {
+function generateCacheKey(modelName, operation, options = {}, tenantId) {
   // Filter out options that don't affect the SQL result
   const { cache, transaction, hooks, _isNew, _partial, ...cacheableOptions } = options;
-  const serializedOptions = stableStringify(cacheableOptions);
-  //const hash = crypto.createHash('sha256').update(serializedOptions).digest('hex');
-  const hash = crypto.createHash('md5').update(serializedOptions).digest('hex');
+  const serializedOptions = stableStringify({ tenant: tenantIdentity(tenantId), options: cacheableOptions });
+  const hash = crypto.createHash('sha256').update(serializedOptions).digest('hex');
   return `seq:${modelName}:${operation}:${hash}`;
 }
 
 class Cache {
   constructor(options = {}) {
     this.options = options;
+    this._namespaces = new Map();
     this.globalTtl = options.ttl || 60 * 1000;
 
     if (options.adapter) {
@@ -2308,10 +2458,10 @@ class Cache {
    */
   async get(modelName, operation, queryOptions) {
     if (!this.isEnabled(modelName)) return { hit: false };
-    const key = generateCacheKey(modelName, operation, queryOptions);
+    const key = generateCacheKey(modelName, operation, queryOptions, this.seq?._tenants.current());
     const result = await this.adapter.get(key);
     this._log('trace', `Cache ${result.hit?'hit':'miss'}: ${key}, model: ${modelName}`);
-    return result;
+    return result.hit ? { ...result, value: copyCachedValue(result.value) } : result;
   }
 
   /**
@@ -2324,9 +2474,29 @@ class Cache {
    */
   async set(modelName, operation, queryOptions, value) {
     if (!this.isEnabled(modelName)) return;
-    const key = generateCacheKey(modelName, operation, queryOptions);
+    const tenantId = this.seq?._tenants.current();
+    const key = generateCacheKey(modelName, operation, queryOptions, tenantId);
     const ttl = this._resolveTtl(modelName);
-    await this.adapter.set(key, value, modelName, ttl);
+    const partition = stableStringify(tenantIdentity(tenantId));
+    const root = this.seq?.getModel(modelName);
+    const dependencies = new Set([modelName]);
+    if (root) dependencies.add(`@table:${root._resolvedTableName || root.tableName}`);
+    const collect = (includes, model) => {
+      for (const include of includes || []) {
+        if (include.model) dependencies.add(include.model.modelName);
+        if (include.model) dependencies.add(`@table:${include.model._resolvedTableName || include.model.tableName}`);
+        const association = model && resolveAssociation(model, include);
+        if (association?.throughModel) dependencies.add(association.throughModel.modelName);
+        if (association?.type === 'belongsToMany') dependencies.add(`@table:${this.seq.adapter.getAssociationThroughTable(association)}`);
+        collect(include.include, include.model);
+      }
+    };
+    collect(queryOptions.include, this.seq?.getModel(modelName));
+    const namespace = stableStringify([modelName, partition, [...dependencies].sort()]);
+    const entry = this._namespaces.get(namespace) || { partition, dependencies, keys: new Set() };
+    entry.keys.add(key);
+    this._namespaces.set(namespace, entry);
+    await this.adapter.set(key, copyCachedValue(value), modelName, ttl);
   }
 
   /**
@@ -2334,8 +2504,34 @@ class Cache {
    * @param {string} modelName
    * @returns {Promise<void>}
    */
-  async invalidate(modelName) {
-    await this.adapter.invalidate(modelName);
+  async invalidate(modelName, scope) {
+    if (!scope) await this.adapter.invalidate(modelName);
+    const partition = scope ? stableStringify(tenantIdentity(scope.tenantId)) : null;
+    const model = this.seq?.getModel(modelName);
+    const affected = new Map([[modelName, partition]]);
+    const pending = model ? [{ table: model._resolvedTableName || model.tableName, partition }] : [];
+    const visited = new Set();
+    while (pending.length) {
+      const current = pending.pop();
+      const identity = stableStringify(current);
+      if (visited.has(identity)) continue;
+      visited.add(identity);
+      const dependency = `@table:${current.table}`;
+      if (!affected.has(dependency) || affected.get(dependency) !== null) affected.set(dependency, current.partition);
+      for (const [table, schema] of this.seq.adapter.schemas) {
+        if (!(schema.foreignKeys || []).some(fk => fk.references.table === current.table
+          && [fk.onDelete, fk.onUpdate].some(action => action === 'CASCADE' || action === 'SET NULL'))) continue;
+        const child = this.seq.models.find(item => (item._resolvedTableName || item.tableName) === table);
+        pending.push({ table, partition: child?.options.tenant || schema.tenantAttribute ? current.partition : null });
+      }
+    }
+    for (const [namespace, entry] of this._namespaces) {
+      if ([...entry.dependencies].some(dependency => affected.has(dependency)
+        && (affected.get(dependency) === null || affected.get(dependency) === entry.partition))) {
+        for (const key of entry.keys) await this.adapter.delete(key);
+        this._namespaces.delete(namespace);
+      }
+    }
   }
 
   /**
@@ -2344,7 +2540,16 @@ class Cache {
    */
   async clear() {
     await this.adapter.clear();
+    this._namespaces.clear();
   }
+}
+
+function copyCachedValue(value) {
+  if (value instanceof Date) return new Date(value.getTime());
+  if (Array.isArray(value)) return value.map(copyCachedValue);
+  if (value instanceof Model) return new value.constructor(copyCachedValue(value.dataValues), { _isNew: false, _partial: true });
+  if (value && typeof value === 'object') return Object.fromEntries(Object.entries(value).map(([key, child]) => [key, copyCachedValue(child)]));
+  return value;
 }
 
 /**
@@ -2362,6 +2567,8 @@ class Seq {
       throw new ConfigurationError('getContext must be a function', { code: 'SEQ_INVALID_GET_CONTEXT' });
     }
     this._getContext = options.getContext;
+    this._tenantConfig = options.tenant === undefined ? null : tenantConfig(options.tenant);
+    this._tenants = new TenantResolver(this);
     this._logging = this._normalizeLogging(options.logging);
     this._slowQueryMs = this._normalizeSlowThreshold(options.slowQueryMs, 'slowQueryMs');
     this._slowOperationMs = this._normalizeSlowThreshold(options.slowOperationMs, 'slowOperationMs');
@@ -2461,6 +2668,7 @@ class Seq {
    * @param {import('../../types/index.d.ts').ModelStatic} modelClass
    */
   registerModel(modelClass) {
+    modelTenant(modelClass);
     if (!modelClass._resolvedTableName) modelClass._resolvedTableName = this._resolveTableName(modelClass);
     this._registry.register(modelClass);
   }
@@ -2669,6 +2877,10 @@ class Seq {
    * @returns {Promise<TResult>}
    */
   async transaction(callback) {
+    return this._tenants.run(() => this._transaction(callback));
+  }
+
+  async _transaction(callback) {
     const transaction = await this._adapter.tcl.begin();
     if (!transaction.afterCommitCallbacks) {
       transaction.afterCommitCallbacks = [];
@@ -3169,6 +3381,13 @@ class BaseAdapter {
     };
 
     const uniqueConstraints = [{ columns: [fkCol, otherKeyCol], constraintName: this.junctionUniqueConstraintName(through, fkCol, otherKeyCol) }];
+    const owner = modelTenant(source) ? source : modelTenant(target) ? target : null;
+    const tenantAttribute = owner ? modelTenant(owner).attribute : null;
+    const tenantColumn = owner ? this.resolveColumnName(owner.rawAttributes[tenantAttribute], tenantAttribute) : null;
+    if (owner) {
+      columns[tenantAttribute] = { type: owner.rawAttributes[tenantAttribute].type, field: tenantColumn, allowNull: false };
+      uniqueConstraints[0].columns.unshift(tenantColumn);
+    }
     const foreignKeys = [
       {
         attributeName: fkAttr,
@@ -3191,6 +3410,7 @@ class BaseAdapter {
     return {
       modelName: null,
       tableName: through,
+      tenantAttribute,
       columns,
       uniqueConstraints,
       indexes: [],
@@ -3202,8 +3422,8 @@ class BaseAdapter {
       timestamps: false,
       createdAt: 'createdAt',
       updatedAt: 'updatedAt',
-      attrToColumn: { [fkAttr]: fkCol, [otherKeyAttr]: otherKeyCol },
-      columnToAttr: { [fkCol]: fkAttr, [otherKeyCol]: otherKeyAttr }
+      attrToColumn: { [fkAttr]: fkCol, [otherKeyAttr]: otherKeyCol, ...(owner ? { [tenantAttribute]: tenantColumn } : {}) },
+      columnToAttr: { [fkCol]: fkAttr, [otherKeyCol]: otherKeyAttr, ...(owner ? { [tenantColumn]: tenantAttribute } : {}) }
     };
   }
 
@@ -3770,6 +3990,114 @@ class MapDDL extends DDLAbstract {
   }
 }
 
+/** Apply the same boundary to inherited and dialect-specific DML entry points. */
+function installTenantDML(dml) {
+  const mutations = new Set(['insert', 'bulkInsert', 'update', 'delete', 'upsert', 'truncate']);
+  for (const operation of ['selectAll', 'selectOne', 'count', ...mutations]) {
+    const original = dml[operation];
+    if (typeof original !== 'function') continue;
+    dml[operation] = function (model, ...args) {
+      const seq = this._adapter._seq;
+      if (!seq) {
+        if (model.options?.tenant) return Promise.reject(new TenantError('Tenant context requires an owning Seq instance', { code: 'SEQ_TENANT_CONTEXT_MISSING' }));
+        return original.call(this, model, ...args);
+      }
+      return seq._tenants.run(async () => {
+        const hasValues = ['insert', 'bulkInsert', 'update', 'upsert'].includes(operation);
+        const options = tenantQuery(model, args[hasValues ? 1 : 0] || {});
+        seq._tenants.assertTransaction(options.transaction);
+        this._assertTransaction(options);
+        if (operation === 'truncate' && modelTenant(model)) {
+          throw new TenantError('truncate is not allowed on tenant models; use destroy instead', { code: 'SEQ_TENANT_TRUNCATE' });
+        }
+        if (hasValues) {
+          const input = operation === 'bulkInsert' ? args[0] : [args[0] || {}];
+          const records = input.map(record => tenantValues(model, record));
+          // Validate the entire batch before executing the first insert.
+          for (const record of records) {
+            await validateTenantReferences(this, model, record, options, operation === 'update');
+          }
+          args = [operation === 'bulkInsert' ? records : records[0], options];
+        } else args = [options];
+        if (operation === 'count' && options.include?.some(include => include.required)) {
+          return (await this.selectAll(model, { ...options, order: undefined, limit: undefined, offset: undefined,
+            attributes: primaryAttributes(model).length ? primaryAttributes(model) : undefined })).length;
+        }
+        const result = await original.call(this, model, ...args);
+        if (mutations.has(operation) && seq.cache) await model._invalidateCache(options);
+        return result;
+      });
+    };
+  }
+  const junctionRows = dml.selectAssociationJunctionRows;
+  if (junctionRows) dml.selectAssociationJunctionRows = function (assoc, ids, options = {}) {
+    const seq = this._adapter._seq;
+    if (!seq) return junctionRows.call(this, assoc, ids, options);
+    return seq._tenants.run(() => {
+      seq._tenants.resolve(assoc.source);
+      seq._tenants.resolve(assoc.target);
+      if (assoc.throughModel) seq._tenants.resolve(assoc.throughModel);
+      seq._tenants.assertTransaction(options.transaction);
+      return junctionRows.call(this, assoc, ids, options);
+    });
+  };
+}
+
+async function validateTenantReferences(dml, model, record, options, update) {
+  const seq = model.seq;
+  const schema = dml._schema(model).schema;
+  for (const fk of schema.foreignKeys || []) {
+    const parent = seq.getModel(fk.references.model);
+    if (!parent || !modelTenant(parent)) continue;
+    const fields = fk.attributeNames || [fk.attributeName || schema.columnToAttr[fk.columnName]];
+    const keys = fk.references.keys || [fk.references.key];
+    if (!update) for (const field of fields) {
+      const defaultValue = model.rawAttributes[field]?.defaultValue;
+      if (record[field] === undefined && defaultValue !== undefined) {
+        record[field] = typeof defaultValue === 'function' ? defaultValue() : defaultValue;
+      }
+    }
+    if (update && !fields.some(field => Object.hasOwn(record, field))) continue;
+    let rows = [record];
+    if (update && fields.some(field => !Object.hasOwn(record, field))) {
+      const previous = await dml.selectAll(model, { where: options.where, transaction: options.transaction });
+      rows = previous.map(row => ({ ...row.dataValues, ...record }));
+    }
+    for (const row of rows) {
+      const values = fields.map(field => row[field]);
+      if (values.some(value => value === null || value === undefined)) continue;
+      const where = Object.fromEntries(keys.map((key, index) => [key, values[index]]));
+      const target = await dml.selectOne(parent, { where, transaction: options.transaction });
+      if (!target) {
+        throw new TenantError('Referenced record is not accessible in the current tenant', { code: 'SEQ_TENANT_REFERENCE' });
+      }
+    }
+  }
+}
+
+function installTenantTransactions(tcl) {
+  for (const operation of ['begin', 'commit', 'rollback']) {
+    const original = tcl[operation];
+    tcl[operation] = function (...args) {
+      const seq = this._adapter._seq;
+      if (!seq) return original.apply(this, args);
+      return seq._tenants.run(async () => {
+        if (operation !== 'begin') seq._tenants.assertTransaction(args[0]);
+        const result = await original.apply(this, args);
+        if (operation === 'begin') {
+          seq._tenants.bindTransaction(result);
+          result.afterCommitCallbacks = [];
+          result.afterCommit = callback => result.afterCommitCallbacks.push(callback);
+        } else {
+          const callbacks = args[0].afterCommitCallbacks?.splice(0) || [];
+          if (operation === 'commit') for (const callback of callbacks) await callback();
+        }
+        return result;
+      });
+    };
+  }
+}
+
 /**
  * Resolves a where clause value into { op, value }.
  * Scalar values → Op.eq.
@@ -3796,6 +4124,11 @@ const requiredPageIncludes = Symbol('requiredPageIncludes');
  * and adapter-specific methods (insert, truncate).
  */
 class DMLAbstract extends BaseAbstract {
+  constructor(adapter) {
+    super(adapter);
+    installTenantDML(this);
+  }
+
   // ---------------------------------------------------------------------------
   // Shared helpers — reusable by all adapter subclasses
   // ---------------------------------------------------------------------------
@@ -3821,6 +4154,15 @@ class DMLAbstract extends BaseAbstract {
       throw new AdapterError(`Table "${tableName}" does not exist`, { code: 'SEQ_ADAPTER_TABLE_NOT_FOUND' });
     }
     return { tableName, schema, alias: model.alias || null };
+  }
+
+  _junctionTenantWhere(assoc) {
+    if (assoc.throughModel) return tenantWhere(assoc.throughModel);
+    const schema = this._adapter.schemas.get(this._adapter.getAssociationThroughTable(assoc));
+    if (!schema?.tenantAttribute) return null;
+    const resolver = this._adapter._seq._tenants;
+    const tenant = resolver.resolve(assoc.source) || resolver.resolve(assoc.target);
+    return { [schema.tenantAttribute]: tenant.value };
   }
 
   /**
@@ -3870,6 +4212,9 @@ class DMLAbstract extends BaseAbstract {
         const target = primaryAttributes(inc.model)[0] || 'id';
         from += ` JOIN ${this._tableWithAlias(through, joinAlias)} ON ${this._colRef(junction.attrToColumn[assoc.otherKey] || assoc.otherKey, joinAlias)} = ${this._colRef(schema.attrToColumn[target] || target, alias)}`;
         links = [`${this._colRef(parentSchema.attrToColumn[source] || source, parentAlias)} = ${this._colRef(junction.attrToColumn[assoc.foreignKey] || assoc.foreignKey, joinAlias)}`];
+        const tenant = this._buildConditions(this._junctionTenantWhere(assoc) || {}, junction, joinAlias);
+        links.push(...tenant.conditions);
+        params.push(...tenant.params);
       } else {
         links = assoc.sourceKeys.map((key, index) => `${this._colRef(parentSchema.attrToColumn[key] || key, parentAlias)} = ${this._colRef(schema.attrToColumn[assoc.targetKeys[index]] || assoc.targetKeys[index], alias)}`);
       }
@@ -4196,6 +4541,11 @@ class DMLAbstract extends BaseAbstract {
         const targetPKCol = targetSchema.attrToColumn[targetPKAttr] || targetPKAttr;
 
         sql += ` ${joinType} ${this._tableWithAlias(throughTable, junctionAlias)} ON ${this._colRef(pkCol, parentAlias)} = ${this._colRef(junctionFKCol, junctionAlias)}`;
+        const junctionTenant = this._buildConditions(this._junctionTenantWhere(assoc) || {}, junctionSchema, junctionAlias);
+        if (junctionTenant.conditions.length) {
+          sql += ` AND ${junctionTenant.conditions.join(' AND ')}`;
+          params.push(...junctionTenant.params);
+        }
 
         let onClause = `${this._colRef(junctionOtherKeyCol, junctionAlias)} = ${this._colRef(targetPKCol, joinAlias)}`;
         if (inc.where) {
@@ -4290,8 +4640,9 @@ class DMLAbstract extends BaseAbstract {
     const otherKeyCol = junctionSchema.attrToColumn[otherKeyAttr] || otherKeyAttr;
     const rows = await Promise.all(chunks(sourceIds).map(ids => {
       const placeholders = ids.map(() => '?').join(', ');
-      const sql = `SELECT ${this._q(fkCol)} AS ${this._q(fkAttr)}, ${this._q(otherKeyCol)} AS ${this._q(otherKeyAttr)} FROM ${this._q(throughTable)} WHERE ${this._q(fkCol)} IN (${placeholders})`;
-      return this._executeQueryAll(sql, ids.map(id => this._serializeValue(id)));
+      const tenant = this._buildConditions(this._junctionTenantWhere(assoc) || {}, junctionSchema);
+      const sql = `SELECT ${this._q(fkCol)} AS ${this._q(fkAttr)}, ${this._q(otherKeyCol)} AS ${this._q(otherKeyAttr)} FROM ${this._q(throughTable)} WHERE ${this._q(fkCol)} IN (${placeholders})${tenant.conditions.length ? ` AND ${tenant.conditions.join(' AND ')}` : ''}`;
+      return this._executeQueryAll(sql, [...ids.map(id => this._serializeValue(id)), ...tenant.params]);
     }));
     return rows.flat();
   }
@@ -5108,10 +5459,12 @@ class MapDML extends DMLAbstract {
     const fkCol = schema.attrToColumn[fkAttr] || fkAttr;
     const otherKeyCol = schema.attrToColumn[otherKeyAttr] || otherKeyAttr;
     const sourceSet = new Set(sourceIds);
+    const tenantWhere = this._translateWhere(this._junctionTenantWhere(assoc) || {}, schema);
     const rows = [];
 
     for (const [, record] of table) {
       if (!sourceSet.has(record[fkCol])) continue;
+      if (!this._matchWhere(record, tenantWhere)) continue;
       rows.push({
         [fkAttr]: record[fkCol],
         [otherKeyAttr]: record[otherKeyCol]
@@ -5429,6 +5782,11 @@ class MapDCL extends DCLAbstract {
  * Adapter-specific subclasses must override all public methods.
  */
 class TCLAbstract extends BaseAbstract {
+  constructor(adapter) {
+    super(adapter);
+    installTenantTransactions(this);
+  }
+
   // ---------------------------------------------------------------------------
   // Abstract methods — must be implemented by adapter subclasses
   // ---------------------------------------------------------------------------
@@ -7555,5 +7913,5 @@ class Oracle11Adapter extends BaseAdapter {
 class Oracle12Adapter extends Oracle11Adapter {
 }
 
-export { AdapterError, Association, BaseAdapter, ConfigurationError, DataTypes, ErrorAbstract, MapAdapter, Model, ModelError, ModelRegistry, MySQLAdapter, MySQLError, Op, Oracle11Adapter, Oracle11Error, Oracle12Adapter, SQLiteAdapter, SQLiteError, Seq, SeqError, ValidationError };
+export { AdapterError, Association, BaseAdapter, ConfigurationError, DataTypes, ErrorAbstract, MapAdapter, Model, ModelError, ModelRegistry, MySQLAdapter, MySQLError, Op, Oracle11Adapter, Oracle11Error, Oracle12Adapter, SQLiteAdapter, SQLiteError, Seq, SeqError, TenantError, ValidationError };
 //# sourceMappingURL=seq.js.map
