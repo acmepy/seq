@@ -225,7 +225,10 @@ describe('MySQL Adapter', () => {
       assert.equal(errors.length, 1);
       assert.equal(errors[0][1], 'INSERT INTO `sessions` () VALUES ()');
       assert.match(errors[0][3], /"type":"sql"/);
-      assert.match(errors[0][3], /Column token cannot be null/);
+      const metadata = JSON.parse(errors[0][3]);
+      assert.equal(metadata.error.message, "Column 'token' cannot be null");
+      assert.equal(metadata.error.code, 'CONFLICT');
+      assert.match(metadata.error.stack, /MySQLError/);
     });
 
     it('is exported from the public entrypoint', async () => {
@@ -236,3 +239,25 @@ describe('MySQL Adapter', () => {
     });
   });
 });
+
+
+for (const [version, type] of [
+  ['5.5.68-MariaDB', 'LONGTEXT'], ['10.2.6-MariaDB', 'LONGTEXT'],
+  ['10.2.7-MariaDB', 'JSON'], ['5.5.5-10.11.2-MariaDB', 'JSON'],
+  ['5.7.7', 'LONGTEXT'], ['5.7.8', 'JSON'], ['8.0.36', 'JSON']
+]) {
+  it('maps JSON column SQL for ' + version, async t => {
+    const adapter = new MySQLAdapter();
+    let versionReads = 0;
+    t.mock.method(adapter.dml, '_executeGet', async () => { versionReads++; return { version }; });
+    const statements = [];
+    t.mock.method(adapter.ddl, '_execute', async sql => statements.push(sql));
+    const columns = { json: { type: DataTypes.JSON }, object: { type: DataTypes.OBJECT }, array: { type: DataTypes.ARRAY(DataTypes.INTEGER) } };
+    await adapter.ddl.createTableStructure({ tableName: 'json_types', columns });
+    adapter.schemas.set('json_types', { columns: {}, attrToColumn: {}, columnToAttr: {} });
+    await adapter.ddl.addColumns('json_types', { added: { type: DataTypes.JSON, allowNull: true } });
+    assert.equal(versionReads, 1);
+    assert.equal(statements[0].match(new RegExp(' ' + type, 'g')).length, 3);
+    assert.ok(statements[1].endsWith(' ' + type));
+  });
+}

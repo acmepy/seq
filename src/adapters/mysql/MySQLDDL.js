@@ -23,7 +23,21 @@ export class MySQLDDL extends DDLAbstract {
     });
   }
 
+  async _prepareColumnTypes(columns) {
+    const jsonTypes = new Set(['ArrayType', 'ObjectType', 'JSONType']);
+    if (this._adapter._supportsJson !== undefined || !Object.values(columns).some(column => jsonTypes.has(column.type?.constructor?.name))) return;
+    const row = await this._adapter.dml._executeGet('SELECT VERSION() AS version', []);
+    const version = String(row.version);
+    const maria = version.match(/(\d+)\.(\d+)\.(\d+)-MariaDB/i);
+    const match = maria || version.match(/^(\d+)\.(\d+)\.(\d+)/);
+    const [major, minor, patch] = match ? match.slice(1, 4).map(Number) : [];
+    this._adapter._supportsJson = maria
+      ? major > 10 || major === 10 && (minor > 2 || minor === 2 && patch >= 7)
+      : major > 5 || major === 5 && (minor > 7 || minor === 7 && patch >= 8);
+  }
+
   async createTableStructure(def) {
+    await this._prepareColumnTypes(def.columns);
     const colDefs = [];
     const primaryKeys = [];
     const timestampColumns = Object.entries(def.columns).filter(([, column]) => column.defaultCurrentTimestamp);
@@ -186,6 +200,7 @@ export class MySQLDDL extends DDLAbstract {
   }
 
   async addColumns(tableName, missingColumns) {
+    await this._prepareColumnTypes(missingColumns);
     const schema = this._adapter.schemas.get(tableName);
     for (const [name, colDef] of Object.entries(missingColumns)) {
       const colType = this._adapter.mapDataType(colDef.type);

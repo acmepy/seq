@@ -895,6 +895,10 @@ const adapter = new MapAdapter();
 
 El adapter Map guarda datos en memoria usando `Map`. Es util para pruebas, prototipos y para validar el contrato comun de adapters.
 
+### MySQLAdapter: almacenamiento JSON
+
+Al crear o agregar columnas `JSON`, `OBJECT` o `ARRAY`, el adaptador consulta la version del servidor y utiliza `JSON` si esta disponible, o `LONGTEXT` en versiones anteriores. La serializacion y lectura conservan los objetos y arrays del modelo. El almacenamiento `LONGTEXT` no agrega validacion JSON del motor ni funciones JSON a servidores que no las soportan.
+
 ### Oracle11Adapter y Oracle12Adapter
 
 ```js

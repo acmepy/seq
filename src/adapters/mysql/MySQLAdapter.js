@@ -152,7 +152,7 @@ export class MySQLAdapter extends BaseAdapter {
       case 'DateType': return 'DATETIME(3)';
       case 'ArrayType':
       case 'ObjectType':
-      case 'JSONType': return 'JSON';
+      case 'JSONType': return this._supportsJson === false ? 'LONGTEXT' : 'JSON';
       default: return 'TEXT';
     }
   }
