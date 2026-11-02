@@ -317,6 +317,21 @@ describe('Logging levels', () => {
       assert.ok(Number.isFinite(JSON.parse(operationLog[2]).operationDurationMs));
 
       await assert.rejects(() => TimedUser.create({ name: 'Ana' }));
+      const validation = Object.assign(new Error('Se ha producido 1 error'), {
+        name: 'ValidationError', code: 'VALIDATION_ERROR',
+        errors: { codMoneda: 'codMoneda es requerido' },
+        details: { field: 'codMoneda', rule: 'required' }
+      });
+      TimedUser.addHook('beforeCreate', () => { throw validation; });
+      await assert.rejects(() => TimedUser.create({ name: 'Rejected' }), error => error === validation);
+      const loggedValidation = errors.map(args => {
+        try { return JSON.parse(args[2])?.error; } catch { return null; }
+      }).find(error => error?.code === 'VALIDATION_ERROR');
+      assert.ok(loggedValidation, 'expected validation failure in the model-operation log');
+      assert.deepEqual(loggedValidation.errors, validation.errors);
+      assert.deepEqual(loggedValidation.details, validation.details);
+      assert.equal(loggedValidation.stack, validation.stack);
+
       assert.ok(errors.some(args => args[1]?.startsWith?.('INSERT INTO') && JSON.parse(args[3]).type === 'sql' && JSON.parse(args[3]).error));
       assert.ok(errors.some(args => args[1] === 'TimedUser.create' && JSON.parse(args[2]).type === 'model-operation' && JSON.parse(args[2]).error));
       for (const args of errors) {

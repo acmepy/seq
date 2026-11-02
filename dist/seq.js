@@ -1538,7 +1538,7 @@ class Model {
         operation,
         model: this.modelName,
         operationDurationMs,
-        error: { name: error.name, message: error.message, code: error.code, stack: error.stack }
+        error: { name: error.name, message: error.message, code: error.code, errors: error.errors, details: error.details, stack: error.stack }
       });
       throw error;
     }
@@ -3051,6 +3051,7 @@ function serializeError(error) {
     message: error?.message || String(error),
     code: error?.code ?? null,
     details: error?.details ?? null,
+    errors: error?.errors ?? null,
     stack: error?.stack
   };
 }
@@ -3530,7 +3531,7 @@ class BaseAdapter {
       this._log(level, loggedSql, params, {
         type: 'sql',
         sqlDurationMs,
-        error: error ? { name: error.name, message: error.message, code: error.code, stack: error.stack } : undefined
+        error: error ? { name: error.name, message: error.message, code: error.code, errors: error.errors, details: error.details, stack: error.stack } : undefined
       });
     };
     const success = result => {

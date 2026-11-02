@@ -401,7 +401,7 @@ export class BaseAdapter {
       this._log(level, loggedSql, params, {
         type: 'sql',
         sqlDurationMs,
-        error: error ? { name: error.name, message: error.message, code: error.code, stack: error.stack } : undefined
+        error: error ? { name: error.name, message: error.message, code: error.code, errors: error.errors, details: error.details, stack: error.stack } : undefined
       });
     };
     const success = result => {

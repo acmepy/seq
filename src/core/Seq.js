@@ -504,6 +504,7 @@ function serializeError(error) {
     message: error?.message || String(error),
     code: error?.code ?? null,
     details: error?.details ?? null,
+    errors: error?.errors ?? null,
     stack: error?.stack
   };
 }
