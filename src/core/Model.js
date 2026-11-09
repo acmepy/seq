@@ -276,7 +276,7 @@ export class Model {
       const result = await execute();
       const operationDurationMs = performance.now() - startedAt;
       const level = this.seq?._isSlowOperation(operationDurationMs) ? 'warn' : 'trace';
-      this._log(level, `${this.modelName}.${operation}`, {
+      this._log(level, {
         type: 'model-operation',
         operation,
         model: this.modelName,
@@ -285,7 +285,7 @@ export class Model {
       return result;
     } catch (error) {
       const operationDurationMs = performance.now() - startedAt;
-      this._log('error', `${this.modelName}.${operation}`, {
+      this._log('error', {
         type: 'model-operation',
         operation,
         model: this.modelName,

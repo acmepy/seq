@@ -120,11 +120,28 @@ export interface BuildOptions {
   _partial?: boolean;
 }
 
+/** Structured event delivered to custom log handlers. Timestamp and level belong to the logger. */
+export interface LogEvent {
+  type?: string;
+  message?: string;
+  sql?: string;
+  params?: unknown[];
+  sqlDurationMs?: number;
+  operationDurationMs?: number;
+  model?: string;
+  operation?: string;
+  error?: { name?: string; message?: string; code?: string | null; stack?: string; [field: string]: unknown };
+  [field: string]: unknown;
+}
+
+/** Receives [SEQ], an optional request txId, and one sanitized event object. */
+export type LogHandler = (origin: string, ...payload: [event: LogEvent] | [txId: string, event: LogEvent]) => void;
+
 export interface Logger {
-  info?: Function | false;
-  trace?: Function | false;
-  warn?: Function | false;
-  error?: Function | false;
+  info?: LogHandler | false;
+  trace?: LogHandler | false;
+  warn?: LogHandler | false;
+  error?: LogHandler | false;
 }
 
 export interface SeqOptions {

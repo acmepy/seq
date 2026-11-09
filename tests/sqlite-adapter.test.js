@@ -142,7 +142,7 @@ describe('SQLite Adapter', () => {
       assert.equal(loadCalls, 1);
       assert.equal(errors.length, 1);
       assert.equal(errors[0][0], '[SEQ]');
-      assert.match(errors[0][1], /better-sqlite3/);
+      assert.match(errors[0][1]?.message || errors[0][1], /better-sqlite3/);
     });
 
     it('exposes dependency validation without opening a connection', async () => {
@@ -170,7 +170,7 @@ describe('SQLite Adapter', () => {
         assert.equal(result, true);
         assert.ok(sqlite._db);
         assert.deepEqual(sqlite._db.prepare('SELECT 1 AS ok').get(), { ok: 1 });
-        assert.ok(trace.some(args => String(args[1]).includes('SELECT 1 AS ok')));
+        assert.ok(trace.some(args => String(args[1]?.sql).includes('SELECT 1 AS ok')));
       } finally {
         await authSeq.close();
       }
@@ -424,8 +424,8 @@ describe('SQLite Adapter', () => {
 
       assert.equal(errors.length, 1);
       assert.equal(errors[0][0], '[SEQ]');
-      assert.equal(errors[0][1], 'INSERT INTO users (name) VALUES (?)');
-      assert.match(errors[0][3], /NOT NULL constraint failed/);
+      assert.equal(errors[0][1].sql, 'INSERT INTO users (name) VALUES (?)');
+      assert.match(errors[0][1].error.message, /NOT NULL constraint failed/);
     });
   });
 
@@ -491,7 +491,7 @@ describe('SQLite Adapter', () => {
         await sqlite.ddl.dropTable('temps');
 
         assert.equal(await sqlite.ddl.hasTable('temps'), false);
-        const sql = trace.map(args => args[1]?.sql || args[1]).filter(Boolean);
+        const sql = trace.map(args => args[1]?.sql).filter(Boolean);
         const deleteIndex = sql.findIndex(entry => entry.includes('DELETE FROM') && entry.includes('temps'));
         const dropIndex = sql.findIndex(entry => entry.includes('DROP TABLE IF EXISTS') && entry.includes('temps'));
         assert.ok(deleteIndex >= 0, 'expected DELETE before DROP');

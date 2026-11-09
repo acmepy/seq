@@ -398,7 +398,8 @@ export class BaseAdapter {
     const startedAt = performance.now();
     const finish = (level, error) => {
       const sqlDurationMs = performance.now() - startedAt;
-      this._log(level, loggedSql, params, {
+      this._log(level, {
+        sql: loggedSql, params,
         type: 'sql',
         sqlDurationMs,
         error: error ? { name: error.name, message: error.message, code: error.code, errors: error.errors, details: error.details, stack: error.stack } : undefined

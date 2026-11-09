@@ -63,7 +63,7 @@ export class Cache {
     if (!this.isEnabled(modelName)) return { hit: false };
     const key = generateCacheKey(modelName, operation, queryOptions, this.seq?._tenants.current());
     const result = await this.adapter.get(key);
-    this._log('trace', `Cache ${result.hit?'hit':'miss'}: ${key}, model: ${modelName}`);
+    this._log('trace', { type: 'cache', hit: result.hit, key, model: modelName, operation });
     return result.hit ? { ...result, value: copyCachedValue(result.value) } : result;
   }
 

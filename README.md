@@ -262,15 +262,19 @@ const seq = new Seq({
 });
 ```
 
-Seq entrega `[SEQ]` como primer argumento al handler, seguido del `txId` activo (si existe), el mensaje y los datos JSON. La fecha y el nivel los agrega el logger configurado; Seq no los duplica ni agrega etiquetas de operacion al encabezado.
+Seq entrega `[SEQ]` como primer argumento al handler, seguido del `txId` activo (si existe) y un unico objeto de evento. La fecha y el nivel los agrega el logger configurado; Seq no los duplica ni agrega etiquetas de operacion al encabezado.
+
+Los handlers personalizados reciben el objeto sin serializar. Los handlers de consola (incluidos los defaults) reciben ese objeto convertido a una cadena JSON:
 
 ```text
-[SEQ] 5208b08d-c3db-4325-b54a-38f4fe7e9a61 SELECT ... [] {"type":"sql","sqlDurationMs":2.4}
+[SEQ] 5208b08d-c3db-4325-b54a-38f4fe7e9a61 {"type":"sql","sql":"SELECT ... WHERE id = ?","params":[1],"sqlDurationMs":2.4}
 ```
 
-Los saltos de linea se escapan como `\n` y los campos sensibles de los objetos se ocultan con `[REDACTED]`.
+Los eventos SQL incluyen `type: 'sql'`, `sql`, `params` y `sqlDurationMs`. Las operaciones de modelo incluyen `type: 'model-operation'`, `model`, `operation` y `operationDurationMs`. La cache emite `type: 'cache'`, `model`, `operation`, `key` y `hit`. Los mensajes generales usan `message`; los fallos incluyen `error` con el stack y los detalles disponibles.
 
-`getContext` permite correlacionar los logs con la peticion activa. Recibe una funcion sin argumentos que devuelve un contexto con `txId` (o `null`/`undefined`). Se consulta al emitir cada log SQL, de modelo o de cache, y se agrega el `txId` despues de `[SEQ]` y antes del mensaje. Los demas campos del contexto no se registran. Fuera de una peticion, o sin `txId`, el formato permanece igual. Con logging desactivado no se consulta el contexto.
+Los campos sensibles se ocultan con `[REDACTED]`. Los datos se copian sin modificar los originales; los valores `bigint` se representan como cadenas y las referencias circulares como `[Circular]`. Al serializar a JSON, los saltos de linea se escapan como `\n`.
+
+`getContext` permite correlacionar los logs con la peticion activa. Recibe una funcion sin argumentos que devuelve un contexto con `txId` (o `null`/`undefined`). Se consulta al emitir cada log SQL, de modelo o de cache, y se agrega el `txId` despues de `[SEQ]` y antes del objeto de evento. Los demas campos del contexto no se registran. Fuera de una peticion, o sin `txId`, el formato permanece igual. Con logging desactivado no se consulta el contexto.
 
 ```js
 const seq = new Seq({ adapter, logging: logger, getContext });

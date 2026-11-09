@@ -78,7 +78,7 @@ describe('MySQL Adapter', () => {
       assert.equal(loadCalls, 1);
       assert.equal(errors.length, 1);
       assert.equal(errors[0][0], '[SEQ]');
-      assert.match(errors[0][1], /mysql2/);
+      assert.match(errors[0][1]?.message || errors[0][1], /mysql2/);
     });
 
     it('exposes dependency validation without opening a connection', async () => {
@@ -223,9 +223,9 @@ describe('MySQL Adapter', () => {
       });
 
       assert.equal(errors.length, 1);
-      assert.equal(errors[0][1], 'INSERT INTO `sessions` () VALUES ()');
-      assert.match(errors[0][3], /"type":"sql"/);
-      const metadata = JSON.parse(errors[0][3]);
+      assert.equal(errors[0][1].sql, 'INSERT INTO `sessions` () VALUES ()');
+      assert.equal(errors[0][1].type, 'sql');
+      const metadata = errors[0][1];
       assert.equal(metadata.error.message, "Column 'token' cannot be null");
       assert.equal(metadata.error.code, 'CONFLICT');
       assert.match(metadata.error.stack, /MySQLError/);

@@ -72,7 +72,7 @@ describe('Model upsert', () => {
       assert.equal(updatedUser.getDataValue('id'), createdUser.getDataValue('id'));
       assert.equal(updatedUser.getDataValue('name'), 'Ana Maria');
       assert.equal(await User.count(), 1);
-      assert.ok(trace.some(args => String(args[1]).includes('ON CONFLICT')));
+      assert.ok(trace.some(args => String(args[1]?.sql).includes('ON CONFLICT')));
     });
 */
     it('falls back to select and update for arbitrary where clauses', async () => {

@@ -1,4 +1,3 @@
-import { singleLine } from '../../utils/logging.js';
 import { BaseAdapter } from '../BaseAdapter.js';
 import { MySQLDDL } from './MySQLDDL.js';
 import { MySQLDML } from './MySQLDML.js';
@@ -173,10 +172,10 @@ export class MySQLAdapter extends BaseAdapter {
 
   _dependencyWarning(message) {
     if (this._seq) {
-      this._log('error', message, { operation: 'dependency' });
+      this._log('error', { type: 'dependency', message });
       return;
     }
-    console.error('[SEQ]', singleLine(message));
+    console.error('[SEQ]', JSON.stringify({ type: 'dependency', message }));
   }
 
   _normalizeConnectionOptions(options) {

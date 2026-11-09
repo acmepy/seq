@@ -729,11 +729,11 @@ describe('Aliases & Include', () => {
         calls.length = 0;
         const users = await AdapterUser.findAll({ include: AdapterTask });
         assert.equal(users[0].getDataValue('adaptertasks').length, 1);
-        assert.ok(calls.some(args => args[1]?.includes?.('LEFT JOIN')));
+        assert.ok(calls.some(args => args[1]?.sql?.includes('LEFT JOIN')));
 
         calls.length = 0;
         await AdapterUser.findAll({ include: { model: AdapterTask, eager: false } });
-        assert.equal(calls.some(args => args[1]?.includes?.('LEFT JOIN')), false);
+        assert.equal(calls.some(args => args[1]?.sql?.includes('LEFT JOIN')), false);
       } finally {
         await cleanupTestContext(eagerContext);
       }
@@ -1169,7 +1169,7 @@ describe('IAM-style include projection', () => {
         assert.equal(rolePermissions[0].getDataValue('permission').getDataValue('permission'), 'portal.fes.list');
         assert.equal(rolePermissions[0].getDataValue('role').getDataValue('userRoles').length, 1);
         if (eager) {
-          const sql = sqlLogs.find(args => args.some(value => typeof value === 'string' && value.startsWith('SELECT ')))[1];
+          const sql = sqlLogs.find(args => args[1]?.sql?.startsWith('SELECT '))[1].sql;
           const select = sql.slice(0, sql.indexOf(' FROM '));
           assert.doesNotMatch(select, /\.active["`]/i);
           assert.doesNotMatch(select, /\.roleId["`]/i);

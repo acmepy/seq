@@ -1,4 +1,4 @@
-import { singleLine } from '../utils/logging.js';
+import { sanitizeLogData } from '../utils/logging.js';
 import { ModelRegistry } from './ModelRegistry.js';
 import { Model } from './Model.js';
 import { ConfigurationError } from './errors/ConfigurationError.js';
@@ -239,7 +239,8 @@ export class Seq {
     try {
       return await this._sync(options, (name) => { tableName = name; });
     } catch (error) {
-      this._log('error', 'Sync failed', {
+      this._log('error', {
+        type: 'sync', message: 'Sync failed',
         operation: 'sync',
         tableName,
         force: options.force === true,
@@ -444,10 +445,10 @@ export class Seq {
   _normalizeLogging(logging) {
     const disabled = { info: false, trace: false, warn: false, error: false };
     const defaults = {
-      info: console.log.bind(console),
-      trace: console.log.bind(console),
-      warn: console.log.bind(console),
-      error: console.error.bind(console)
+      info: (...args) => console.log(...args.slice(0, -1), JSON.stringify(args.at(-1))),
+      trace: (...args) => console.log(...args.slice(0, -1), JSON.stringify(args.at(-1))),
+      warn: (...args) => console.log(...args.slice(0, -1), JSON.stringify(args.at(-1))),
+      error: (...args) => console.error(...args.slice(0, -1), JSON.stringify(args.at(-1)))
     };
     if (logging === undefined || logging === true) return { ...defaults };
     if (logging === false || logging === null) return disabled;
@@ -456,26 +457,13 @@ export class Seq {
         Object.entries(defaults).map(([level, defaultHandler]) => {
           const handler = logging[level] ?? defaultHandler;
           const consoleHandler = Object.values(console).includes(handler);
-          return [level, typeof handler === 'function' ? handler.bind(consoleHandler ? console : logging) : handler];
+          return [level, typeof handler === 'function'
+            ? consoleHandler ? (...args) => handler.call(console, ...args.slice(0, -1), JSON.stringify(args.at(-1))) : handler.bind(logging)
+            : handler];
         })
       );
     }
     return disabled;
-  }
-
-  _formatLogValue(value) {
-    if (typeof value === 'string') return singleLine(value);
-    if (value === null || typeof value !== 'object') return value;
-    let output;
-    try {
-      output = JSON.stringify(value, (key, nestedValue) =>
-        /password|passwd|token|secret|api[_-]?key/i.test(key) ? '[REDACTED]'
-          : nestedValue instanceof Error ? { ...nestedValue, name: nestedValue.name, message: nestedValue.message, stack: nestedValue.stack } : nestedValue
-      );
-    } catch {
-      output = String(value);
-    }
-    return output;
   }
 
   /**
@@ -493,8 +481,12 @@ export class Seq {
     const target = typeof logger === 'function' ? this._logging : undefined;
     if (typeof logger !== 'function') return;
     const txId = this._getContext?.()?.txId;
-    if (txId) payload = [txId, ...payload];
-    logger.call(target, '[SEQ]', ...payload.map(value => this._formatLogValue(value)));
+    let event;
+    if (payload.length === 1 && payload[0] instanceof Error) event = { type: 'error', error: payload[0] };
+    else if (payload.length === 1 && payload[0] && typeof payload[0] === 'object' && !Array.isArray(payload[0])) event = payload[0];
+    else event = { message: payload[0], ...(payload.length > 1 ? { data: payload.length === 2 ? payload[1] : payload.slice(1) } : {}) };
+    const prefix = txId ? ['[SEQ]', String(txId)] : ['[SEQ]'];
+    logger.call(target, ...prefix, sanitizeLogData(event));
   }
 }
 

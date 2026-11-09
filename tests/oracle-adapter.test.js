@@ -100,7 +100,7 @@ test('Oracle adapters', async t => {
 
     assert.equal(errors.length, 1);
     assert.equal(errors[0][0], '[SEQ]');
-    assert.match(errors[0][1], /oracledb/);
+    assert.match(errors[0][1]?.message || errors[0][1], /oracledb/);
   });
 
   await t.test('rejects oracledb versions newer than 5.5.0', async () => {
@@ -125,7 +125,7 @@ test('Oracle adapters', async t => {
 
     assert.equal(errors.length, 1);
     assert.equal(errors[0][0], '[SEQ]');
-    assert.match(errors[0][1], /5\.5\.0/);
+    assert.match(errors[0][1]?.message || errors[0][1], /5\.5\.0/);
   });
 
   await t.test('Oracle 11 maps JSON-like values to VARCHAR2 and dates to DATE', () => {
@@ -187,8 +187,8 @@ test('Oracle adapters', async t => {
     });
 
     assert.equal(errors.length, 1);
-    assert.equal(errors[0][1], 'INSERT INTO "SESSIONS" ("TOKEN") VALUES (?)');
-    assert.match(errors[0][3], /ORA-01400/);
+    assert.equal(errors[0][1].sql, 'INSERT INTO "SESSIONS" ("TOKEN") VALUES (?)');
+    assert.match(errors[0][1].error.message, /ORA-01400/);
   });
 
   await t.test('Oracle 11 uses ROWNUM pagination and Oracle 12 extends it with OFFSET/FETCH', () => {

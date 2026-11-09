@@ -3,9 +3,27 @@ import crypto from 'node:crypto';
 import { createHash } from 'crypto';
 import util from 'node:util';
 
-/** Escapes line breaks so each log event occupies one line. */
-function singleLine(value) {
-  return value.replace(/\r\n|\r|\n/g, '\\n');
+/** Creates detached JSON-compatible log data without exposing sensitive fields. */
+function sanitizeLogData(event) {
+  const ancestors = new Set();
+  function copy(value) {
+    if (typeof value === 'bigint') return String(value);
+    if (!value || typeof value !== 'object') return value;
+    if (ancestors.has(value)) return '[Circular]';
+    ancestors.add(value);
+    try {
+      if (value instanceof Error) return copyObject({ ...value, name: value.name, message: value.message, stack: value.stack });
+      if (typeof value.toJSON === 'function') return copy(value.toJSON());
+      if (Array.isArray(value)) return value.map(copy);
+      return copyObject(value);
+    } finally { ancestors.delete(value); }
+  }
+  function copyObject(value) {
+    return Object.fromEntries(Object.entries(value).map(([key, nested]) => [key,
+      /password|passwd|token|secret|api[_-]?key/i.test(key) ? '[REDACTED]' : copy(nested)]));
+  }
+  try { return JSON.parse(JSON.stringify(copy(event))); }
+  catch { return { message: 'Unable to serialize log data' }; }
 }
 
 /**
@@ -1524,7 +1542,7 @@ class Model {
       const result = await execute();
       const operationDurationMs = performance.now() - startedAt;
       const level = this.seq?._isSlowOperation(operationDurationMs) ? 'warn' : 'trace';
-      this._log(level, `${this.modelName}.${operation}`, {
+      this._log(level, {
         type: 'model-operation',
         operation,
         model: this.modelName,
@@ -1533,7 +1551,7 @@ class Model {
       return result;
     } catch (error) {
       const operationDurationMs = performance.now() - startedAt;
-      this._log('error', `${this.modelName}.${operation}`, {
+      this._log('error', {
         type: 'model-operation',
         operation,
         model: this.modelName,
@@ -2460,7 +2478,7 @@ class Cache {
     if (!this.isEnabled(modelName)) return { hit: false };
     const key = generateCacheKey(modelName, operation, queryOptions, this.seq?._tenants.current());
     const result = await this.adapter.get(key);
-    this._log('trace', `Cache ${result.hit?'hit':'miss'}: ${key}, model: ${modelName}`);
+    this._log('trace', { type: 'cache', hit: result.hit, key, model: modelName, operation });
     return result.hit ? { ...result, value: copyCachedValue(result.value) } : result;
   }
 
@@ -2786,7 +2804,8 @@ class Seq {
     try {
       return await this._sync(options, (name) => { tableName = name; });
     } catch (error) {
-      this._log('error', 'Sync failed', {
+      this._log('error', {
+        type: 'sync', message: 'Sync failed',
         operation: 'sync',
         tableName,
         force: options.force === true,
@@ -2991,10 +3010,10 @@ class Seq {
   _normalizeLogging(logging) {
     const disabled = { info: false, trace: false, warn: false, error: false };
     const defaults = {
-      info: console.log.bind(console),
-      trace: console.log.bind(console),
-      warn: console.log.bind(console),
-      error: console.error.bind(console)
+      info: (...args) => console.log(...args.slice(0, -1), JSON.stringify(args.at(-1))),
+      trace: (...args) => console.log(...args.slice(0, -1), JSON.stringify(args.at(-1))),
+      warn: (...args) => console.log(...args.slice(0, -1), JSON.stringify(args.at(-1))),
+      error: (...args) => console.error(...args.slice(0, -1), JSON.stringify(args.at(-1)))
     };
     if (logging === undefined || logging === true) return { ...defaults };
     if (logging === false || logging === null) return disabled;
@@ -3003,26 +3022,13 @@ class Seq {
         Object.entries(defaults).map(([level, defaultHandler]) => {
           const handler = logging[level] ?? defaultHandler;
           const consoleHandler = Object.values(console).includes(handler);
-          return [level, typeof handler === 'function' ? handler.bind(consoleHandler ? console : logging) : handler];
+          return [level, typeof handler === 'function'
+            ? consoleHandler ? (...args) => handler.call(console, ...args.slice(0, -1), JSON.stringify(args.at(-1))) : handler.bind(logging)
+            : handler];
         })
       );
     }
     return disabled;
-  }
-
-  _formatLogValue(value) {
-    if (typeof value === 'string') return singleLine(value);
-    if (value === null || typeof value !== 'object') return value;
-    let output;
-    try {
-      output = JSON.stringify(value, (key, nestedValue) =>
-        /password|passwd|token|secret|api[_-]?key/i.test(key) ? '[REDACTED]'
-          : nestedValue instanceof Error ? { ...nestedValue, name: nestedValue.name, message: nestedValue.message, stack: nestedValue.stack } : nestedValue
-      );
-    } catch {
-      output = String(value);
-    }
-    return output;
   }
 
   /**
@@ -3040,8 +3046,12 @@ class Seq {
     const target = typeof logger === 'function' ? this._logging : undefined;
     if (typeof logger !== 'function') return;
     const txId = this._getContext?.()?.txId;
-    if (txId) payload = [txId, ...payload];
-    logger.call(target, '[SEQ]', ...payload.map(value => this._formatLogValue(value)));
+    let event;
+    if (payload.length === 1 && payload[0] instanceof Error) event = { type: 'error', error: payload[0] };
+    else if (payload.length === 1 && payload[0] && typeof payload[0] === 'object' && !Array.isArray(payload[0])) event = payload[0];
+    else event = { message: payload[0], ...(payload.length > 1 ? { data: payload.length === 2 ? payload[1] : payload.slice(1) } : {}) };
+    const prefix = txId ? ['[SEQ]', String(txId)] : ['[SEQ]'];
+    logger.call(target, ...prefix, sanitizeLogData(event));
   }
 }
 
@@ -3528,7 +3538,8 @@ class BaseAdapter {
     const startedAt = performance.now();
     const finish = (level, error) => {
       const sqlDurationMs = performance.now() - startedAt;
-      this._log(level, loggedSql, params, {
+      this._log(level, {
+        sql: loggedSql, params,
         type: 'sql',
         sqlDurationMs,
         error: error ? { name: error.name, message: error.message, code: error.code, errors: error.errors, details: error.details, stack: error.stack } : undefined
@@ -6522,10 +6533,10 @@ class SQLiteAdapter extends BaseAdapter {
 
   _dependencyWarning(message) {
     if (this._seq) {
-      this._log('error', message, { operation: 'dependency' });
+      this._log('error', { type: 'dependency', message });
       return;
     }
-    console.error('[SEQ]', singleLine(message));
+    console.error('[SEQ]', JSON.stringify({ type: 'dependency', message }));
   }
 
   async close() {
@@ -7281,10 +7292,10 @@ class MySQLAdapter extends BaseAdapter {
 
   _dependencyWarning(message) {
     if (this._seq) {
-      this._log('error', message, { operation: 'dependency' });
+      this._log('error', { type: 'dependency', message });
       return;
     }
-    console.error('[SEQ]', singleLine(message));
+    console.error('[SEQ]', JSON.stringify({ type: 'dependency', message }));
   }
 
   _normalizeConnectionOptions(options) {
@@ -7904,7 +7915,7 @@ class Oracle11Adapter extends BaseAdapter {
     }
     return 0;
   }
-  _dependencyWarning(message) { if (this._seq) this._log('error', message, { operation: 'dependency' }); else console.error('[SEQ]', singleLine(message)); }
+  _dependencyWarning(message) { if (this._seq) this._log('error', { type: 'dependency', message }); else console.error('[SEQ]', JSON.stringify({ type: 'dependency', message })); }
   _normalizeConnectionOptions(options) {
     const { naming, fkStrategy, eager, booleanValues, afterConnect, connectString, user, password, poolMin, poolMax, poolIncrement, ...rest } = options;
     if (afterConnect !== undefined) {

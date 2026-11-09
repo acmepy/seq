@@ -1,4 +1,3 @@
-import { singleLine } from '../../utils/logging.js';
 import { BaseAdapter } from '../BaseAdapter.js';
 import { Oracle11DDL } from './Oracle11DDL.js';
 import { Oracle11DML } from './Oracle11DML.js';
@@ -169,7 +168,7 @@ export class Oracle11Adapter extends BaseAdapter {
     }
     return 0;
   }
-  _dependencyWarning(message) { if (this._seq) this._log('error', message, { operation: 'dependency' }); else console.error('[SEQ]', singleLine(message)); }
+  _dependencyWarning(message) { if (this._seq) this._log('error', { type: 'dependency', message }); else console.error('[SEQ]', JSON.stringify({ type: 'dependency', message })); }
   _normalizeConnectionOptions(options) {
     const { naming, fkStrategy, eager, booleanValues, afterConnect, connectString, user, password, poolMin, poolMax, poolIncrement, ...rest } = options;
     if (afterConnect !== undefined) {
