@@ -13,7 +13,7 @@ const requiredPageIncludes = Symbol('requiredPageIncludes');
 /**
  * Base DML abstract.
  * Provides SQL-based default implementations for selectAll, count, update, delete.
- * Adapter subclasses implement execution hooks (_executeQuery, _executeGet, _execute, _mapRows)
+ * Adapter subclasses implement execution hooks (executeQueryAll, executeGet, execute, _mapRows)
  * and adapter-specific methods (insert, truncate).
  */
 export class DMLAbstract extends BaseAbstract {
@@ -32,7 +32,7 @@ export class DMLAbstract extends BaseAbstract {
    * @returns {string}
    */
   _getTableName(model) {
-    return model._resolvedTableName || model.tableName;
+    return model.tableName;
   }
 
   /**
@@ -478,8 +478,8 @@ export class DMLAbstract extends BaseAbstract {
    * @param {*[]} params
    * @returns {Promise<object[]>}
    */
-  async _executeQueryAll(sql, params) {
-    throw new AdapterError('DML _executeQuery is not implemented by this adapter', { code: 'SEQ_DML_NOT_IMPLEMENTED' });
+  async executeQueryAll(sql, params = []) {
+    throw new AdapterError('DML executeQueryAll is not implemented by this adapter', { code: 'SEQ_DML_NOT_IMPLEMENTED' });
   }
 
   /**
@@ -488,8 +488,8 @@ export class DMLAbstract extends BaseAbstract {
    * @param {*[]} params
    * @returns {Promise<object|null>}
    */
-  async _executeGet(sql, params) {
-    throw new AdapterError('DML _executeGet is not implemented by this adapter', { code: 'SEQ_DML_NOT_IMPLEMENTED' });
+  async executeGet(sql, params = []) {
+    throw new AdapterError('DML executeGet is not implemented by this adapter', { code: 'SEQ_DML_NOT_IMPLEMENTED' });
   }
 
   /**
@@ -498,8 +498,8 @@ export class DMLAbstract extends BaseAbstract {
    * @param {*[]} params
    * @returns {Promise<{ changes: number, lastInsertRowid?: number }>}
    */
-  async _execute(sql, params = []) {
-    throw new AdapterError('DML _execute is not implemented by this adapter', { code: 'SEQ_DML_NOT_IMPLEMENTED' });
+  async execute(sql, params = []) {
+    throw new AdapterError('DML execute is not implemented by this adapter', { code: 'SEQ_DML_NOT_IMPLEMENTED' });
   }
 
   async selectAssociationJunctionRows(assoc, sourceIds, options = {}) {
@@ -535,7 +535,7 @@ export class DMLAbstract extends BaseAbstract {
       const placeholders = ids.map(() => '?').join(', ');
       const tenant = this._buildConditions(this._junctionTenantWhere(assoc) || {}, junctionSchema);
       const sql = `SELECT ${this._q(fkCol)} AS ${this._q(fkAttr)}, ${this._q(otherKeyCol)} AS ${this._q(otherKeyAttr)} FROM ${this._q(throughTable)} WHERE ${this._q(fkCol)} IN (${placeholders})${tenant.conditions.length ? ` AND ${tenant.conditions.join(' AND ')}` : ''}`;
-      return this._executeQueryAll(sql, [...ids.map(id => this._serializeValue(id)), ...tenant.params]);
+      return this.executeQueryAll(sql, [...ids.map(id => this._serializeValue(id)), ...tenant.params]);
     }));
     return rows.flat();
   }
@@ -625,7 +625,7 @@ export class DMLAbstract extends BaseAbstract {
     }
     sql += this._buildOrderBy(queryOptions.order, schema, alias);
     sql = this._applyLimitOffset(sql, queryOptions);
-    const rows = await this._executeQueryAll(sql, params);
+    const rows = await this.executeQueryAll(sql, params);
     let instances;
     if (eagerIncludes.length > 0) {
       instances = processJoinedRows(rows, model, eagerIncludes, this, eagerIncludeSqlAliases, globalEager);
@@ -655,7 +655,7 @@ export class DMLAbstract extends BaseAbstract {
     const where = this._buildWhere(options.where, schema, alias);
     sql += where.sql;
     params.push(...where.params);
-    const row = await this._executeGet(sql, params);
+    const row = await this.executeGet(sql, params);
     return row.cnt;
   }
 
@@ -686,7 +686,7 @@ export class DMLAbstract extends BaseAbstract {
     const where = this._buildWhere(options.where, schema);
     const sql = `UPDATE ${this._q(tableName)} SET ${setClauses.join(', ')}${where.sql}`;
     params.push(...where.params);
-    await this._execute(sql, params);
+    await this.execute(sql, params);
     if (primaryKeys) {
       return this.selectAll(model, { ...options, where: tuplesWhere(pkAttrs, primaryKeys) });
     }
@@ -708,7 +708,7 @@ export class DMLAbstract extends BaseAbstract {
     const where = this._buildWhere(options.where, schema);
     const sql = `DELETE FROM ${this._q(tableName)}${where.sql}`;
     params.push(...where.params);
-    const info = await this._execute(sql, params);
+    const info = await this.execute(sql, params);
     return info.changes;
   }
 
@@ -736,7 +736,7 @@ export class DMLAbstract extends BaseAbstract {
     this._validateRecord(colRecord, schema, model.modelName);
     const cols = Object.keys(colRecord);
     if (cols.length === 0) {
-      const info = await this._execute(`INSERT INTO ${this._q(tableName)} DEFAULT VALUES`, []);
+      const info = await this.execute(`INSERT INTO ${this._q(tableName)} DEFAULT VALUES`, []);
       if (schema.primaryKey) colRecord[schema.primaryKey] = Number(info.lastInsertRowid);
       return new model(this._toAttrNames(colRecord, schema), { _isNew: false });
     }
@@ -744,7 +744,7 @@ export class DMLAbstract extends BaseAbstract {
     const placeholders = cols.map(() => '?').join(', ');
     const sql = `INSERT INTO ${this._q(tableName)} (${colNames}) VALUES (${placeholders})`;
     const params = cols.map(c => this._serializeValue(colRecord[c]));
-    const info = await this._execute(sql, params);
+    const info = await this.execute(sql, params);
     if (schema.autoIncrement && colRecord[schema.autoIncrement] == null) {
       colRecord[schema.autoIncrement] = Number(info.lastInsertRowid);
     }

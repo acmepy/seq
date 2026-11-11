@@ -12,7 +12,7 @@ export class MySQLDDL extends DDLAbstract {
     return this._adapter._connection();
   }
 
-  async _execute(sql, params = [], prepared = true) {
+  async execute(sql, params = [], prepared = true) {
     return this._measureSql(sql.replaceAll('\n  ', ' '), params, async () => {
       try {
         const [result] = await this._adapter._withConnection(connection => prepared ? connection.execute(sql, params) : connection.query(sql, params));
@@ -26,7 +26,7 @@ export class MySQLDDL extends DDLAbstract {
   async _prepareColumnTypes(columns) {
     const jsonTypes = new Set(['ArrayType', 'ObjectType', 'JSONType']);
     if (this._adapter._supportsJson !== undefined || !Object.values(columns).some(column => jsonTypes.has(column.type?.constructor?.name))) return;
-    const row = await this._adapter.dml._executeGet('SELECT VERSION() AS version', []);
+    const row = await this._adapter.dml.executeGet('SELECT VERSION() AS version', []);
     const version = String(row.version);
     const maria = version.match(/(\d+)\.(\d+)\.(\d+)-MariaDB/i);
     const match = maria || version.match(/^(\d+)\.(\d+)\.(\d+)/);
@@ -43,7 +43,7 @@ export class MySQLDDL extends DDLAbstract {
     const timestampColumns = Object.entries(def.columns).filter(([, column]) => column.defaultCurrentTimestamp);
     let supportsTimestampDefaults = true;
     if (timestampColumns.length) {
-      const row = await this._adapter.dml._executeGet('SELECT VERSION() AS version', []);
+      const row = await this._adapter.dml.executeGet('SELECT VERSION() AS version', []);
       const version = String(row.version);
       const maria = version.match(/(\d+)\.(\d+)\.(\d+)-MariaDB/i);
       const match = maria || version.match(/^(\d+)\.(\d+)\.(\d+)/);
@@ -70,7 +70,7 @@ export class MySQLDDL extends DDLAbstract {
     }
 
     const sql = `CREATE TABLE ${this._q(def.tableName)} (\n  ${colDefs.join(',\n  ')}\n)`;
-    await this._execute(sql);
+    await this.execute(sql);
     if (timestampColumns.length && !supportsTimestampDefaults) {
       const trigger = `seq_ts_${createHash('sha256').update(def.tableName).digest('hex').slice(0, 24)}`;
       const assignments = timestampColumns.map(([name, column]) => {
@@ -78,10 +78,10 @@ export class MySQLDDL extends DDLAbstract {
         return `${field} = COALESCE(${field}, CURRENT_TIMESTAMP)`;
       });
       try {
-        await this._execute(`CREATE TRIGGER ${this._q(trigger)} BEFORE INSERT ON ${this._q(def.tableName)} FOR EACH ROW SET ${assignments.join(', ')}`, [], false);
+        await this.execute(`CREATE TRIGGER ${this._q(trigger)} BEFORE INSERT ON ${this._q(def.tableName)} FOR EACH ROW SET ${assignments.join(', ')}`, [], false);
       } catch (error) {
         try {
-          await this._execute(`DROP TABLE ${this._q(def.tableName)}`);
+          await this.execute(`DROP TABLE ${this._q(def.tableName)}`);
         } catch (cleanupError) {
           error.cleanupError = cleanupError;
         }
@@ -91,27 +91,27 @@ export class MySQLDDL extends DDLAbstract {
   }
 
   async dropTable(tableName, options = {}) {
-    if (options.ignoreForeignKeys !== false) await this._execute('SET FOREIGN_KEY_CHECKS = 0');
+    if (options.ignoreForeignKeys !== false) await this.execute('SET FOREIGN_KEY_CHECKS = 0');
     try {
-      await this._execute(`DROP TABLE IF EXISTS ${this._q(tableName)}`);
+      await this.execute(`DROP TABLE IF EXISTS ${this._q(tableName)}`);
     } finally {
-      if (options.ignoreForeignKeys !== false) await this._execute('SET FOREIGN_KEY_CHECKS = 1');
+      if (options.ignoreForeignKeys !== false) await this.execute('SET FOREIGN_KEY_CHECKS = 1');
     }
     await super.dropTable(tableName, options);
   }
 
   async truncateTable(tableName, options = {}) {
     if (options.ifExists && !(await this.hasTable(tableName))) return;
-    if (options.ignoreForeignKeys !== false) await this._execute('SET FOREIGN_KEY_CHECKS = 0');
+    if (options.ignoreForeignKeys !== false) await this.execute('SET FOREIGN_KEY_CHECKS = 0');
     try {
-      await this._execute(`TRUNCATE TABLE ${this._q(tableName)}`);
+      await this.execute(`TRUNCATE TABLE ${this._q(tableName)}`);
     } finally {
-      if (options.ignoreForeignKeys !== false) await this._execute('SET FOREIGN_KEY_CHECKS = 1');
+      if (options.ignoreForeignKeys !== false) await this.execute('SET FOREIGN_KEY_CHECKS = 1');
     }
   }
 
   async hasTable(tableName) {
-    const row = await this._executeGet(
+    const row = await this.executeGet(
       'SELECT TABLE_NAME FROM information_schema.TABLES WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ? LIMIT 1',
       [tableName]
     );
@@ -122,7 +122,7 @@ export class MySQLDDL extends DDLAbstract {
     if (!(await this.hasTable(tableName))) {
       throw new AdapterError(`Table "${tableName}" does not exist`, { code: 'SEQ_ADAPTER_TABLE_NOT_FOUND' });
     }
-    const rows = await this._executeQueryAll(
+    const rows = await this.executeQueryAll(
       `SELECT COLUMN_NAME, COLUMN_TYPE, IS_NULLABLE, COLUMN_KEY, COLUMN_DEFAULT, EXTRA
        FROM information_schema.COLUMNS
        WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ?
@@ -144,7 +144,7 @@ export class MySQLDDL extends DDLAbstract {
 
   async introspectDefinition(definition) {
     const def = this.normalizeDefinition(definition);
-    const columnsInfo = await this._executeQueryAll(
+    const columnsInfo = await this.executeQueryAll(
       `SELECT COLUMN_NAME
        FROM information_schema.COLUMNS
        WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ?`,
@@ -169,7 +169,7 @@ export class MySQLDDL extends DDLAbstract {
       columnToAttr[physicalColumnName] = attrName;
     }
 
-    const indexRows = await this._executeQueryAll(
+    const indexRows = await this.executeQueryAll(
       `SELECT DISTINCT INDEX_NAME
        FROM information_schema.STATISTICS
        WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ?`,
@@ -179,7 +179,7 @@ export class MySQLDDL extends DDLAbstract {
     const uniqueConstraints = def.uniqueConstraints.filter(item => existingIndexNames.has(item.constraintName));
     const indexes = def.indexes.filter(item => existingIndexNames.has(item.name));
 
-    const fkRows = await this._executeQueryAll(
+    const fkRows = await this.executeQueryAll(
       `SELECT CONSTRAINT_NAME
        FROM information_schema.KEY_COLUMN_USAGE
        WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ? AND REFERENCED_TABLE_NAME IS NOT NULL`,
@@ -192,7 +192,7 @@ export class MySQLDDL extends DDLAbstract {
   }
 
   async listTables() {
-    const rows = await this._executeQueryAll(
+    const rows = await this.executeQueryAll(
       'SELECT TABLE_NAME FROM information_schema.TABLES WHERE TABLE_SCHEMA = DATABASE() AND TABLE_TYPE = ?',
       ['BASE TABLE']
     );
@@ -217,7 +217,7 @@ export class MySQLDDL extends DDLAbstract {
         const value = typeof colDef.defaultValue === 'function' ? colDef.defaultValue() : colDef.defaultValue;
         constraints.push(`DEFAULT ${this._formatDefaultValue(value)}`);
       }
-      await this._execute(`ALTER TABLE ${this._q(tableName)} ADD COLUMN ${this._q(columnName)} ${colType}${constraints.length ? ` ${constraints.join(' ')}` : ''}`);
+      await this.execute(`ALTER TABLE ${this._q(tableName)} ADD COLUMN ${this._q(columnName)} ${colType}${constraints.length ? ` ${constraints.join(' ')}` : ''}`);
       schema.columns[name] = colDef;
       schema.attrToColumn[name] = columnName;
       schema.columnToAttr[columnName] = name;
@@ -227,7 +227,7 @@ export class MySQLDDL extends DDLAbstract {
   async addUniqueConstraint(tableName, constraint) {
     const schema = this._adapter.schemas.get(tableName);
     const cols = constraint.columns.map(c => this._q(c)).join(', ');
-    await this._execute(`CREATE UNIQUE INDEX ${this._q(constraint.constraintName)} ON ${this._q(tableName)} (${cols})`);
+    await this.execute(`CREATE UNIQUE INDEX ${this._q(constraint.constraintName)} ON ${this._q(tableName)} (${cols})`);
     schema.uniqueConstraints.push({ ...constraint });
   }
 
@@ -235,18 +235,18 @@ export class MySQLDDL extends DDLAbstract {
     const schema = this._adapter.schemas.get(tableName);
     const cols = index.columns.map(c => this._q(c)).join(', ');
     const unique = index.unique ? 'UNIQUE ' : '';
-    await this._execute(`CREATE ${unique}INDEX ${this._q(index.name)} ON ${this._q(tableName)} (${cols})`);
+    await this.execute(`CREATE ${unique}INDEX ${this._q(index.name)} ON ${this._q(tableName)} (${cols})`);
     schema.indexes.push({ ...index });
   }
 
   async addForeignKey(tableName, fk) {
     const sql = `ALTER TABLE ${this._q(tableName)} ADD CONSTRAINT ${this._q(fk.constraintName)} FOREIGN KEY (${(fk.columnNames || [fk.columnName]).map(column => this._q(column)).join(', ')}) REFERENCES ${this._q(fk.references.table)} (${(fk.references.columns || [fk.references.column]).map(column => this._q(column)).join(', ')}) ON DELETE ${fk.onDelete || 'RESTRICT'} ON UPDATE ${fk.onUpdate || 'RESTRICT'}`;
-    await this._execute(sql);
+    await this.execute(sql);
     const schema = this._adapter.schemas.get(tableName);
     schema.foreignKeys.push({ ...fk });
   }
 
-  async _executeQueryAll(sql, params = []) {
+  async executeQueryAll(sql, params = []) {
     return this._measureSql(sql, params, async () => {
       try {
         const [rows] = await this._adapter._withConnection(connection => connection.execute(sql, params));
@@ -257,8 +257,8 @@ export class MySQLDDL extends DDLAbstract {
     });
   }
 
-  async _executeGet(sql, params = []) {
-    const rows = await this._executeQueryAll(sql, params);
+  async executeGet(sql, params = []) {
+    const rows = await this.executeQueryAll(sql, params);
     return rows[0] || null;
   }
 

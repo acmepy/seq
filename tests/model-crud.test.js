@@ -5,7 +5,7 @@ import { DataTypes } from '../src/data-types/index.js';
 import { cleanupTestContext, createTestContext, quoteTestIdentifier, testAdapterName, testTable } from './shared/test-context.js';
 
 function physicalTableName(model) {
-  return model._resolvedTableName || model.tableName;
+  return model.tableName;
 }
 
 function physicalColumnName(context, model, attrName) {
@@ -51,7 +51,7 @@ describe('Reading numeric attributes from text columns', () => {
   async function insert(id, integer, number, decimal, parentId = null) {
     const attrs = ['id', 'integer', 'number', 'decimal', 'label', 'parentId'];
     const columns = attrs.map(attr => quoteTestIdentifier(definition.attrToColumn[attr])).join(', ');
-    await context.adapter.dml._execute(
+    await context.adapter.dml.execute(
       `INSERT INTO ${quoteTestIdentifier(definition.tableName)} (${columns}) VALUES (?, ?, ?, ?, ?, ?)`,
       [id, integer, number, decimal, '0042', parentId]
     );
@@ -60,7 +60,7 @@ describe('Reading numeric attributes from text columns', () => {
   it(`converts numeric text using model types with ${testAdapterName()}`, async () => {
     await insert(1, '0042', '-12.5', '1.25e2');
     await insert(2, '0', '+.5', ' 2.50 ', '1');
-    const raw = await context.adapter.dml._executeGet(selectFirstSql(context, Numeric), []);
+    const raw = await context.adapter.dml.executeGet(selectFirstSql(context, Numeric), []);
     assert.equal(typeof raw[definition.attrToColumn.integer], 'string');
     const row = await Numeric.findByPk(1);
     assert.equal(row.getDataValue('integer'), 42);
@@ -546,7 +546,7 @@ describe('Model CRUD', () => {
 
     it('stores records using column names', async () => {
       await Product.create({ productName: 'Laptop', unitPrice: 999.99 });
-      const raw = await fieldContext.adapter.dml._executeGet(selectFirstSql(fieldContext, Product), []);
+      const raw = await fieldContext.adapter.dml.executeGet(selectFirstSql(fieldContext, Product), []);
       assert.ok(physicalColumnName(fieldContext, Product, 'productName') in raw);
       assert.ok(physicalColumnName(fieldContext, Product, 'unitPrice') in raw);
       assert.ok(physicalColumnName(fieldContext, Product, 'inStock') in raw);
@@ -655,7 +655,7 @@ describe('Model CRUD', () => {
         assert.equal(created.getDataValue('fullName'), 'Ana Demo');
         assert.equal(created.toJSON().fullName, 'Ana Demo');
 
-        const raw = await virtualContext.adapter.dml._executeGet(selectFirstSql(virtualContext, Person), []);
+        const raw = await virtualContext.adapter.dml.executeGet(selectFirstSql(virtualContext, Person), []);
         assert.deepEqual(Object.keys(raw).sort(), [
           physicalColumnName(virtualContext, Person, 'firstName'),
           physicalColumnName(virtualContext, Person, 'id'),

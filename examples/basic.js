@@ -36,7 +36,7 @@ const laptop = await Product.create({productName: 'Laptop',unitPrice: 999.99});
 const mouse = await Product.create({productName: 'Mouse',unitPrice: 25.50,inStock: false});
 console.log('Laptop (attr names):', laptop.toJSON());
 
-const productTable = Product._resolvedTableName;
+const productTable = Product.tableName;
 const schema = seq._adapter.schemas.get(productTable);
 console.log('Laptop attrToColumn:', schema.attrToColumn);
 console.log('Laptop uniqueConstraints:', schema.uniqueConstraints);

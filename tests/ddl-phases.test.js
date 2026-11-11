@@ -15,7 +15,7 @@ describe('DDL Phases', () => {
   }
 
   function physicalTableName(model) {
-    return model._resolvedTableName || model.tableName;
+    return model.tableName;
   }
 
   function physicalColumnName(model, attrName) {

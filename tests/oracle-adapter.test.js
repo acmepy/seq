@@ -47,7 +47,7 @@ test('Oracle adapters', async t => {
     for (const Adapter of [Oracle11Adapter, Oracle12Adapter]) {
       const adapter = new Adapter({ naming: { prefix: 'AFI_' } });
       const statements = [];
-      adapter.ddl._execute = async sql => statements.push(sql);
+      adapter.ddl.execute = async sql => statements.push(sql);
       await adapter.ddl.createTableStructure({
         tableName: 'AFI_BIENES',
         columns: {
@@ -163,7 +163,7 @@ test('Oracle adapters', async t => {
     const adapter = new Oracle11Adapter();
     const seq = new Seq({ adapter, models: [ExplicitUser], logging: false });
     ExplicitUser.seq = seq;
-    ExplicitUser._resolvedTableName = seq._resolveTableName(ExplicitUser);
+    seq.registerModel(ExplicitUser);
     const def = seq.buildTableDefinition(ExplicitUser);
 
     assert.equal(def.tableName, 'explicit_users');
@@ -180,7 +180,7 @@ test('Oracle adapters', async t => {
       }
     });
 
-    await assert.rejects(() => adapter.dml._execute('INSERT INTO "SESSIONS" ("TOKEN") VALUES (?)', [null]), error => {
+    await assert.rejects(() => adapter.dml.execute('INSERT INTO "SESSIONS" ("TOKEN") VALUES (?)', [null]), error => {
       assert.equal(error.name, 'Oracle11Error');
       assert.match(error.message, /ORA-01400/);
       return true;

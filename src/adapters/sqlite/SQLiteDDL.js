@@ -10,7 +10,7 @@ export class SQLiteDDL extends DDLAbstract {
     return this._adapter._db;
   }
 
-  async _execute(sql, params = []) {
+  async execute(sql, params = []) {
     return this._measureSql(sql.replaceAll('\n  ', ' '), params, () => this._db().prepare(sql).run(...params));
   }
 
@@ -56,12 +56,12 @@ export class SQLiteDDL extends DDLAbstract {
     }
 
     const sql = `CREATE TABLE ${this._q(def.tableName)} (\n  ${colDefs.join(',\n  ')}\n)`;
-    await this._execute(sql);
+    await this.execute(sql);
   }
 
   async dropTable(tableName, options = {}) {
     await this.truncateTable(tableName, { ...options, ifExists: true, ignoreForeignKeys: true });
-    await this._execute(`DROP TABLE IF EXISTS ${this._q(tableName)}`);
+    await this.execute(`DROP TABLE IF EXISTS ${this._q(tableName)}`);
     await super.dropTable(tableName, options);
   }
 
@@ -73,8 +73,8 @@ export class SQLiteDDL extends DDLAbstract {
 
     try {
       if (ignoreForeignKeys && foreignKeysBefore) this._db().pragma('foreign_keys = OFF');
-      await this._execute(`DELETE FROM ${this._q(tableName)}`);
-      await this._execute('DELETE FROM sqlite_sequence WHERE name = ?', [tableName]);
+      await this.execute(`DELETE FROM ${this._q(tableName)}`);
+      await this.execute('DELETE FROM sqlite_sequence WHERE name = ?', [tableName]);
     } finally {
       if (ignoreForeignKeys && foreignKeysBefore) this._db().pragma('foreign_keys = ON');
     }

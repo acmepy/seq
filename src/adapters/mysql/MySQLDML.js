@@ -12,7 +12,7 @@ export class MySQLDML extends DMLAbstract {
     return this._adapter._connection();
   }
 
-  async _executeQueryAll(sql, params = []) {
+  async executeQueryAll(sql, params = []) {
     return this._measureSql(sql, params, async () => {
       try {
         const [rows] = await this._adapter._withConnection(connection => connection.execute(sql, params));
@@ -23,12 +23,12 @@ export class MySQLDML extends DMLAbstract {
     });
   }
 
-  async _executeGet(sql, params = []) {
-    const rows = await this._executeQueryAll(sql, params);
+  async executeGet(sql, params = []) {
+    const rows = await this.executeQueryAll(sql, params);
     return rows[0] || null;
   }
 
-  async _execute(sql, params = []) {
+  async execute(sql, params = []) {
     return this._measureSql(sql, params, async () => {
       try {
         const [result] = await this._adapter._withConnection(connection => connection.execute(sql, params));
@@ -66,7 +66,7 @@ export class MySQLDML extends DMLAbstract {
 
     const cols = Object.keys(colRecord);
     if (cols.length === 0) {
-      const info = await this._execute(`INSERT INTO ${this._q(tableName)} () VALUES ()`, []);
+      const info = await this.execute(`INSERT INTO ${this._q(tableName)} () VALUES ()`, []);
       if (schema.primaryKey) colRecord[schema.primaryKey] = Number(info.lastInsertRowid);
       return new model(this._toAttrNames(colRecord, schema), { _isNew: false });
     }
@@ -75,7 +75,7 @@ export class MySQLDML extends DMLAbstract {
     const placeholders = cols.map(() => '?').join(', ');
     const sql = `INSERT INTO ${this._q(tableName)} (${colNames}) VALUES (${placeholders})`;
     const params = cols.map(c => this._serializeValue(colRecord[c]));
-    const info = await this._execute(sql, params);
+    const info = await this.execute(sql, params);
     if (schema.autoIncrement && colRecord[schema.autoIncrement] == null) colRecord[schema.autoIncrement] = Number(info.lastInsertRowid);
     return new model(this._toAttrNames(colRecord, schema), { _isNew: false });
   }
@@ -83,11 +83,11 @@ export class MySQLDML extends DMLAbstract {
   async truncate(model, options = {}) {
     this._assertTransaction(options);
     const { tableName } = this._schema(model);
-    await this._execute('SET FOREIGN_KEY_CHECKS = 0', []);
+    await this.execute('SET FOREIGN_KEY_CHECKS = 0', []);
     try {
-      await this._execute(`TRUNCATE TABLE ${this._q(tableName)}`, []);
+      await this.execute(`TRUNCATE TABLE ${this._q(tableName)}`, []);
     } finally {
-      await this._execute('SET FOREIGN_KEY_CHECKS = 1', []);
+      await this.execute('SET FOREIGN_KEY_CHECKS = 1', []);
     }
   }
 

@@ -55,7 +55,7 @@ export interface ModelOptions {
   tenant?: boolean | TenantOptions;
   seq?: Seq;
   modelName?: string;
-  tableName?: string;
+  tableName?: string | null;
   timestamps?: boolean;
   createdAt?: string;
   updatedAt?: string;
@@ -171,6 +171,8 @@ export interface SyncResult {
 }
 
 export class Model<TValues = Record<string, unknown>> {
+  /** Final physical table name after registration; null/undefined before registration generates it from naming options. */
+  static tableName: string | null | undefined;
   static primaryKeyAttribute: string | null;
   static primaryKeyAttributes: string[];
   constructor(values?: Partial<TValues>, options?: BuildOptions);
@@ -271,7 +273,27 @@ export interface AdapterOptions {
   eager?: boolean;
 }
 
+export interface SqlExecutionResult {
+  changes: number;
+  /** Available for inserts in SQLite and MySQL. */
+  lastInsertRowid?: number | bigint;
+}
+
+/** Low-level SQL operations. Rows are driver objects, not Model instances. */
+export interface SqlDML {
+  executeGet<TRow extends object = Record<string, unknown>>(sql: string, params?: unknown[]): Promise<TRow | null>;
+  executeQueryAll<TRow extends object = Record<string, unknown>>(sql: string, params?: unknown[]): Promise<TRow[]>;
+  execute(sql: string, params?: unknown[]): SqlExecutionResult | Promise<SqlExecutionResult>;
+}
+
+/** DDL execution returns the underlying driver's result. */
+export interface SqlDDL {
+  execute(sql: string, params?: unknown[]): Promise<unknown>;
+}
+
 export class BaseAdapter {
+  /** Raw SQL API; MapAdapter does not support SQL. */
+  dml: SqlDML;
   constructor(options?: AdapterOptions);
   connect(): Promise<void>;
   authenticate(): Promise<boolean>;
@@ -293,6 +315,7 @@ export interface SQLiteAdapterOptions extends AdapterOptions {
 }
 
 export class SQLiteAdapter extends BaseAdapter {
+  ddl: SqlDDL;
   constructor(options?: SQLiteAdapterOptions);
 }
 
@@ -322,6 +345,7 @@ export interface MySQLAdapterOptions extends AdapterOptions {
 }
 
 export class MySQLAdapter extends BaseAdapter {
+  ddl: SqlDDL & Pick<SqlDML, 'executeGet' | 'executeQueryAll'>;
   constructor(options?: MySQLAdapterOptions);
 }
 
@@ -346,6 +370,7 @@ export interface OracleAdapterOptions extends AdapterOptions {
 }
 
 export class Oracle11Adapter extends BaseAdapter {
+  ddl: SqlDDL & Pick<SqlDML, 'executeGet' | 'executeQueryAll'>;
   constructor(options?: OracleAdapterOptions);
 }
 

@@ -30,3 +30,5 @@ await import('../composite-keys.test.js');
 await import('../tenant.test.js');
 
 await import('../timezone.test.js');
+
+await import('../raw-execution.test.js');

@@ -105,9 +105,6 @@ export class Seq {
       if (!modelClass.seq) modelClass.seq = this;
     }
 
-    // Phase 1.5: Resolve table names so DML operations use correct names
-    for (const modelClass of this._modelClasses) modelClass._resolvedTableName = this._resolveTableName(modelClass);
-
     // Phase 2: Register models (now that modelName is set)
     for (const modelClass of this._modelClasses) this.registerModel(modelClass);
     this._runModelAssociations();
@@ -122,7 +119,7 @@ export class Seq {
    */
   registerModel(modelClass) {
     modelTenant(modelClass);
-    if (!modelClass._resolvedTableName) modelClass._resolvedTableName = this._resolveTableName(modelClass);
+    if (modelClass.tableName == null) modelClass.tableName = this._resolveTableName(modelClass);
     this._registry.register(modelClass);
   }
 
@@ -148,7 +145,6 @@ export class Seq {
 
     if (!this._modelClasses.includes(DefinedModel)) this._modelClasses.push(DefinedModel);
     if (this._initialized) {
-      DefinedModel._resolvedTableName = this._resolveTableName(DefinedModel);
       this.registerModel(DefinedModel);
       this._runModelAssociations();
     }
@@ -169,7 +165,6 @@ export class Seq {
     for (const model of models) {
       result[model.modelName] = model;
       if (model.tableName && !result[model.tableName]) result[model.tableName] = model;
-      if (model._resolvedTableName && !result[model._resolvedTableName]) result[model._resolvedTableName] = model;
     }
     return result;
   }

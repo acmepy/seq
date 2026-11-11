@@ -26,11 +26,11 @@ describe('SQLite composite primary-key DDL', () => {
       const columns = adapter._db.pragma('table_info(composite_keys)');
       assert.deepEqual(columns.map(column => [column.name, column.pk]), [['company"id', 1], ['item_code', 2]]);
       const insert = 'INSERT INTO "composite_keys" ("company""id", "item_code") VALUES (?, ?)';
-      await adapter.dml._execute(insert, [1, 'A']);
-      await adapter.dml._execute(insert, [1, 'B']);
-      await adapter.dml._execute(insert, [2, 'A']);
-      assert.throws(() => adapter.dml._execute(insert, [1, 'A']), /UNIQUE constraint failed/);
-      assert.throws(() => adapter.dml._execute(insert, [null, 'A']), /NOT NULL constraint failed/);
+      await adapter.dml.execute(insert, [1, 'A']);
+      await adapter.dml.execute(insert, [1, 'B']);
+      await adapter.dml.execute(insert, [2, 'A']);
+      assert.throws(() => adapter.dml.execute(insert, [1, 'A']), /UNIQUE constraint failed/);
+      assert.throws(() => adapter.dml.execute(insert, [null, 'A']), /NOT NULL constraint failed/);
     } finally {
       await adapter.close();
     }
@@ -64,8 +64,8 @@ describe('SQLite composite primary-key DDL', () => {
       for (const autoIncrement of [false, true]) {
         const table = autoIncrement ? 'single_auto' : 'single_key';
         await adapter.ddl.createTable({ tableName: table, columns: { id: { type: DataTypes.INTEGER, primaryKey: true, autoIncrement } } });
-        await adapter.dml._execute(`INSERT INTO "${table}" DEFAULT VALUES`);
-        await adapter.dml._execute(`INSERT INTO "${table}" DEFAULT VALUES`);
+        await adapter.dml.execute(`INSERT INTO "${table}" DEFAULT VALUES`);
+        await adapter.dml.execute(`INSERT INTO "${table}" DEFAULT VALUES`);
         assert.deepEqual(adapter._db.prepare(`SELECT id FROM "${table}" ORDER BY id`).all(), [{ id: 1 }, { id: 2 }]);
       }
     } finally {
@@ -365,12 +365,12 @@ describe('SQLite Adapter', () => {
 
     it('maps UNIQUE constraint failed', async () => {
       await withConstraintAdapter(async sqlite => {
-        sqlite.dml._execute('CREATE TABLE users (id INTEGER PRIMARY KEY, email TEXT UNIQUE)');
-        sqlite.dml._execute('INSERT INTO users (email) VALUES (?)', ['ana@test.com']);
+        sqlite.dml.execute('CREATE TABLE users (id INTEGER PRIMARY KEY, email TEXT UNIQUE)');
+        sqlite.dml.execute('INSERT INTO users (email) VALUES (?)', ['ana@test.com']);
 
         await assertConstraint(
           sqlite,
-          () => sqlite.dml._execute('INSERT INTO users (email) VALUES (?)', ['ana@test.com']),
+          () => sqlite.dml.execute('INSERT INTO users (email) VALUES (?)', ['ana@test.com']),
           'UNIQUE constraint failed'
         );
       });
@@ -378,12 +378,12 @@ describe('SQLite Adapter', () => {
 
     it('maps FOREIGN KEY constraint failed', async () => {
       await withConstraintAdapter(async sqlite => {
-        sqlite.dml._execute('CREATE TABLE users (id INTEGER PRIMARY KEY)');
-        sqlite.dml._execute('CREATE TABLE tasks (id INTEGER PRIMARY KEY, user_id INTEGER REFERENCES users(id))');
+        sqlite.dml.execute('CREATE TABLE users (id INTEGER PRIMARY KEY)');
+        sqlite.dml.execute('CREATE TABLE tasks (id INTEGER PRIMARY KEY, user_id INTEGER REFERENCES users(id))');
 
         await assertConstraint(
           sqlite,
-          () => sqlite.dml._execute('INSERT INTO tasks (user_id) VALUES (?)', [1]),
+          () => sqlite.dml.execute('INSERT INTO tasks (user_id) VALUES (?)', [1]),
           'FOREIGN KEY constraint failed'
         );
       });
@@ -391,11 +391,11 @@ describe('SQLite Adapter', () => {
 
     it('maps NOT NULL constraint failed', async () => {
       await withConstraintAdapter(async sqlite => {
-        sqlite.dml._execute('CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT NOT NULL)');
+        sqlite.dml.execute('CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT NOT NULL)');
 
         await assertConstraint(
           sqlite,
-          () => sqlite.dml._execute('INSERT INTO users (name) VALUES (?)', [null]),
+          () => sqlite.dml.execute('INSERT INTO users (name) VALUES (?)', [null]),
           'NOT NULL constraint failed'
         );
       });
@@ -403,11 +403,11 @@ describe('SQLite Adapter', () => {
 
     it('maps CHECK constraint failed', async () => {
       await withConstraintAdapter(async sqlite => {
-        sqlite.dml._execute('CREATE TABLE users (id INTEGER PRIMARY KEY, age INTEGER CHECK (age >= 18))');
+        sqlite.dml.execute('CREATE TABLE users (id INTEGER PRIMARY KEY, age INTEGER CHECK (age >= 18))');
 
         await assertConstraint(
           sqlite,
-          () => sqlite.dml._execute('INSERT INTO users (age) VALUES (?)', [17]),
+          () => sqlite.dml.execute('INSERT INTO users (age) VALUES (?)', [17]),
           'CHECK constraint failed'
         );
       });
@@ -417,9 +417,9 @@ describe('SQLite Adapter', () => {
       const errors = [];
       await withConstraintAdapter(async sqlite => {
         new Seq({ adapter: sqlite, logging: { info: false, error: (...args) => errors.push(args) } });
-        sqlite.dml._execute('CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT NOT NULL)');
+        sqlite.dml.execute('CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT NOT NULL)');
 
-        assert.throws(() => sqlite.dml._execute('INSERT INTO users (name) VALUES (?)', [null]));
+        assert.throws(() => sqlite.dml.execute('INSERT INTO users (name) VALUES (?)', [null]));
       });
 
       assert.equal(errors.length, 1);

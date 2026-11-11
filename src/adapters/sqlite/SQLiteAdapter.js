@@ -44,7 +44,7 @@ export class SQLiteAdapter extends BaseAdapter {
 
   async authenticate() {
     await this.connect();
-    await this.dml._executeGet('SELECT 1 AS ok', []);
+    await this.dml.executeGet('SELECT 1 AS ok', []);
     return true;
   }
 

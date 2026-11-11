@@ -13,7 +13,7 @@ export class Oracle11DDL extends DDLAbstract {
     let index = 0; return sql.replaceAll('?', () => `:${++index}`);
   }
 
-  async _execute(sql, params = []) {
+  async execute(sql, params = []) {
     return this._measureSql(sql, params, async () => {
       try {
         return await this._adapter._withConnection(connection => connection.execute(this._oracleSql(sql), params, { autoCommit: !this._adapter._activeTransaction }));
@@ -22,7 +22,7 @@ export class Oracle11DDL extends DDLAbstract {
       }
     });
   }
-  async _executeQueryAll(sql, params = []) {
+  async executeQueryAll(sql, params = []) {
     return this._measureSql(sql, params, async () => {
       try {
         return await this._adapter._withConnection(async connection => (await connection.execute(this._oracleSql(sql), params, { outFormat: this._adapter._client.OUT_FORMAT_OBJECT })).rows || []);
@@ -31,21 +31,21 @@ export class Oracle11DDL extends DDLAbstract {
       }
     });
   }
-  async _executeGet(sql, params = []) {
-    return (await this._executeQueryAll(sql, params))[0] || null;
+  async executeGet(sql, params = []) {
+    return (await this.executeQueryAll(sql, params))[0] || null;
   }
 
   _usesSequenceForAutoIncrement() { return true; }
 
   async _hasSequence(name) {
-    return !!await this._executeGet('SELECT SEQUENCE_NAME FROM USER_SEQUENCES WHERE SEQUENCE_NAME = ?', [name]);
+    return !!await this.executeGet('SELECT SEQUENCE_NAME FROM USER_SEQUENCES WHERE SEQUENCE_NAME = ?', [name]);
   }
 
   async _ensureSequence(tableName) {
     const name = this._adapter.sequenceName(tableName);
     if (await this._hasSequence(name)) return;
     try {
-      await this._execute(`CREATE SEQUENCE ${this._q(name)} START WITH 1 INCREMENT BY 1`);
+      await this.execute(`CREATE SEQUENCE ${this._q(name)} START WITH 1 INCREMENT BY 1`);
     } catch (error) {
       // Another sync may have created it after the existence check.
       if (error.errorNum !== 955 || !(await this._hasSequence(name))) throw error;
@@ -69,37 +69,37 @@ export class Oracle11DDL extends DDLAbstract {
       columns.push(parts.join(' ')); if (column.primaryKey) primaryKeys.push(name);
     }
     if (primaryKeys.length) columns.push(`CONSTRAINT ${this._q(this._constraintName('pk', def.tableName, primaryKeys))} PRIMARY KEY (${primaryKeys.map(key => this._q(key)).join(', ')})`);
-    await this._execute(`CREATE TABLE ${this._q(def.tableName)} (\n  ${columns.join(',\n  ')}\n)`);
+    await this.execute(`CREATE TABLE ${this._q(def.tableName)} (\n  ${columns.join(',\n  ')}\n)`);
     if (def.autoIncrement && this._usesSequenceForAutoIncrement()) await this._ensureSequence(def.tableName);
   }
 
   async dropTable(tableName, options = {}) {
     if (options.ifExists && !(await this.hasTable(tableName))) return;
-    await this._execute(`DROP TABLE ${this._q(tableName)}${options.ignoreForeignKeys !== false ? ' CASCADE CONSTRAINTS' : ''}`);
-    try { await this._execute(`DROP SEQUENCE ${this._q(this._adapter.sequenceName(tableName))}`); } catch (error) { if (!/ORA-02289/.test(error?.message || '')) throw error; }
+    await this.execute(`DROP TABLE ${this._q(tableName)}${options.ignoreForeignKeys !== false ? ' CASCADE CONSTRAINTS' : ''}`);
+    try { await this.execute(`DROP SEQUENCE ${this._q(this._adapter.sequenceName(tableName))}`); } catch (error) { if (!/ORA-02289/.test(error?.message || '')) throw error; }
     await super.dropTable(tableName, options);
   }
   async truncateTable(tableName, options = {}) {
-    if (!options.ifExists || await this.hasTable(tableName)) await this._execute(`TRUNCATE TABLE ${this._q(tableName)}`);
+    if (!options.ifExists || await this.hasTable(tableName)) await this.execute(`TRUNCATE TABLE ${this._q(tableName)}`);
   }
 
   async hasTable(tableName) {
-    return !!await this._executeGet('SELECT TABLE_NAME FROM USER_TABLES WHERE TABLE_NAME = ?', [tableName]);
+    return !!await this.executeGet('SELECT TABLE_NAME FROM USER_TABLES WHERE TABLE_NAME = ?', [tableName]);
   }
 
   async listTables() {
-    return (await this._executeQueryAll('SELECT TABLE_NAME FROM USER_TABLES union all select view_name from user_views')).map(row => row.TABLE_NAME);
+    return (await this.executeQueryAll('SELECT TABLE_NAME FROM USER_TABLES union all select view_name from user_views')).map(row => row.TABLE_NAME);
   }
 
   async describeTable(tableName) {
     if (!(await this.hasTable(tableName))) throw new AdapterError(`Table "${tableName}" does not exist`, { code: 'SEQ_ADAPTER_TABLE_NOT_FOUND' });
-    const rows = await this._executeQueryAll('SELECT COLUMN_NAME, DATA_TYPE, DATA_LENGTH, NULLABLE, DATA_DEFAULT FROM USER_TAB_COLUMNS WHERE TABLE_NAME = ? ORDER BY COLUMN_ID', [tableName]);
-    const primaryKeys = new Set((await this._executeQueryAll('SELECT COLUMN_NAME FROM USER_CONS_COLUMNS WHERE TABLE_NAME = ? AND CONSTRAINT_NAME IN (SELECT CONSTRAINT_NAME FROM USER_CONSTRAINTS WHERE TABLE_NAME = ? AND CONSTRAINT_TYPE = \'P\')', [tableName, tableName])).map(row => row.COLUMN_NAME));
+    const rows = await this.executeQueryAll('SELECT COLUMN_NAME, DATA_TYPE, DATA_LENGTH, NULLABLE, DATA_DEFAULT FROM USER_TAB_COLUMNS WHERE TABLE_NAME = ? ORDER BY COLUMN_ID', [tableName]);
+    const primaryKeys = new Set((await this.executeQueryAll('SELECT COLUMN_NAME FROM USER_CONS_COLUMNS WHERE TABLE_NAME = ? AND CONSTRAINT_NAME IN (SELECT CONSTRAINT_NAME FROM USER_CONSTRAINTS WHERE TABLE_NAME = ? AND CONSTRAINT_TYPE = \'P\')', [tableName, tableName])).map(row => row.COLUMN_NAME));
     return { tableName, columns: rows.map(row => ({ name: row.COLUMN_NAME, type: row.DATA_TYPE, allowNull: row.NULLABLE === 'Y', primaryKey: primaryKeys.has(row.COLUMN_NAME), autoIncrement: false, defaultValue: row.DATA_DEFAULT })) };
   }
   async introspectDefinition(definition) {
     const def = this.normalizeDefinition(definition);
-    const columnsInfo = await this._executeQueryAll('SELECT COLUMN_NAME FROM USER_TAB_COLUMNS WHERE TABLE_NAME = ?', [def.tableName]);
+    const columnsInfo = await this.executeQueryAll('SELECT COLUMN_NAME FROM USER_TAB_COLUMNS WHERE TABLE_NAME = ?', [def.tableName]);
     const physicalColumnNames = columnsInfo.map(row => row.COLUMN_NAME);
     const physicalColumns = new Map(physicalColumnNames.map(name => [name.toLowerCase(), name]));
     const columns = {};
@@ -119,15 +119,15 @@ export class Oracle11DDL extends DDLAbstract {
       columnToAttr[physicalColumnName] = attrName;
     }
 
-    const uniqueRows = await this._executeQueryAll("SELECT CONSTRAINT_NAME FROM USER_CONSTRAINTS WHERE TABLE_NAME = ? AND CONSTRAINT_TYPE = 'U'", [def.tableName]);
+    const uniqueRows = await this.executeQueryAll("SELECT CONSTRAINT_NAME FROM USER_CONSTRAINTS WHERE TABLE_NAME = ? AND CONSTRAINT_TYPE = 'U'", [def.tableName]);
     const existingUniqueNames = new Set(uniqueRows.map(row => row.CONSTRAINT_NAME));
     const uniqueConstraints = def.uniqueConstraints.filter(item => existingUniqueNames.has(item.constraintName));
 
-    const indexRows = await this._executeQueryAll('SELECT INDEX_NAME FROM USER_INDEXES WHERE TABLE_NAME = ?',[def.tableName]);
+    const indexRows = await this.executeQueryAll('SELECT INDEX_NAME FROM USER_INDEXES WHERE TABLE_NAME = ?',[def.tableName]);
     const existingIndexNames = new Set(indexRows.map(row => row.INDEX_NAME));
     const indexes = def.indexes.filter(item => existingIndexNames.has(item.name));
 
-    const fkRows = await this._executeQueryAll("SELECT CONSTRAINT_NAME FROM USER_CONSTRAINTS WHERE TABLE_NAME = ? AND CONSTRAINT_TYPE = 'R'", [def.tableName]);
+    const fkRows = await this.executeQueryAll("SELECT CONSTRAINT_NAME FROM USER_CONSTRAINTS WHERE TABLE_NAME = ? AND CONSTRAINT_TYPE = 'R'", [def.tableName]);
     const existingFKNames = new Set(fkRows.map(row => row.CONSTRAINT_NAME));
     const foreignKeys = def.foreignKeys.filter(fk => existingFKNames.has(fk.constraintName));
 
@@ -142,26 +142,26 @@ export class Oracle11DDL extends DDLAbstract {
         parts.push(`DEFAULT ${this._formatDefaultValue(value, column)}`);
       }
       if (!column.allowNull) parts.push(`CONSTRAINT ${this._q(this._constraintName('nn', tableName, [name]))} NOT NULL`);
-      await this._execute(`ALTER TABLE ${this._q(tableName)} ADD (${parts.join(' ')})`);
+      await this.execute(`ALTER TABLE ${this._q(tableName)} ADD (${parts.join(' ')})`);
       schema.columns[attr] = column;
       schema.attrToColumn[attr] = name;
       schema.columnToAttr[name] = attr;
     }
   }
   async addUniqueConstraint(tableName, constraint) {
-    await this._execute(`ALTER TABLE ${this._q(tableName)} ADD CONSTRAINT ${this._q(constraint.constraintName)} UNIQUE (${constraint.columns.map(column => this._q(column)).join(', ')})`);
+    await this.execute(`ALTER TABLE ${this._q(tableName)} ADD CONSTRAINT ${this._q(constraint.constraintName)} UNIQUE (${constraint.columns.map(column => this._q(column)).join(', ')})`);
     this._adapter.schemas.get(tableName).uniqueConstraints.push({ ...constraint });
   }
 
   async addIndex(tableName, index) {
-    await this._execute(`CREATE ${index.unique ? 'UNIQUE ' : ''}INDEX ${this._q(index.name)} ON ${this._q(tableName)} (${index.columns.map(column => this._q(column)).join(', ')})`);
+    await this.execute(`CREATE ${index.unique ? 'UNIQUE ' : ''}INDEX ${this._q(index.name)} ON ${this._q(tableName)} (${index.columns.map(column => this._q(column)).join(', ')})`);
     this._adapter.schemas.get(tableName).indexes.push({ ...index });
   }
 
   async addForeignKey(tableName, fk) {
     const deleteClause = fk.onDelete === 'CASCADE' || fk.onDelete === 'SET NULL' ? ` ON DELETE ${fk.onDelete}` : '';
     const deferred = ['CASCADE', 'SET NULL'].includes(fk.onUpdate) ? ' DEFERRABLE INITIALLY IMMEDIATE' : '';
-    await this._execute(`ALTER TABLE ${this._q(tableName)} ADD CONSTRAINT ${this._q(fk.constraintName)} FOREIGN KEY (${(fk.columnNames || [fk.columnName]).map(column => this._q(column)).join(', ')}) REFERENCES ${this._q(fk.references.table)} (${(fk.references.columns || [fk.references.column]).map(column => this._q(column)).join(', ')})${deleteClause}${deferred}`);
+    await this.execute(`ALTER TABLE ${this._q(tableName)} ADD CONSTRAINT ${this._q(fk.constraintName)} FOREIGN KEY (${(fk.columnNames || [fk.columnName]).map(column => this._q(column)).join(', ')}) REFERENCES ${this._q(fk.references.table)} (${(fk.references.columns || [fk.references.column]).map(column => this._q(column)).join(', ')})${deleteClause}${deferred}`);
     this._adapter.schemas.get(tableName).foreignKeys.push({ ...fk });
   }
   _formatDefaultValue(value, column) {

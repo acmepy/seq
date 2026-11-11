@@ -62,7 +62,7 @@ describe('Associations', () => {
   }
 
   function physicalTableName(model) {
-    return model._resolvedTableName || model.tableName;
+    return model.tableName;
   }
 
   function expectedForeignKeyName(sourceTable, targetTable, foreignKeyColumn) {

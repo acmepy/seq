@@ -173,7 +173,7 @@ for (const compositeMaster of [false, true]) {
       const { seq, adapter, Order, Line } = await setup(compositeMaster);
       adapter.schemas.clear();
       await seq._registerExistingSchemas();
-      const schema = adapter.schemas.get(Line._resolvedTableName);
+      const schema = adapter.schemas.get(Line.tableName);
       assert.equal(schema.foreignKeys.length, 1);
       assert.equal(schema.foreignKeys[0].columnNames.length, compositeMaster ? 2 : 1);
       const result = await Order.findAll({ include: [{ model: Line, as: 'lines', eager: true }] });

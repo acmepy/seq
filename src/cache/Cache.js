@@ -83,11 +83,11 @@ export class Cache {
     const partition = stableStringify(tenantIdentity(tenantId));
     const root = this.seq?.getModel(modelName);
     const dependencies = new Set([modelName]);
-    if (root) dependencies.add(`@table:${root._resolvedTableName || root.tableName}`);
+    if (root) dependencies.add(`@table:${root.tableName}`);
     const collect = (includes, model) => {
       for (const include of includes || []) {
         if (include.model) dependencies.add(include.model.modelName);
-        if (include.model) dependencies.add(`@table:${include.model._resolvedTableName || include.model.tableName}`);
+        if (include.model) dependencies.add(`@table:${include.model.tableName}`);
         const association = model && resolveAssociation(model, include);
         if (association?.throughModel) dependencies.add(association.throughModel.modelName);
         if (association?.type === 'belongsToMany') dependencies.add(`@table:${this.seq.adapter.getAssociationThroughTable(association)}`);
@@ -112,7 +112,7 @@ export class Cache {
     const partition = scope ? stableStringify(tenantIdentity(scope.tenantId)) : null;
     const model = this.seq?.getModel(modelName);
     const affected = new Map([[modelName, partition]]);
-    const pending = model ? [{ table: model._resolvedTableName || model.tableName, partition }] : [];
+    const pending = model ? [{ table: model.tableName, partition }] : [];
     const visited = new Set();
     while (pending.length) {
       const current = pending.pop();
@@ -124,7 +124,7 @@ export class Cache {
       for (const [table, schema] of this.seq.adapter.schemas) {
         if (!(schema.foreignKeys || []).some(fk => fk.references.table === current.table
           && [fk.onDelete, fk.onUpdate].some(action => action === 'CASCADE' || action === 'SET NULL'))) continue;
-        const child = this.seq.models.find(item => (item._resolvedTableName || item.tableName) === table);
+        const child = this.seq.models.find(item => item.tableName === table);
         pending.push({ table, partition: child?.options.tenant || schema.tenantAttribute ? current.partition : null });
       }
     }

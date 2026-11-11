@@ -12,7 +12,7 @@ export class SQLiteTCL extends TCLAbstract {
     return this._adapter._db;
   }
 
-  async _execute(sql, params = []) {
+  async execute(sql, params = []) {
     return this._measureSql(sql, params, () => this._db().prepare(sql).run(...params));
   }
 
@@ -20,7 +20,7 @@ export class SQLiteTCL extends TCLAbstract {
     if (this._adapter._activeTransaction) {
       throw new AdapterError('Nested or concurrent SQLite transactions are not supported', { code: 'SEQ_ADAPTER_TRANSACTION_CONCURRENT' });
     }
-    this._execute('BEGIN IMMEDIATE');
+    this.execute('BEGIN IMMEDIATE');
     const transaction = {
       id: ++transactionIdCounter,
       active: true,
@@ -32,14 +32,14 @@ export class SQLiteTCL extends TCLAbstract {
 
   async commit(transaction) {
     this._validateTransaction(transaction);
-    this._execute('COMMIT');
+    this.execute('COMMIT');
     transaction.active = false;
     this._adapter._activeTransaction = null;
   }
 
   async rollback(transaction) {
     this._validateTransaction(transaction);
-    this._execute('ROLLBACK');
+    this.execute('ROLLBACK');
     transaction.active = false;
     this._adapter._activeTransaction = null;
   }

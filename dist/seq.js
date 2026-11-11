@@ -93,7 +93,7 @@ class ModelRegistry {
       });
     }
     this._models.set(name, modelClass);
-    const tableName = modelClass._resolvedTableName || modelClass.tableName;
+    const tableName = modelClass.tableName;
     if (tableName) {
       if (this._tableNames.has(tableName)) {
         throw new ModelError(
@@ -1402,8 +1402,7 @@ class Model {
     }
     const throughModel = through?.model || through;
     if (typeof throughModel === 'function') {
-      const throughTable = throughModel._resolvedTableName
-        || throughModel.tableName
+      const throughTable = throughModel.tableName
         || throughModel.modelName
         || throughModel.name;
       return { through, throughModel, throughTable };
@@ -2391,7 +2390,7 @@ function encode(value) {
   if (value === null) return ['null'];
   if (value instanceof Date) return ['date', value.toISOString()];
   if (Array.isArray(value)) return ['array', value.map(encode)];
-  if (typeof value === 'function') return ['model', value.modelName || value.name, value._resolvedTableName || value.tableName];
+  if (typeof value === 'function') return ['model', value.modelName || value.name, value.tableName];
   if (typeof value === 'object') {
     const entries = Reflect.ownKeys(value).filter(key => value[key] !== undefined).map(key => [
       typeof key === 'symbol' ? ['symbol', Symbol.keyFor(key) || key.description] : ['string', key], encode(value[key])
@@ -2498,11 +2497,11 @@ class Cache {
     const partition = stableStringify(tenantIdentity(tenantId));
     const root = this.seq?.getModel(modelName);
     const dependencies = new Set([modelName]);
-    if (root) dependencies.add(`@table:${root._resolvedTableName || root.tableName}`);
+    if (root) dependencies.add(`@table:${root.tableName}`);
     const collect = (includes, model) => {
       for (const include of includes || []) {
         if (include.model) dependencies.add(include.model.modelName);
-        if (include.model) dependencies.add(`@table:${include.model._resolvedTableName || include.model.tableName}`);
+        if (include.model) dependencies.add(`@table:${include.model.tableName}`);
         const association = model && resolveAssociation(model, include);
         if (association?.throughModel) dependencies.add(association.throughModel.modelName);
         if (association?.type === 'belongsToMany') dependencies.add(`@table:${this.seq.adapter.getAssociationThroughTable(association)}`);
@@ -2527,7 +2526,7 @@ class Cache {
     const partition = scope ? stableStringify(tenantIdentity(scope.tenantId)) : null;
     const model = this.seq?.getModel(modelName);
     const affected = new Map([[modelName, partition]]);
-    const pending = model ? [{ table: model._resolvedTableName || model.tableName, partition }] : [];
+    const pending = model ? [{ table: model.tableName, partition }] : [];
     const visited = new Set();
     while (pending.length) {
       const current = pending.pop();
@@ -2539,7 +2538,7 @@ class Cache {
       for (const [table, schema] of this.seq.adapter.schemas) {
         if (!(schema.foreignKeys || []).some(fk => fk.references.table === current.table
           && [fk.onDelete, fk.onUpdate].some(action => action === 'CASCADE' || action === 'SET NULL'))) continue;
-        const child = this.seq.models.find(item => (item._resolvedTableName || item.tableName) === table);
+        const child = this.seq.models.find(item => item.tableName === table);
         pending.push({ table, partition: child?.options.tenant || schema.tenantAttribute ? current.partition : null });
       }
     }
@@ -2670,9 +2669,6 @@ class Seq {
       if (!modelClass.seq) modelClass.seq = this;
     }
 
-    // Phase 1.5: Resolve table names so DML operations use correct names
-    for (const modelClass of this._modelClasses) modelClass._resolvedTableName = this._resolveTableName(modelClass);
-
     // Phase 2: Register models (now that modelName is set)
     for (const modelClass of this._modelClasses) this.registerModel(modelClass);
     this._runModelAssociations();
@@ -2687,7 +2683,7 @@ class Seq {
    */
   registerModel(modelClass) {
     modelTenant(modelClass);
-    if (!modelClass._resolvedTableName) modelClass._resolvedTableName = this._resolveTableName(modelClass);
+    if (modelClass.tableName == null) modelClass.tableName = this._resolveTableName(modelClass);
     this._registry.register(modelClass);
   }
 
@@ -2713,7 +2709,6 @@ class Seq {
 
     if (!this._modelClasses.includes(DefinedModel)) this._modelClasses.push(DefinedModel);
     if (this._initialized) {
-      DefinedModel._resolvedTableName = this._resolveTableName(DefinedModel);
       this.registerModel(DefinedModel);
       this._runModelAssociations();
     }
@@ -2734,7 +2729,6 @@ class Seq {
     for (const model of models) {
       result[model.modelName] = model;
       if (model.tableName && !result[model.tableName]) result[model.tableName] = model;
-      if (model._resolvedTableName && !result[model._resolvedTableName]) result[model._resolvedTableName] = model;
     }
     return result;
   }
@@ -3268,9 +3262,9 @@ class BaseAdapter {
   }
 
   resolveTableName(modelClass) {
-    const name = (modelClass.tableName? modelClass.tableName : this.naming.prefix ? `${this.naming.prefix}${initCap(modelClass.modelName)}` : modelClass.modelName).replace(/[^A-Za-z0-9_$#]+/g, '_');
-    const convention = modelClass.tableName ? null : this.naming.tables;
-    return truncateMiddle(applyCase(applyConvention(name, convention), this._caseStyle(convention)), this.naming.maxLength);
+    if (modelClass.tableName != null) return modelClass.tableName;
+    const name = (this.naming.prefix ? `${this.naming.prefix}${initCap(modelClass.modelName)}` : modelClass.modelName).replace(/[^A-Za-z0-9_$#]+/g, '_');
+    return truncateMiddle(applyCase(applyConvention(name, this.naming.tables), this._caseStyle(this.naming.tables)), this.naming.maxLength);
   }
 
   resolveColumnName(def, attrName) {
@@ -3306,7 +3300,7 @@ class BaseAdapter {
     const attrToColumn = {};
     const columnToAttr = {};
     const virtualAttributes = [];
-    const sourceTable = modelClass._resolvedTableName || this.resolveTableName(modelClass);
+    const sourceTable = modelClass.tableName ?? this.resolveTableName(modelClass);
 
     for (const [name, def] of Object.entries(attributes)) {
       if (modelClass._isVirtualAttribute?.(def)) {
@@ -3379,8 +3373,8 @@ class BaseAdapter {
     const targetPKType = targetPKDef.type;
     const targetPKCol = this.resolveColumnName(targetPKDef, targetPKAttr);
 
-    const sourceTable = source._resolvedTableName || this.resolveTableName(source);
-    const targetTable = target._resolvedTableName || this.resolveTableName(target);
+    const sourceTable = source.tableName ?? this.resolveTableName(source);
+    const targetTable = target.tableName ?? this.resolveTableName(target);
 
     const fkCol = fkAttr;
     const otherKeyCol = otherKeyAttr;
@@ -3454,18 +3448,17 @@ class BaseAdapter {
   }
 
   getAssociationThroughTable(assoc) {
-    return assoc.throughModel?._resolvedTableName
-      || assoc.throughModel?.tableName
+    return assoc.throughModel?.tableName
       || assoc.throughTable
       || assoc.through;
   }
 
   buildForeignKeys(modelClass, attrToColumn, context) {
     const fkMap = new Map();
-    const sourceTable = modelClass._resolvedTableName || this.resolveTableName(modelClass);
+    const sourceTable = modelClass.tableName ?? this.resolveTableName(modelClass);
     const add = (attrs, parent, keys, options) => {
       const columnNames = attrs.map(attr => attrToColumn[attr] || attr);
-      const refTable = parent._resolvedTableName || this.resolveTableName(parent);
+      const refTable = parent.tableName ?? this.resolveTableName(parent);
       const refColumns = keys.map(key => this.resolveColumnName(parent.rawAttributes[key] || {}, key));
       const entry = {
         attributeNames: attrs, columnNames,
@@ -4131,7 +4124,7 @@ const requiredPageIncludes = Symbol('requiredPageIncludes');
 /**
  * Base DML abstract.
  * Provides SQL-based default implementations for selectAll, count, update, delete.
- * Adapter subclasses implement execution hooks (_executeQuery, _executeGet, _execute, _mapRows)
+ * Adapter subclasses implement execution hooks (executeQueryAll, executeGet, execute, _mapRows)
  * and adapter-specific methods (insert, truncate).
  */
 class DMLAbstract extends BaseAbstract {
@@ -4150,7 +4143,7 @@ class DMLAbstract extends BaseAbstract {
    * @returns {string}
    */
   _getTableName(model) {
-    return model._resolvedTableName || model.tableName;
+    return model.tableName;
   }
 
   /**
@@ -4596,8 +4589,8 @@ class DMLAbstract extends BaseAbstract {
    * @param {*[]} params
    * @returns {Promise<object[]>}
    */
-  async _executeQueryAll(sql, params) {
-    throw new AdapterError('DML _executeQuery is not implemented by this adapter', { code: 'SEQ_DML_NOT_IMPLEMENTED' });
+  async executeQueryAll(sql, params = []) {
+    throw new AdapterError('DML executeQueryAll is not implemented by this adapter', { code: 'SEQ_DML_NOT_IMPLEMENTED' });
   }
 
   /**
@@ -4606,8 +4599,8 @@ class DMLAbstract extends BaseAbstract {
    * @param {*[]} params
    * @returns {Promise<object|null>}
    */
-  async _executeGet(sql, params) {
-    throw new AdapterError('DML _executeGet is not implemented by this adapter', { code: 'SEQ_DML_NOT_IMPLEMENTED' });
+  async executeGet(sql, params = []) {
+    throw new AdapterError('DML executeGet is not implemented by this adapter', { code: 'SEQ_DML_NOT_IMPLEMENTED' });
   }
 
   /**
@@ -4616,8 +4609,8 @@ class DMLAbstract extends BaseAbstract {
    * @param {*[]} params
    * @returns {Promise<{ changes: number, lastInsertRowid?: number }>}
    */
-  async _execute(sql, params = []) {
-    throw new AdapterError('DML _execute is not implemented by this adapter', { code: 'SEQ_DML_NOT_IMPLEMENTED' });
+  async execute(sql, params = []) {
+    throw new AdapterError('DML execute is not implemented by this adapter', { code: 'SEQ_DML_NOT_IMPLEMENTED' });
   }
 
   async selectAssociationJunctionRows(assoc, sourceIds, options = {}) {
@@ -4653,7 +4646,7 @@ class DMLAbstract extends BaseAbstract {
       const placeholders = ids.map(() => '?').join(', ');
       const tenant = this._buildConditions(this._junctionTenantWhere(assoc) || {}, junctionSchema);
       const sql = `SELECT ${this._q(fkCol)} AS ${this._q(fkAttr)}, ${this._q(otherKeyCol)} AS ${this._q(otherKeyAttr)} FROM ${this._q(throughTable)} WHERE ${this._q(fkCol)} IN (${placeholders})${tenant.conditions.length ? ` AND ${tenant.conditions.join(' AND ')}` : ''}`;
-      return this._executeQueryAll(sql, [...ids.map(id => this._serializeValue(id)), ...tenant.params]);
+      return this.executeQueryAll(sql, [...ids.map(id => this._serializeValue(id)), ...tenant.params]);
     }));
     return rows.flat();
   }
@@ -4743,7 +4736,7 @@ class DMLAbstract extends BaseAbstract {
     }
     sql += this._buildOrderBy(queryOptions.order, schema, alias);
     sql = this._applyLimitOffset(sql, queryOptions);
-    const rows = await this._executeQueryAll(sql, params);
+    const rows = await this.executeQueryAll(sql, params);
     let instances;
     if (eagerIncludes.length > 0) {
       instances = processJoinedRows(rows, model, eagerIncludes, this, eagerIncludeSqlAliases, globalEager);
@@ -4773,7 +4766,7 @@ class DMLAbstract extends BaseAbstract {
     const where = this._buildWhere(options.where, schema, alias);
     sql += where.sql;
     params.push(...where.params);
-    const row = await this._executeGet(sql, params);
+    const row = await this.executeGet(sql, params);
     return row.cnt;
   }
 
@@ -4804,7 +4797,7 @@ class DMLAbstract extends BaseAbstract {
     const where = this._buildWhere(options.where, schema);
     const sql = `UPDATE ${this._q(tableName)} SET ${setClauses.join(', ')}${where.sql}`;
     params.push(...where.params);
-    await this._execute(sql, params);
+    await this.execute(sql, params);
     if (primaryKeys) {
       return this.selectAll(model, { ...options, where: tuplesWhere(pkAttrs, primaryKeys) });
     }
@@ -4826,7 +4819,7 @@ class DMLAbstract extends BaseAbstract {
     const where = this._buildWhere(options.where, schema);
     const sql = `DELETE FROM ${this._q(tableName)}${where.sql}`;
     params.push(...where.params);
-    const info = await this._execute(sql, params);
+    const info = await this.execute(sql, params);
     return info.changes;
   }
 
@@ -4854,7 +4847,7 @@ class DMLAbstract extends BaseAbstract {
     this._validateRecord(colRecord, schema, model.modelName);
     const cols = Object.keys(colRecord);
     if (cols.length === 0) {
-      const info = await this._execute(`INSERT INTO ${this._q(tableName)} DEFAULT VALUES`, []);
+      const info = await this.execute(`INSERT INTO ${this._q(tableName)} DEFAULT VALUES`, []);
       if (schema.primaryKey) colRecord[schema.primaryKey] = Number(info.lastInsertRowid);
       return new model(this._toAttrNames(colRecord, schema), { _isNew: false });
     }
@@ -4862,7 +4855,7 @@ class DMLAbstract extends BaseAbstract {
     const placeholders = cols.map(() => '?').join(', ');
     const sql = `INSERT INTO ${this._q(tableName)} (${colNames}) VALUES (${placeholders})`;
     const params = cols.map(c => this._serializeValue(colRecord[c]));
-    const info = await this._execute(sql, params);
+    const info = await this.execute(sql, params);
     if (schema.autoIncrement && colRecord[schema.autoIncrement] == null) {
       colRecord[schema.autoIncrement] = Number(info.lastInsertRowid);
     }
@@ -5267,12 +5260,12 @@ class MapDML extends DMLAbstract {
 
   /**
    * Returns the effective table name for a model.
-   * Uses _resolvedTableName if set by Seq (convention-applied), otherwise falls back to tableName.
+   * Uses the physical tableName finalized when Seq registers the model.
    * @param {typeof import('../../core/Model.js').Model} model
    * @returns {string}
    */
   _getTableName(model) {
-    return model._resolvedTableName || model.tableName;
+    return model.tableName;
   }
 
   /**
@@ -6004,7 +5997,7 @@ class SQLiteDDL extends DDLAbstract {
     return this._adapter._db;
   }
 
-  async _execute(sql, params = []) {
+  async execute(sql, params = []) {
     return this._measureSql(sql.replaceAll('\n  ', ' '), params, () => this._db().prepare(sql).run(...params));
   }
 
@@ -6050,12 +6043,12 @@ class SQLiteDDL extends DDLAbstract {
     }
 
     const sql = `CREATE TABLE ${this._q(def.tableName)} (\n  ${colDefs.join(',\n  ')}\n)`;
-    await this._execute(sql);
+    await this.execute(sql);
   }
 
   async dropTable(tableName, options = {}) {
     await this.truncateTable(tableName, { ...options, ifExists: true, ignoreForeignKeys: true });
-    await this._execute(`DROP TABLE IF EXISTS ${this._q(tableName)}`);
+    await this.execute(`DROP TABLE IF EXISTS ${this._q(tableName)}`);
     await super.dropTable(tableName, options);
   }
 
@@ -6067,8 +6060,8 @@ class SQLiteDDL extends DDLAbstract {
 
     try {
       if (ignoreForeignKeys && foreignKeysBefore) this._db().pragma('foreign_keys = OFF');
-      await this._execute(`DELETE FROM ${this._q(tableName)}`);
-      await this._execute('DELETE FROM sqlite_sequence WHERE name = ?', [tableName]);
+      await this.execute(`DELETE FROM ${this._q(tableName)}`);
+      await this.execute('DELETE FROM sqlite_sequence WHERE name = ?', [tableName]);
     } finally {
       if (ignoreForeignKeys && foreignKeysBefore) this._db().pragma('foreign_keys = ON');
     }
@@ -6241,7 +6234,7 @@ class SQLiteDML extends DMLAbstract {
   // Execution hooks — SQLite-specific
   // ---------------------------------------------------------------------------
 
-  async _executeQueryAll(sql, params) {
+  async executeQueryAll(sql, params = []) {
     return this._measureSql(sql, params, () => {
       try {
         return this._db().prepare(sql).all(...params);
@@ -6251,17 +6244,17 @@ class SQLiteDML extends DMLAbstract {
     });
   }
 
-  async _executeGet(sql, params) {
+  async executeGet(sql, params = []) {
     return this._measureSql(sql, params, () => {
       try {
-        return this._db().prepare(sql).get(...params);
+        return this._db().prepare(sql).get(...params) || null;
       } catch (error) {
         throw this._toError(error);
       }
     });
   }
 
-  _execute(sql, params = []) {
+  execute(sql, params = []) {
     return this._measureSql(sql, params, () => {
       try {
         return this._db().prepare(sql).run(...params);
@@ -6347,7 +6340,7 @@ class SQLiteDML extends DMLAbstract {
       const placeholders = cols.map(() => '?').join(', ');
       const sql = `INSERT INTO ${this._q(tableName)} (${colNames}) VALUES (${placeholders})`;
       const params = cols.map(c => this._serializeValue(colRecord[c]));
-      const info = this._execute(sql, params);
+      const info = this.execute(sql, params);
 
       if (schema.autoIncrement && colRecord[schema.autoIncrement] == null) colRecord[schema.autoIncrement] = Number(info.lastInsertRowid);
       const attrRecord = this._toAttrNames(colRecord, schema);
@@ -6400,7 +6393,7 @@ class SQLiteDML extends DMLAbstract {
 
     const sql = `INSERT INTO ${this._q(tableName)} (${cols.map(col => this._q(col)).join(', ')}) VALUES (${cols.map(() => '?').join(', ')}) ON CONFLICT (${conflictCols.map(col => this._q(col)).join(', ')}) DO UPDATE SET ${assignments.join(', ')}`;
     const params = cols.map(col => this._serializeValue(colRecord[col]));
-    const info = await this._execute(sql, params);
+    const info = await this.execute(sql, params);
 
     let resultWhere = where;
     if (!existing && schema.primaryKeyAttribute && !Object.prototype.hasOwnProperty.call(resultWhere, schema.primaryKeyAttribute) && info.lastInsertRowid) {
@@ -6423,8 +6416,8 @@ class SQLiteDML extends DMLAbstract {
   async truncate(model, options = {}) {
     this._assertTransaction(options);
     const { tableName } = this._schema(model);
-    await this._execute(`DELETE FROM ${this._q(tableName)}`, []);
-    await this._execute('DELETE FROM sqlite_sequence WHERE name = ?', [tableName]);
+    await this.execute(`DELETE FROM ${this._q(tableName)}`, []);
+    await this.execute('DELETE FROM sqlite_sequence WHERE name = ?', [tableName]);
   }
 }
 
@@ -6439,7 +6432,7 @@ class SQLiteTCL extends TCLAbstract {
     return this._adapter._db;
   }
 
-  async _execute(sql, params = []) {
+  async execute(sql, params = []) {
     return this._measureSql(sql, params, () => this._db().prepare(sql).run(...params));
   }
 
@@ -6447,7 +6440,7 @@ class SQLiteTCL extends TCLAbstract {
     if (this._adapter._activeTransaction) {
       throw new AdapterError('Nested or concurrent SQLite transactions are not supported', { code: 'SEQ_ADAPTER_TRANSACTION_CONCURRENT' });
     }
-    this._execute('BEGIN IMMEDIATE');
+    this.execute('BEGIN IMMEDIATE');
     const transaction = {
       id: ++transactionIdCounter$1,
       active: true,
@@ -6459,14 +6452,14 @@ class SQLiteTCL extends TCLAbstract {
 
   async commit(transaction) {
     this._validateTransaction(transaction);
-    this._execute('COMMIT');
+    this.execute('COMMIT');
     transaction.active = false;
     this._adapter._activeTransaction = null;
   }
 
   async rollback(transaction) {
     this._validateTransaction(transaction);
-    this._execute('ROLLBACK');
+    this.execute('ROLLBACK');
     transaction.active = false;
     this._adapter._activeTransaction = null;
   }
@@ -6511,7 +6504,7 @@ class SQLiteAdapter extends BaseAdapter {
 
   async authenticate() {
     await this.connect();
-    await this.dml._executeGet('SELECT 1 AS ok', []);
+    await this.dml.executeGet('SELECT 1 AS ok', []);
     return true;
   }
 
@@ -6689,7 +6682,7 @@ class MySQLDDL extends DDLAbstract {
     return this._adapter._connection();
   }
 
-  async _execute(sql, params = [], prepared = true) {
+  async execute(sql, params = [], prepared = true) {
     return this._measureSql(sql.replaceAll('\n  ', ' '), params, async () => {
       try {
         const [result] = await this._adapter._withConnection(connection => prepared ? connection.execute(sql, params) : connection.query(sql, params));
@@ -6703,7 +6696,7 @@ class MySQLDDL extends DDLAbstract {
   async _prepareColumnTypes(columns) {
     const jsonTypes = new Set(['ArrayType', 'ObjectType', 'JSONType']);
     if (this._adapter._supportsJson !== undefined || !Object.values(columns).some(column => jsonTypes.has(column.type?.constructor?.name))) return;
-    const row = await this._adapter.dml._executeGet('SELECT VERSION() AS version', []);
+    const row = await this._adapter.dml.executeGet('SELECT VERSION() AS version', []);
     const version = String(row.version);
     const maria = version.match(/(\d+)\.(\d+)\.(\d+)-MariaDB/i);
     const match = maria || version.match(/^(\d+)\.(\d+)\.(\d+)/);
@@ -6720,7 +6713,7 @@ class MySQLDDL extends DDLAbstract {
     const timestampColumns = Object.entries(def.columns).filter(([, column]) => column.defaultCurrentTimestamp);
     let supportsTimestampDefaults = true;
     if (timestampColumns.length) {
-      const row = await this._adapter.dml._executeGet('SELECT VERSION() AS version', []);
+      const row = await this._adapter.dml.executeGet('SELECT VERSION() AS version', []);
       const version = String(row.version);
       const maria = version.match(/(\d+)\.(\d+)\.(\d+)-MariaDB/i);
       const match = maria || version.match(/^(\d+)\.(\d+)\.(\d+)/);
@@ -6747,7 +6740,7 @@ class MySQLDDL extends DDLAbstract {
     }
 
     const sql = `CREATE TABLE ${this._q(def.tableName)} (\n  ${colDefs.join(',\n  ')}\n)`;
-    await this._execute(sql);
+    await this.execute(sql);
     if (timestampColumns.length && !supportsTimestampDefaults) {
       const trigger = `seq_ts_${createHash('sha256').update(def.tableName).digest('hex').slice(0, 24)}`;
       const assignments = timestampColumns.map(([name, column]) => {
@@ -6755,10 +6748,10 @@ class MySQLDDL extends DDLAbstract {
         return `${field} = COALESCE(${field}, CURRENT_TIMESTAMP)`;
       });
       try {
-        await this._execute(`CREATE TRIGGER ${this._q(trigger)} BEFORE INSERT ON ${this._q(def.tableName)} FOR EACH ROW SET ${assignments.join(', ')}`, [], false);
+        await this.execute(`CREATE TRIGGER ${this._q(trigger)} BEFORE INSERT ON ${this._q(def.tableName)} FOR EACH ROW SET ${assignments.join(', ')}`, [], false);
       } catch (error) {
         try {
-          await this._execute(`DROP TABLE ${this._q(def.tableName)}`);
+          await this.execute(`DROP TABLE ${this._q(def.tableName)}`);
         } catch (cleanupError) {
           error.cleanupError = cleanupError;
         }
@@ -6768,27 +6761,27 @@ class MySQLDDL extends DDLAbstract {
   }
 
   async dropTable(tableName, options = {}) {
-    if (options.ignoreForeignKeys !== false) await this._execute('SET FOREIGN_KEY_CHECKS = 0');
+    if (options.ignoreForeignKeys !== false) await this.execute('SET FOREIGN_KEY_CHECKS = 0');
     try {
-      await this._execute(`DROP TABLE IF EXISTS ${this._q(tableName)}`);
+      await this.execute(`DROP TABLE IF EXISTS ${this._q(tableName)}`);
     } finally {
-      if (options.ignoreForeignKeys !== false) await this._execute('SET FOREIGN_KEY_CHECKS = 1');
+      if (options.ignoreForeignKeys !== false) await this.execute('SET FOREIGN_KEY_CHECKS = 1');
     }
     await super.dropTable(tableName, options);
   }
 
   async truncateTable(tableName, options = {}) {
     if (options.ifExists && !(await this.hasTable(tableName))) return;
-    if (options.ignoreForeignKeys !== false) await this._execute('SET FOREIGN_KEY_CHECKS = 0');
+    if (options.ignoreForeignKeys !== false) await this.execute('SET FOREIGN_KEY_CHECKS = 0');
     try {
-      await this._execute(`TRUNCATE TABLE ${this._q(tableName)}`);
+      await this.execute(`TRUNCATE TABLE ${this._q(tableName)}`);
     } finally {
-      if (options.ignoreForeignKeys !== false) await this._execute('SET FOREIGN_KEY_CHECKS = 1');
+      if (options.ignoreForeignKeys !== false) await this.execute('SET FOREIGN_KEY_CHECKS = 1');
     }
   }
 
   async hasTable(tableName) {
-    const row = await this._executeGet(
+    const row = await this.executeGet(
       'SELECT TABLE_NAME FROM information_schema.TABLES WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ? LIMIT 1',
       [tableName]
     );
@@ -6799,7 +6792,7 @@ class MySQLDDL extends DDLAbstract {
     if (!(await this.hasTable(tableName))) {
       throw new AdapterError(`Table "${tableName}" does not exist`, { code: 'SEQ_ADAPTER_TABLE_NOT_FOUND' });
     }
-    const rows = await this._executeQueryAll(
+    const rows = await this.executeQueryAll(
       `SELECT COLUMN_NAME, COLUMN_TYPE, IS_NULLABLE, COLUMN_KEY, COLUMN_DEFAULT, EXTRA
        FROM information_schema.COLUMNS
        WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ?
@@ -6821,7 +6814,7 @@ class MySQLDDL extends DDLAbstract {
 
   async introspectDefinition(definition) {
     const def = this.normalizeDefinition(definition);
-    const columnsInfo = await this._executeQueryAll(
+    const columnsInfo = await this.executeQueryAll(
       `SELECT COLUMN_NAME
        FROM information_schema.COLUMNS
        WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ?`,
@@ -6846,7 +6839,7 @@ class MySQLDDL extends DDLAbstract {
       columnToAttr[physicalColumnName] = attrName;
     }
 
-    const indexRows = await this._executeQueryAll(
+    const indexRows = await this.executeQueryAll(
       `SELECT DISTINCT INDEX_NAME
        FROM information_schema.STATISTICS
        WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ?`,
@@ -6856,7 +6849,7 @@ class MySQLDDL extends DDLAbstract {
     const uniqueConstraints = def.uniqueConstraints.filter(item => existingIndexNames.has(item.constraintName));
     const indexes = def.indexes.filter(item => existingIndexNames.has(item.name));
 
-    const fkRows = await this._executeQueryAll(
+    const fkRows = await this.executeQueryAll(
       `SELECT CONSTRAINT_NAME
        FROM information_schema.KEY_COLUMN_USAGE
        WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ? AND REFERENCED_TABLE_NAME IS NOT NULL`,
@@ -6869,7 +6862,7 @@ class MySQLDDL extends DDLAbstract {
   }
 
   async listTables() {
-    const rows = await this._executeQueryAll(
+    const rows = await this.executeQueryAll(
       'SELECT TABLE_NAME FROM information_schema.TABLES WHERE TABLE_SCHEMA = DATABASE() AND TABLE_TYPE = ?',
       ['BASE TABLE']
     );
@@ -6894,7 +6887,7 @@ class MySQLDDL extends DDLAbstract {
         const value = typeof colDef.defaultValue === 'function' ? colDef.defaultValue() : colDef.defaultValue;
         constraints.push(`DEFAULT ${this._formatDefaultValue(value)}`);
       }
-      await this._execute(`ALTER TABLE ${this._q(tableName)} ADD COLUMN ${this._q(columnName)} ${colType}${constraints.length ? ` ${constraints.join(' ')}` : ''}`);
+      await this.execute(`ALTER TABLE ${this._q(tableName)} ADD COLUMN ${this._q(columnName)} ${colType}${constraints.length ? ` ${constraints.join(' ')}` : ''}`);
       schema.columns[name] = colDef;
       schema.attrToColumn[name] = columnName;
       schema.columnToAttr[columnName] = name;
@@ -6904,7 +6897,7 @@ class MySQLDDL extends DDLAbstract {
   async addUniqueConstraint(tableName, constraint) {
     const schema = this._adapter.schemas.get(tableName);
     const cols = constraint.columns.map(c => this._q(c)).join(', ');
-    await this._execute(`CREATE UNIQUE INDEX ${this._q(constraint.constraintName)} ON ${this._q(tableName)} (${cols})`);
+    await this.execute(`CREATE UNIQUE INDEX ${this._q(constraint.constraintName)} ON ${this._q(tableName)} (${cols})`);
     schema.uniqueConstraints.push({ ...constraint });
   }
 
@@ -6912,18 +6905,18 @@ class MySQLDDL extends DDLAbstract {
     const schema = this._adapter.schemas.get(tableName);
     const cols = index.columns.map(c => this._q(c)).join(', ');
     const unique = index.unique ? 'UNIQUE ' : '';
-    await this._execute(`CREATE ${unique}INDEX ${this._q(index.name)} ON ${this._q(tableName)} (${cols})`);
+    await this.execute(`CREATE ${unique}INDEX ${this._q(index.name)} ON ${this._q(tableName)} (${cols})`);
     schema.indexes.push({ ...index });
   }
 
   async addForeignKey(tableName, fk) {
     const sql = `ALTER TABLE ${this._q(tableName)} ADD CONSTRAINT ${this._q(fk.constraintName)} FOREIGN KEY (${(fk.columnNames || [fk.columnName]).map(column => this._q(column)).join(', ')}) REFERENCES ${this._q(fk.references.table)} (${(fk.references.columns || [fk.references.column]).map(column => this._q(column)).join(', ')}) ON DELETE ${fk.onDelete || 'RESTRICT'} ON UPDATE ${fk.onUpdate || 'RESTRICT'}`;
-    await this._execute(sql);
+    await this.execute(sql);
     const schema = this._adapter.schemas.get(tableName);
     schema.foreignKeys.push({ ...fk });
   }
 
-  async _executeQueryAll(sql, params = []) {
+  async executeQueryAll(sql, params = []) {
     return this._measureSql(sql, params, async () => {
       try {
         const [rows] = await this._adapter._withConnection(connection => connection.execute(sql, params));
@@ -6934,8 +6927,8 @@ class MySQLDDL extends DDLAbstract {
     });
   }
 
-  async _executeGet(sql, params = []) {
-    const rows = await this._executeQueryAll(sql, params);
+  async executeGet(sql, params = []) {
+    const rows = await this.executeQueryAll(sql, params);
     return rows[0] || null;
   }
 
@@ -6965,7 +6958,7 @@ class MySQLDML extends DMLAbstract {
     return this._adapter._connection();
   }
 
-  async _executeQueryAll(sql, params = []) {
+  async executeQueryAll(sql, params = []) {
     return this._measureSql(sql, params, async () => {
       try {
         const [rows] = await this._adapter._withConnection(connection => connection.execute(sql, params));
@@ -6976,12 +6969,12 @@ class MySQLDML extends DMLAbstract {
     });
   }
 
-  async _executeGet(sql, params = []) {
-    const rows = await this._executeQueryAll(sql, params);
+  async executeGet(sql, params = []) {
+    const rows = await this.executeQueryAll(sql, params);
     return rows[0] || null;
   }
 
-  async _execute(sql, params = []) {
+  async execute(sql, params = []) {
     return this._measureSql(sql, params, async () => {
       try {
         const [result] = await this._adapter._withConnection(connection => connection.execute(sql, params));
@@ -7019,7 +7012,7 @@ class MySQLDML extends DMLAbstract {
 
     const cols = Object.keys(colRecord);
     if (cols.length === 0) {
-      const info = await this._execute(`INSERT INTO ${this._q(tableName)} () VALUES ()`, []);
+      const info = await this.execute(`INSERT INTO ${this._q(tableName)} () VALUES ()`, []);
       if (schema.primaryKey) colRecord[schema.primaryKey] = Number(info.lastInsertRowid);
       return new model(this._toAttrNames(colRecord, schema), { _isNew: false });
     }
@@ -7028,7 +7021,7 @@ class MySQLDML extends DMLAbstract {
     const placeholders = cols.map(() => '?').join(', ');
     const sql = `INSERT INTO ${this._q(tableName)} (${colNames}) VALUES (${placeholders})`;
     const params = cols.map(c => this._serializeValue(colRecord[c]));
-    const info = await this._execute(sql, params);
+    const info = await this.execute(sql, params);
     if (schema.autoIncrement && colRecord[schema.autoIncrement] == null) colRecord[schema.autoIncrement] = Number(info.lastInsertRowid);
     return new model(this._toAttrNames(colRecord, schema), { _isNew: false });
   }
@@ -7036,11 +7029,11 @@ class MySQLDML extends DMLAbstract {
   async truncate(model, options = {}) {
     this._assertTransaction(options);
     const { tableName } = this._schema(model);
-    await this._execute('SET FOREIGN_KEY_CHECKS = 0', []);
+    await this.execute('SET FOREIGN_KEY_CHECKS = 0', []);
     try {
-      await this._execute(`TRUNCATE TABLE ${this._q(tableName)}`, []);
+      await this.execute(`TRUNCATE TABLE ${this._q(tableName)}`, []);
     } finally {
-      await this._execute('SET FOREIGN_KEY_CHECKS = 1', []);
+      await this.execute('SET FOREIGN_KEY_CHECKS = 1', []);
     }
   }
 
@@ -7197,7 +7190,7 @@ class MySQLAdapter extends BaseAdapter {
 
   async authenticate() {
     await this.connect();
-    await this.dml._executeGet('SELECT 1 AS ok', []);
+    await this.dml.executeGet('SELECT 1 AS ok', []);
     return true;
   }
 
@@ -7422,7 +7415,7 @@ class Oracle11DDL extends DDLAbstract {
     let index = 0; return sql.replaceAll('?', () => `:${++index}`);
   }
 
-  async _execute(sql, params = []) {
+  async execute(sql, params = []) {
     return this._measureSql(sql, params, async () => {
       try {
         return await this._adapter._withConnection(connection => connection.execute(this._oracleSql(sql), params, { autoCommit: !this._adapter._activeTransaction }));
@@ -7431,7 +7424,7 @@ class Oracle11DDL extends DDLAbstract {
       }
     });
   }
-  async _executeQueryAll(sql, params = []) {
+  async executeQueryAll(sql, params = []) {
     return this._measureSql(sql, params, async () => {
       try {
         return await this._adapter._withConnection(async connection => (await connection.execute(this._oracleSql(sql), params, { outFormat: this._adapter._client.OUT_FORMAT_OBJECT })).rows || []);
@@ -7440,21 +7433,21 @@ class Oracle11DDL extends DDLAbstract {
       }
     });
   }
-  async _executeGet(sql, params = []) {
-    return (await this._executeQueryAll(sql, params))[0] || null;
+  async executeGet(sql, params = []) {
+    return (await this.executeQueryAll(sql, params))[0] || null;
   }
 
   _usesSequenceForAutoIncrement() { return true; }
 
   async _hasSequence(name) {
-    return !!await this._executeGet('SELECT SEQUENCE_NAME FROM USER_SEQUENCES WHERE SEQUENCE_NAME = ?', [name]);
+    return !!await this.executeGet('SELECT SEQUENCE_NAME FROM USER_SEQUENCES WHERE SEQUENCE_NAME = ?', [name]);
   }
 
   async _ensureSequence(tableName) {
     const name = this._adapter.sequenceName(tableName);
     if (await this._hasSequence(name)) return;
     try {
-      await this._execute(`CREATE SEQUENCE ${this._q(name)} START WITH 1 INCREMENT BY 1`);
+      await this.execute(`CREATE SEQUENCE ${this._q(name)} START WITH 1 INCREMENT BY 1`);
     } catch (error) {
       // Another sync may have created it after the existence check.
       if (error.errorNum !== 955 || !(await this._hasSequence(name))) throw error;
@@ -7478,37 +7471,37 @@ class Oracle11DDL extends DDLAbstract {
       columns.push(parts.join(' ')); if (column.primaryKey) primaryKeys.push(name);
     }
     if (primaryKeys.length) columns.push(`CONSTRAINT ${this._q(this._constraintName('pk', def.tableName, primaryKeys))} PRIMARY KEY (${primaryKeys.map(key => this._q(key)).join(', ')})`);
-    await this._execute(`CREATE TABLE ${this._q(def.tableName)} (\n  ${columns.join(',\n  ')}\n)`);
+    await this.execute(`CREATE TABLE ${this._q(def.tableName)} (\n  ${columns.join(',\n  ')}\n)`);
     if (def.autoIncrement && this._usesSequenceForAutoIncrement()) await this._ensureSequence(def.tableName);
   }
 
   async dropTable(tableName, options = {}) {
     if (options.ifExists && !(await this.hasTable(tableName))) return;
-    await this._execute(`DROP TABLE ${this._q(tableName)}${options.ignoreForeignKeys !== false ? ' CASCADE CONSTRAINTS' : ''}`);
-    try { await this._execute(`DROP SEQUENCE ${this._q(this._adapter.sequenceName(tableName))}`); } catch (error) { if (!/ORA-02289/.test(error?.message || '')) throw error; }
+    await this.execute(`DROP TABLE ${this._q(tableName)}${options.ignoreForeignKeys !== false ? ' CASCADE CONSTRAINTS' : ''}`);
+    try { await this.execute(`DROP SEQUENCE ${this._q(this._adapter.sequenceName(tableName))}`); } catch (error) { if (!/ORA-02289/.test(error?.message || '')) throw error; }
     await super.dropTable(tableName, options);
   }
   async truncateTable(tableName, options = {}) {
-    if (!options.ifExists || await this.hasTable(tableName)) await this._execute(`TRUNCATE TABLE ${this._q(tableName)}`);
+    if (!options.ifExists || await this.hasTable(tableName)) await this.execute(`TRUNCATE TABLE ${this._q(tableName)}`);
   }
 
   async hasTable(tableName) {
-    return !!await this._executeGet('SELECT TABLE_NAME FROM USER_TABLES WHERE TABLE_NAME = ?', [tableName]);
+    return !!await this.executeGet('SELECT TABLE_NAME FROM USER_TABLES WHERE TABLE_NAME = ?', [tableName]);
   }
 
   async listTables() {
-    return (await this._executeQueryAll('SELECT TABLE_NAME FROM USER_TABLES union all select view_name from user_views')).map(row => row.TABLE_NAME);
+    return (await this.executeQueryAll('SELECT TABLE_NAME FROM USER_TABLES union all select view_name from user_views')).map(row => row.TABLE_NAME);
   }
 
   async describeTable(tableName) {
     if (!(await this.hasTable(tableName))) throw new AdapterError(`Table "${tableName}" does not exist`, { code: 'SEQ_ADAPTER_TABLE_NOT_FOUND' });
-    const rows = await this._executeQueryAll('SELECT COLUMN_NAME, DATA_TYPE, DATA_LENGTH, NULLABLE, DATA_DEFAULT FROM USER_TAB_COLUMNS WHERE TABLE_NAME = ? ORDER BY COLUMN_ID', [tableName]);
-    const primaryKeys = new Set((await this._executeQueryAll('SELECT COLUMN_NAME FROM USER_CONS_COLUMNS WHERE TABLE_NAME = ? AND CONSTRAINT_NAME IN (SELECT CONSTRAINT_NAME FROM USER_CONSTRAINTS WHERE TABLE_NAME = ? AND CONSTRAINT_TYPE = \'P\')', [tableName, tableName])).map(row => row.COLUMN_NAME));
+    const rows = await this.executeQueryAll('SELECT COLUMN_NAME, DATA_TYPE, DATA_LENGTH, NULLABLE, DATA_DEFAULT FROM USER_TAB_COLUMNS WHERE TABLE_NAME = ? ORDER BY COLUMN_ID', [tableName]);
+    const primaryKeys = new Set((await this.executeQueryAll('SELECT COLUMN_NAME FROM USER_CONS_COLUMNS WHERE TABLE_NAME = ? AND CONSTRAINT_NAME IN (SELECT CONSTRAINT_NAME FROM USER_CONSTRAINTS WHERE TABLE_NAME = ? AND CONSTRAINT_TYPE = \'P\')', [tableName, tableName])).map(row => row.COLUMN_NAME));
     return { tableName, columns: rows.map(row => ({ name: row.COLUMN_NAME, type: row.DATA_TYPE, allowNull: row.NULLABLE === 'Y', primaryKey: primaryKeys.has(row.COLUMN_NAME), autoIncrement: false, defaultValue: row.DATA_DEFAULT })) };
   }
   async introspectDefinition(definition) {
     const def = this.normalizeDefinition(definition);
-    const columnsInfo = await this._executeQueryAll('SELECT COLUMN_NAME FROM USER_TAB_COLUMNS WHERE TABLE_NAME = ?', [def.tableName]);
+    const columnsInfo = await this.executeQueryAll('SELECT COLUMN_NAME FROM USER_TAB_COLUMNS WHERE TABLE_NAME = ?', [def.tableName]);
     const physicalColumnNames = columnsInfo.map(row => row.COLUMN_NAME);
     const physicalColumns = new Map(physicalColumnNames.map(name => [name.toLowerCase(), name]));
     const columns = {};
@@ -7528,15 +7521,15 @@ class Oracle11DDL extends DDLAbstract {
       columnToAttr[physicalColumnName] = attrName;
     }
 
-    const uniqueRows = await this._executeQueryAll("SELECT CONSTRAINT_NAME FROM USER_CONSTRAINTS WHERE TABLE_NAME = ? AND CONSTRAINT_TYPE = 'U'", [def.tableName]);
+    const uniqueRows = await this.executeQueryAll("SELECT CONSTRAINT_NAME FROM USER_CONSTRAINTS WHERE TABLE_NAME = ? AND CONSTRAINT_TYPE = 'U'", [def.tableName]);
     const existingUniqueNames = new Set(uniqueRows.map(row => row.CONSTRAINT_NAME));
     const uniqueConstraints = def.uniqueConstraints.filter(item => existingUniqueNames.has(item.constraintName));
 
-    const indexRows = await this._executeQueryAll('SELECT INDEX_NAME FROM USER_INDEXES WHERE TABLE_NAME = ?',[def.tableName]);
+    const indexRows = await this.executeQueryAll('SELECT INDEX_NAME FROM USER_INDEXES WHERE TABLE_NAME = ?',[def.tableName]);
     const existingIndexNames = new Set(indexRows.map(row => row.INDEX_NAME));
     const indexes = def.indexes.filter(item => existingIndexNames.has(item.name));
 
-    const fkRows = await this._executeQueryAll("SELECT CONSTRAINT_NAME FROM USER_CONSTRAINTS WHERE TABLE_NAME = ? AND CONSTRAINT_TYPE = 'R'", [def.tableName]);
+    const fkRows = await this.executeQueryAll("SELECT CONSTRAINT_NAME FROM USER_CONSTRAINTS WHERE TABLE_NAME = ? AND CONSTRAINT_TYPE = 'R'", [def.tableName]);
     const existingFKNames = new Set(fkRows.map(row => row.CONSTRAINT_NAME));
     const foreignKeys = def.foreignKeys.filter(fk => existingFKNames.has(fk.constraintName));
 
@@ -7551,26 +7544,26 @@ class Oracle11DDL extends DDLAbstract {
         parts.push(`DEFAULT ${this._formatDefaultValue(value, column)}`);
       }
       if (!column.allowNull) parts.push(`CONSTRAINT ${this._q(this._constraintName('nn', tableName, [name]))} NOT NULL`);
-      await this._execute(`ALTER TABLE ${this._q(tableName)} ADD (${parts.join(' ')})`);
+      await this.execute(`ALTER TABLE ${this._q(tableName)} ADD (${parts.join(' ')})`);
       schema.columns[attr] = column;
       schema.attrToColumn[attr] = name;
       schema.columnToAttr[name] = attr;
     }
   }
   async addUniqueConstraint(tableName, constraint) {
-    await this._execute(`ALTER TABLE ${this._q(tableName)} ADD CONSTRAINT ${this._q(constraint.constraintName)} UNIQUE (${constraint.columns.map(column => this._q(column)).join(', ')})`);
+    await this.execute(`ALTER TABLE ${this._q(tableName)} ADD CONSTRAINT ${this._q(constraint.constraintName)} UNIQUE (${constraint.columns.map(column => this._q(column)).join(', ')})`);
     this._adapter.schemas.get(tableName).uniqueConstraints.push({ ...constraint });
   }
 
   async addIndex(tableName, index) {
-    await this._execute(`CREATE ${index.unique ? 'UNIQUE ' : ''}INDEX ${this._q(index.name)} ON ${this._q(tableName)} (${index.columns.map(column => this._q(column)).join(', ')})`);
+    await this.execute(`CREATE ${index.unique ? 'UNIQUE ' : ''}INDEX ${this._q(index.name)} ON ${this._q(tableName)} (${index.columns.map(column => this._q(column)).join(', ')})`);
     this._adapter.schemas.get(tableName).indexes.push({ ...index });
   }
 
   async addForeignKey(tableName, fk) {
     const deleteClause = fk.onDelete === 'CASCADE' || fk.onDelete === 'SET NULL' ? ` ON DELETE ${fk.onDelete}` : '';
     const deferred = ['CASCADE', 'SET NULL'].includes(fk.onUpdate) ? ' DEFERRABLE INITIALLY IMMEDIATE' : '';
-    await this._execute(`ALTER TABLE ${this._q(tableName)} ADD CONSTRAINT ${this._q(fk.constraintName)} FOREIGN KEY (${(fk.columnNames || [fk.columnName]).map(column => this._q(column)).join(', ')}) REFERENCES ${this._q(fk.references.table)} (${(fk.references.columns || [fk.references.column]).map(column => this._q(column)).join(', ')})${deleteClause}${deferred}`);
+    await this.execute(`ALTER TABLE ${this._q(tableName)} ADD CONSTRAINT ${this._q(fk.constraintName)} FOREIGN KEY (${(fk.columnNames || [fk.columnName]).map(column => this._q(column)).join(', ')}) REFERENCES ${this._q(fk.references.table)} (${(fk.references.columns || [fk.references.column]).map(column => this._q(column)).join(', ')})${deleteClause}${deferred}`);
     this._adapter.schemas.get(tableName).foreignKeys.push({ ...fk });
   }
   _formatDefaultValue(value, column) {
@@ -7591,7 +7584,7 @@ class Oracle11DML extends DMLAbstract {
   _toError(error, sql) { return Oracle11Error.from(error, sql); }
 
   _oracleSql(sql) { let index = 0; return sql.replaceAll('?', () => `:${++index}`); }
-  async _executeQueryAll(sql, params = []) {
+  async executeQueryAll(sql, params = []) {
     return this._measureSql(sql, params, async () => {
       try {
         return await this._adapter._withConnection(async connection => (await connection.execute(this._oracleSql(sql), params, { outFormat: this._adapter._client.OUT_FORMAT_OBJECT })).rows || []);
@@ -7600,8 +7593,8 @@ class Oracle11DML extends DMLAbstract {
       }
     });
   }
-  async _executeGet(sql, params = []) { return (await this._executeQueryAll(sql, params))[0] || null; }
-  async _execute(sql, params = []) {
+  async executeGet(sql, params = []) { return (await this.executeQueryAll(sql, params))[0] || null; }
+  async execute(sql, params = []) {
     return this._measureSql(sql, params, async () => {
       try {
         return await this._adapter._withConnection(async connection => {
@@ -7638,7 +7631,7 @@ class Oracle11DML extends DMLAbstract {
     this._assertTransaction(options);
     const { tableName, schema, alias } = this._schema(model);
     const where = this._buildWhere(options.where, schema, alias);
-    const row = await this._executeGet(`SELECT COUNT(*) AS "cnt" FROM ${this._tableWithAlias(tableName, alias)}${where.sql}`, where.params);
+    const row = await this.executeGet(`SELECT COUNT(*) AS "cnt" FROM ${this._tableWithAlias(tableName, alias)}${where.sql}`, where.params);
     return row?.cnt ?? 0;
   }
 
@@ -7697,7 +7690,7 @@ class Oracle11DML extends DMLAbstract {
     const transaction = options.transaction || await this._adapter.tcl.begin();
     const mutationOptions = { ...options, transaction };
     try {
-      for (const { fk } of cascadeFks) await this._execute('SET CONSTRAINTS ' + this._q(fk.constraintName) + ' DEFERRED');
+      for (const { fk } of cascadeFks) await this.execute('SET CONSTRAINTS ' + this._q(fk.constraintName) + ' DEFERRED');
       const updated = await super.update(model, values, mutationOptions);
       for (const previous of matches) {
         for (const { childTable, childSchema, fk } of cascadeFks) {
@@ -7715,11 +7708,11 @@ class Oracle11DML extends DMLAbstract {
           } else {
             const set = columns.map(col => this._q(col) + ' = ?').join(', ');
             const where = columns.map(col => this._q(col) + ' = ?').join(' AND ');
-            await this._execute('UPDATE ' + this._q(childTable) + ' SET ' + set + ' WHERE ' + where, [...newValues, ...oldValues]);
+            await this.execute('UPDATE ' + this._q(childTable) + ' SET ' + set + ' WHERE ' + where, [...newValues, ...oldValues]);
           }
         }
       }
-      for (const { fk } of cascadeFks) await this._execute('SET CONSTRAINTS ' + this._q(fk.constraintName) + ' IMMEDIATE');
+      for (const { fk } of cascadeFks) await this.execute('SET CONSTRAINTS ' + this._q(fk.constraintName) + ' IMMEDIATE');
       if (ownTransaction) await this._adapter.tcl.commit(transaction);
       return updated;
     } catch (error) {
@@ -7824,7 +7817,7 @@ class Oracle11Adapter extends BaseAdapter {
   
   async authenticate() { 
     await this.connect(); 
-    await this.dml._executeGet('SELECT 1 AS ok FROM dual'); 
+    await this.dml.executeGet('SELECT 1 AS ok FROM dual');
     return true; 
   }
   

@@ -46,7 +46,7 @@ export class Oracle11Adapter extends BaseAdapter {
   
   async authenticate() { 
     await this.connect(); 
-    await this.dml._executeGet('SELECT 1 AS ok FROM dual'); 
+    await this.dml.executeGet('SELECT 1 AS ok FROM dual');
     return true; 
   }
   

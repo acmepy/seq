@@ -136,8 +136,7 @@ export class Model {
     }
     const throughModel = through?.model || through;
     if (typeof throughModel === 'function') {
-      const throughTable = throughModel._resolvedTableName
-        || throughModel.tableName
+      const throughTable = throughModel.tableName
         || throughModel.modelName
         || throughModel.name;
       return { through, throughModel, throughTable };

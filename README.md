@@ -431,6 +431,13 @@ export default function init(seq) {
 
 `seq.models` conserva comportamiento de array y ademas expone accesos por nombre de modelo o tabla, por ejemplo `seq.models.usuarios` y `seq.models.repUsuarios`.
 
+Al registrar un modelo, Seq fija su nombre fisico en `Modelo.tableName`. Si es `null` o `undefined`, lo genera una vez con las convenciones del adaptador; si tiene un valor, lo conserva. Las consultas, asociaciones y la cache usan ese mismo atributo.
+
+```js
+await seq.init();
+console.log(User.tableName); // Nombre fisico listo para usar.
+```
+
 ## Tipos de datos
 
 | Tipo | Ejemplo |
@@ -843,7 +850,48 @@ await seq.transaction(async transaction => {
 });
 ```
 
-`seq.transaction()` hace commit si el callback termina correctamente y rollback si lanza un error. Mientras exista una transaccion activa, todas las lecturas y mutaciones deben recibir exactamente su token mediante `{ transaction }`; las operaciones sin token, con un token finalizado o perteneciente a otro adapter son rechazadas. Los adapters SQLite y Map no admiten transacciones anidadas ni concurrentes sobre la misma instancia.
+`seq.transaction()` hace commit si el callback termina correctamente y rollback si lanza un error. Mientras exista una transaccion activa, todas las lecturas y mutaciones de modelos deben recibir exactamente su token mediante `{ transaction }`; las operaciones sin token, con un token finalizado o perteneciente a otro adapter son rechazadas. Los adapters SQLite y Map no admiten transacciones anidadas ni concurrentes sobre la misma instancia.
+
+## SQL directo
+
+Los adaptadores SQLite, MySQL y Oracle exponen estos metodos en `seq.adapter.dml`:
+
+| Metodo | Parametros | Resultado |
+| --- | --- | --- |
+| `executeGet(sql, params = [])` | SQL y array de valores enlazados | Primera fila como objeto del driver, o `null` si no hay filas. No agrega `LIMIT` al SQL. |
+| `executeQueryAll(sql, params = [])` | SQL y array de valores enlazados | Array de filas; `[]` si no hay resultados. |
+| `execute(sql, params = [])` | SQL de escritura y array de valores enlazados | Objeto con `changes`; SQLite y MySQL tambien pueden devolver `lastInsertRowid`. |
+
+Usa siempre `await` para mantener el mismo codigo entre adaptadores. Los parametros son opcionales y se enlazan en el orden del array. Puedes usar `?` en los tres adaptadores; Oracle los convierte a sus placeholders posicionales. Los nombres de tablas y columnas deben ser los nombres fisicos de tu base, con el quoting que corresponda al motor; no son parametros enlazables.
+
+Ejemplo sobre una tabla fisica `users` (`USERS` en Oracle) con columnas `id` y `name`:
+
+```js
+const { dml } = seq.adapter;
+const user = await dml.executeGet('SELECT * FROM users WHERE id = ?', [1]);
+console.log(user); // Objeto del driver o null, no una instancia de Model.
+
+const users = await dml.executeQueryAll(
+  'SELECT * FROM users WHERE id > ? ORDER BY id', [0]
+);
+const result = await dml.execute(
+  'UPDATE users SET name = ? WHERE id = ?', ['Ana', 1]
+);
+console.log(users, result.changes);
+```
+
+Estas operaciones devuelven datos del driver: no aplican el mapeo de atributos, conversiones de tipos del modelo, validaciones, hooks ni filtros tenant. Tampoco invalidan automaticamente la cache de modelos. Usa valores compatibles con el driver y el formato almacenado de cada columna, y gestiona los filtros e invalidaciones que necesite tu aplicacion. Si necesitas el comportamiento del ORM, usa `findOne`, `findAll`, `create`, `update` o `destroy`.
+
+El SQL directo conserva los logs y tiempos de ejecucion de Seq. Dentro de `seq.transaction()` utiliza la conexion de la transaccion activa, sin un argumento `transaction` adicional:
+
+```js
+await seq.transaction(async () => {
+  await dml.execute('UPDATE users SET name = ? WHERE id = ?', ['Ana', 1]);
+  // Un error en el callback revierte la escritura.
+});
+```
+
+Para DDL existe `adapter.ddl.execute(sql, params = [])`, cuyo resultado depende del driver. Los grupos DDL de MySQL y Oracle tambien ofrecen `executeGet` y `executeQueryAll`; para consultas portables usa el grupo `dml`. `MapAdapter` no ejecuta SQL. Los nombres anteriores con `_` se reemplazaron por los nombres publicos anteriores, sin aliases.
 
 ## Sincronizacion
 

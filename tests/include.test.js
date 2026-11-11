@@ -240,11 +240,11 @@ describe('Aliases & Include', () => {
         const sqlAliases = buildIncludeSqlAliasMap(include, _RolePermission, localSeq.adapter.dml);
         const select = localSeq.adapter.dml._buildQualifiedSelect(_RolePermission, schema, alias, include, sqlAliases);
         const join = localSeq.adapter.dml._buildJoinClause(include, _RolePermission, alias, resolveIncludeAlias, sqlAliases);
-        const permissionSchema = localSeq.adapter.schemas.get(_Permission._resolvedTableName);
+        const permissionSchema = localSeq.adapter.schemas.get(_Permission.tableName);
         const permissionColumn = permissionSchema.attrToColumn.permission;
 
         assert.ok(select.includes(`${quoteTestIdentifier('p')}.${quoteTestIdentifier(permissionColumn)} AS ${quoteTestIdentifier('p.permission')}`));
-        assert.ok(join.sql.includes(`JOIN ${localSeq.adapter.dml._tableWithAlias(_Permission._resolvedTableName, 'p')}`));
+        assert.ok(join.sql.includes(`JOIN ${localSeq.adapter.dml._tableWithAlias(_Permission.tableName, 'p')}`));
         assert.equal(join.sql.includes(`AS ${quoteTestIdentifier('permission')}`), false);
       } finally {
         await cleanupTestContext(localContext);
@@ -755,16 +755,16 @@ describe('Aliases & Include', () => {
       deletePerm = await Permission.create({ name: 'delete' });
 
       const userRolesSQL = `INSERT INTO ${quoteTestIdentifier(userRolesTable)} (${quoteTestIdentifier('userId')}, ${quoteTestIdentifier('roleId')}) VALUES (?, ?)`;
-      await seq._adapter.dml._execute(userRolesSQL, [1, admin.getDataValue('id')]);
-      await seq._adapter.dml._execute(userRolesSQL, [1, editor.getDataValue('id')]);
-      await seq._adapter.dml._execute(userRolesSQL, [2, admin.getDataValue('id')]);
+      await seq._adapter.dml.execute(userRolesSQL, [1, admin.getDataValue('id')]);
+      await seq._adapter.dml.execute(userRolesSQL, [1, editor.getDataValue('id')]);
+      await seq._adapter.dml.execute(userRolesSQL, [2, admin.getDataValue('id')]);
 
       const rolePermsSQL = `INSERT INTO ${quoteTestIdentifier(rolePermissionsTable)} (${quoteTestIdentifier('roleId')}, ${quoteTestIdentifier('permissionId')}) VALUES (?, ?)`;
-      await seq._adapter.dml._execute(rolePermsSQL, [admin.getDataValue('id'), readPerm.getDataValue('id')]);
-      await seq._adapter.dml._execute(rolePermsSQL, [admin.getDataValue('id'), writePerm.getDataValue('id')]);
-      await seq._adapter.dml._execute(rolePermsSQL, [admin.getDataValue('id'), deletePerm.getDataValue('id')]);
-      await seq._adapter.dml._execute(rolePermsSQL, [editor.getDataValue('id'), readPerm.getDataValue('id')]);
-      await seq._adapter.dml._execute(rolePermsSQL, [editor.getDataValue('id'), writePerm.getDataValue('id')]);
+      await seq._adapter.dml.execute(rolePermsSQL, [admin.getDataValue('id'), readPerm.getDataValue('id')]);
+      await seq._adapter.dml.execute(rolePermsSQL, [admin.getDataValue('id'), writePerm.getDataValue('id')]);
+      await seq._adapter.dml.execute(rolePermsSQL, [admin.getDataValue('id'), deletePerm.getDataValue('id')]);
+      await seq._adapter.dml.execute(rolePermsSQL, [editor.getDataValue('id'), readPerm.getDataValue('id')]);
+      await seq._adapter.dml.execute(rolePermsSQL, [editor.getDataValue('id'), writePerm.getDataValue('id')]);
     });
 
     it('sync creates junction tables', async () => {
@@ -882,16 +882,16 @@ describe('Aliases & Include', () => {
       deletePerm = await Permission.create({ name: 'delete' });
 
       const userRolesSQL = `INSERT INTO ${quoteTestIdentifier(userRolesTable)} (${quoteTestIdentifier('userId')}, ${quoteTestIdentifier('roleId')}) VALUES (?, ?)`;
-      await seq._adapter.dml._execute(userRolesSQL, [1, admin.getDataValue('id')]);
-      await seq._adapter.dml._execute(userRolesSQL, [1, editor.getDataValue('id')]);
-      await seq._adapter.dml._execute(userRolesSQL, [2, admin.getDataValue('id')]);
+      await seq._adapter.dml.execute(userRolesSQL, [1, admin.getDataValue('id')]);
+      await seq._adapter.dml.execute(userRolesSQL, [1, editor.getDataValue('id')]);
+      await seq._adapter.dml.execute(userRolesSQL, [2, admin.getDataValue('id')]);
 
       const rolePermsSQL = `INSERT INTO ${quoteTestIdentifier(rolePermissionsTable)} (${quoteTestIdentifier('roleId')}, ${quoteTestIdentifier('permissionId')}) VALUES (?, ?)`;
-      await seq._adapter.dml._execute(rolePermsSQL, [admin.getDataValue('id'), readPerm.getDataValue('id')]);
-      await seq._adapter.dml._execute(rolePermsSQL, [admin.getDataValue('id'), writePerm.getDataValue('id')]);
-      await seq._adapter.dml._execute(rolePermsSQL, [admin.getDataValue('id'), deletePerm.getDataValue('id')]);
-      await seq._adapter.dml._execute(rolePermsSQL, [editor.getDataValue('id'), readPerm.getDataValue('id')]);
-      await seq._adapter.dml._execute(rolePermsSQL, [editor.getDataValue('id'), writePerm.getDataValue('id')]);
+      await seq._adapter.dml.execute(rolePermsSQL, [admin.getDataValue('id'), readPerm.getDataValue('id')]);
+      await seq._adapter.dml.execute(rolePermsSQL, [admin.getDataValue('id'), writePerm.getDataValue('id')]);
+      await seq._adapter.dml.execute(rolePermsSQL, [admin.getDataValue('id'), deletePerm.getDataValue('id')]);
+      await seq._adapter.dml.execute(rolePermsSQL, [editor.getDataValue('id'), readPerm.getDataValue('id')]);
+      await seq._adapter.dml.execute(rolePermsSQL, [editor.getDataValue('id'), writePerm.getDataValue('id')]);
     });
 
     it('loads roles via LEFT JOIN through junction table', async () => {
@@ -1031,7 +1031,7 @@ describe('belongsToMany with through model', () => {
 
   it('syncs the through model table instead of creating an automatic junction table', async () => {
     const tables = await adapter.ddl.listTables();
-    const userRoleTable = UserRole._resolvedTableName;
+    const userRoleTable = UserRole.tableName;
 
     assert.ok(tables.includes(userRoleTable));
     assert.ok(!tables.includes('user_roles'));

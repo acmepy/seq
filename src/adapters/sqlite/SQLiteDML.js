@@ -19,7 +19,7 @@ export class SQLiteDML extends DMLAbstract {
   // Execution hooks — SQLite-specific
   // ---------------------------------------------------------------------------
 
-  async _executeQueryAll(sql, params) {
+  async executeQueryAll(sql, params = []) {
     return this._measureSql(sql, params, () => {
       try {
         return this._db().prepare(sql).all(...params);
@@ -29,17 +29,17 @@ export class SQLiteDML extends DMLAbstract {
     });
   }
 
-  async _executeGet(sql, params) {
+  async executeGet(sql, params = []) {
     return this._measureSql(sql, params, () => {
       try {
-        return this._db().prepare(sql).get(...params);
+        return this._db().prepare(sql).get(...params) || null;
       } catch (error) {
         throw this._toError(error);
       }
     });
   }
 
-  _execute(sql, params = []) {
+  execute(sql, params = []) {
     return this._measureSql(sql, params, () => {
       try {
         return this._db().prepare(sql).run(...params);
@@ -125,7 +125,7 @@ export class SQLiteDML extends DMLAbstract {
       const placeholders = cols.map(() => '?').join(', ');
       const sql = `INSERT INTO ${this._q(tableName)} (${colNames}) VALUES (${placeholders})`;
       const params = cols.map(c => this._serializeValue(colRecord[c]));
-      const info = this._execute(sql, params);
+      const info = this.execute(sql, params);
 
       if (schema.autoIncrement && colRecord[schema.autoIncrement] == null) colRecord[schema.autoIncrement] = Number(info.lastInsertRowid);
       const attrRecord = this._toAttrNames(colRecord, schema);
@@ -178,7 +178,7 @@ export class SQLiteDML extends DMLAbstract {
 
     const sql = `INSERT INTO ${this._q(tableName)} (${cols.map(col => this._q(col)).join(', ')}) VALUES (${cols.map(() => '?').join(', ')}) ON CONFLICT (${conflictCols.map(col => this._q(col)).join(', ')}) DO UPDATE SET ${assignments.join(', ')}`;
     const params = cols.map(col => this._serializeValue(colRecord[col]));
-    const info = await this._execute(sql, params);
+    const info = await this.execute(sql, params);
 
     let resultWhere = where;
     if (!existing && schema.primaryKeyAttribute && !Object.prototype.hasOwnProperty.call(resultWhere, schema.primaryKeyAttribute) && info.lastInsertRowid) {
@@ -201,7 +201,7 @@ export class SQLiteDML extends DMLAbstract {
   async truncate(model, options = {}) {
     this._assertTransaction(options);
     const { tableName } = this._schema(model);
-    await this._execute(`DELETE FROM ${this._q(tableName)}`, []);
-    await this._execute('DELETE FROM sqlite_sequence WHERE name = ?', [tableName]);
+    await this.execute(`DELETE FROM ${this._q(tableName)}`, []);
+    await this.execute('DELETE FROM sqlite_sequence WHERE name = ?', [tableName]);
   }
 }

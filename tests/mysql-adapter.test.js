@@ -8,8 +8,8 @@ describe('MySQL Adapter', () => {
     it(`generates timestamp default SQL for ${version}`, async (t) => {
       const adapter = new MySQLAdapter();
       const statements = [];
-      t.mock.method(adapter.dml, '_executeGet', async () => ({ version }));
-      t.mock.method(adapter.ddl, '_execute', async (sql, params, prepared) => { statements.push({ sql, prepared }); });
+      t.mock.method(adapter.dml, 'executeGet', async () => ({ version }));
+      t.mock.method(adapter.ddl, 'execute', async (sql, params, prepared) => { statements.push({ sql, prepared }); });
       await adapter.ddl.createTableStructure({
         tableName: 'timestamps',
         columns: {
@@ -216,7 +216,7 @@ describe('MySQL Adapter', () => {
         }
       };
 
-      await assert.rejects(() => mysql.dml._execute('INSERT INTO `sessions` () VALUES ()'), error => {
+      await assert.rejects(() => mysql.dml.execute('INSERT INTO `sessions` () VALUES ()'), error => {
         assert.equal(error.name, 'MySQLError');
         assert.equal(error.message, "Column 'token' cannot be null");
         return true;
@@ -249,9 +249,9 @@ for (const [version, type] of [
   it('maps JSON column SQL for ' + version, async t => {
     const adapter = new MySQLAdapter();
     let versionReads = 0;
-    t.mock.method(adapter.dml, '_executeGet', async () => { versionReads++; return { version }; });
+    t.mock.method(adapter.dml, 'executeGet', async () => { versionReads++; return { version }; });
     const statements = [];
-    t.mock.method(adapter.ddl, '_execute', async sql => statements.push(sql));
+    t.mock.method(adapter.ddl, 'execute', async sql => statements.push(sql));
     const columns = { json: { type: DataTypes.JSON }, object: { type: DataTypes.OBJECT }, array: { type: DataTypes.ARRAY(DataTypes.INTEGER) } };
     await adapter.ddl.createTableStructure({ tableName: 'json_types', columns });
     adapter.schemas.set('json_types', { columns: {}, attrToColumn: {}, columnToAttr: {} });

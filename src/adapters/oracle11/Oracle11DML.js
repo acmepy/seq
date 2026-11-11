@@ -10,7 +10,7 @@ export class Oracle11DML extends DMLAbstract {
   _toError(error, sql) { return Oracle11Error.from(error, sql); }
 
   _oracleSql(sql) { let index = 0; return sql.replaceAll('?', () => `:${++index}`); }
-  async _executeQueryAll(sql, params = []) {
+  async executeQueryAll(sql, params = []) {
     return this._measureSql(sql, params, async () => {
       try {
         return await this._adapter._withConnection(async connection => (await connection.execute(this._oracleSql(sql), params, { outFormat: this._adapter._client.OUT_FORMAT_OBJECT })).rows || []);
@@ -19,8 +19,8 @@ export class Oracle11DML extends DMLAbstract {
       }
     });
   }
-  async _executeGet(sql, params = []) { return (await this._executeQueryAll(sql, params))[0] || null; }
-  async _execute(sql, params = []) {
+  async executeGet(sql, params = []) { return (await this.executeQueryAll(sql, params))[0] || null; }
+  async execute(sql, params = []) {
     return this._measureSql(sql, params, async () => {
       try {
         return await this._adapter._withConnection(async connection => {
@@ -57,7 +57,7 @@ export class Oracle11DML extends DMLAbstract {
     this._assertTransaction(options);
     const { tableName, schema, alias } = this._schema(model);
     const where = this._buildWhere(options.where, schema, alias);
-    const row = await this._executeGet(`SELECT COUNT(*) AS "cnt" FROM ${this._tableWithAlias(tableName, alias)}${where.sql}`, where.params);
+    const row = await this.executeGet(`SELECT COUNT(*) AS "cnt" FROM ${this._tableWithAlias(tableName, alias)}${where.sql}`, where.params);
     return row?.cnt ?? 0;
   }
 
@@ -116,7 +116,7 @@ export class Oracle11DML extends DMLAbstract {
     const transaction = options.transaction || await this._adapter.tcl.begin();
     const mutationOptions = { ...options, transaction };
     try {
-      for (const { fk } of cascadeFks) await this._execute('SET CONSTRAINTS ' + this._q(fk.constraintName) + ' DEFERRED');
+      for (const { fk } of cascadeFks) await this.execute('SET CONSTRAINTS ' + this._q(fk.constraintName) + ' DEFERRED');
       const updated = await super.update(model, values, mutationOptions);
       for (const previous of matches) {
         for (const { childTable, childSchema, fk } of cascadeFks) {
@@ -134,11 +134,11 @@ export class Oracle11DML extends DMLAbstract {
           } else {
             const set = columns.map(col => this._q(col) + ' = ?').join(', ');
             const where = columns.map(col => this._q(col) + ' = ?').join(' AND ');
-            await this._execute('UPDATE ' + this._q(childTable) + ' SET ' + set + ' WHERE ' + where, [...newValues, ...oldValues]);
+            await this.execute('UPDATE ' + this._q(childTable) + ' SET ' + set + ' WHERE ' + where, [...newValues, ...oldValues]);
           }
         }
       }
-      for (const { fk } of cascadeFks) await this._execute('SET CONSTRAINTS ' + this._q(fk.constraintName) + ' IMMEDIATE');
+      for (const { fk } of cascadeFks) await this.execute('SET CONSTRAINTS ' + this._q(fk.constraintName) + ' IMMEDIATE');
       if (ownTransaction) await this._adapter.tcl.commit(transaction);
       return updated;
     } catch (error) {

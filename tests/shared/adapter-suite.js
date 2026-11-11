@@ -24,7 +24,7 @@ export function runAdapterSuite({ name, createSeq, cleanup = async () => {}, sup
     }
 
     function physicalTableName(model) {
-      return model._resolvedTableName || model.tableName;
+      return model.tableName;
     }
 
     async function setup(models) {

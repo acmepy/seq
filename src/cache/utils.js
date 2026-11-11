@@ -14,7 +14,7 @@ function encode(value) {
   if (value === null) return ['null'];
   if (value instanceof Date) return ['date', value.toISOString()];
   if (Array.isArray(value)) return ['array', value.map(encode)];
-  if (typeof value === 'function') return ['model', value.modelName || value.name, value._resolvedTableName || value.tableName];
+  if (typeof value === 'function') return ['model', value.modelName || value.name, value.tableName];
   if (typeof value === 'object') {
     const entries = Reflect.ownKeys(value).filter(key => value[key] !== undefined).map(key => [
       typeof key === 'symbol' ? ['symbol', Symbol.keyFor(key) || key.description] : ['string', key], encode(value[key])

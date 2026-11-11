@@ -129,9 +129,9 @@ export class BaseAdapter {
   }
 
   resolveTableName(modelClass) {
-    const name = (modelClass.tableName? modelClass.tableName : this.naming.prefix ? `${this.naming.prefix}${initCap(modelClass.modelName)}` : modelClass.modelName).replace(/[^A-Za-z0-9_$#]+/g, '_');
-    const convention = modelClass.tableName ? null : this.naming.tables;
-    return truncateMiddle(applyCase(applyConvention(name, convention), this._caseStyle(convention)), this.naming.maxLength);
+    if (modelClass.tableName != null) return modelClass.tableName;
+    const name = (this.naming.prefix ? `${this.naming.prefix}${initCap(modelClass.modelName)}` : modelClass.modelName).replace(/[^A-Za-z0-9_$#]+/g, '_');
+    return truncateMiddle(applyCase(applyConvention(name, this.naming.tables), this._caseStyle(this.naming.tables)), this.naming.maxLength);
   }
 
   resolveColumnName(def, attrName) {
@@ -167,7 +167,7 @@ export class BaseAdapter {
     const attrToColumn = {};
     const columnToAttr = {};
     const virtualAttributes = [];
-    const sourceTable = modelClass._resolvedTableName || this.resolveTableName(modelClass);
+    const sourceTable = modelClass.tableName ?? this.resolveTableName(modelClass);
 
     for (const [name, def] of Object.entries(attributes)) {
       if (modelClass._isVirtualAttribute?.(def)) {
@@ -240,8 +240,8 @@ export class BaseAdapter {
     const targetPKType = targetPKDef.type;
     const targetPKCol = this.resolveColumnName(targetPKDef, targetPKAttr);
 
-    const sourceTable = source._resolvedTableName || this.resolveTableName(source);
-    const targetTable = target._resolvedTableName || this.resolveTableName(target);
+    const sourceTable = source.tableName ?? this.resolveTableName(source);
+    const targetTable = target.tableName ?? this.resolveTableName(target);
 
     const fkCol = fkAttr;
     const otherKeyCol = otherKeyAttr;
@@ -315,18 +315,17 @@ export class BaseAdapter {
   }
 
   getAssociationThroughTable(assoc) {
-    return assoc.throughModel?._resolvedTableName
-      || assoc.throughModel?.tableName
+    return assoc.throughModel?.tableName
       || assoc.throughTable
       || assoc.through;
   }
 
   buildForeignKeys(modelClass, attrToColumn, context) {
     const fkMap = new Map();
-    const sourceTable = modelClass._resolvedTableName || this.resolveTableName(modelClass);
+    const sourceTable = modelClass.tableName ?? this.resolveTableName(modelClass);
     const add = (attrs, parent, keys, options) => {
       const columnNames = attrs.map(attr => attrToColumn[attr] || attr);
-      const refTable = parent._resolvedTableName || this.resolveTableName(parent);
+      const refTable = parent.tableName ?? this.resolveTableName(parent);
       const refColumns = keys.map(key => this.resolveColumnName(parent.rawAttributes[key] || {}, key));
       const entry = {
         attributeNames: attrs, columnNames,

@@ -26,12 +26,12 @@ export class MapDML extends DMLAbstract {
 
   /**
    * Returns the effective table name for a model.
-   * Uses _resolvedTableName if set by Seq (convention-applied), otherwise falls back to tableName.
+   * Uses the physical tableName finalized when Seq registers the model.
    * @param {typeof import('../../core/Model.js').Model} model
    * @returns {string}
    */
   _getTableName(model) {
-    return model._resolvedTableName || model.tableName;
+    return model.tableName;
   }
 
   /**

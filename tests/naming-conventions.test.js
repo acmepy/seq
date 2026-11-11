@@ -608,7 +608,7 @@ describe('Naming Conventions', () => {
       const { adapter, seq } = context;
       open.push(context);
       const result = await seq.sync();
-      const userProfileTable = UserProfile._resolvedTableName;
+      const userProfileTable = UserProfile.tableName;
 
       assert.deepEqual(result.created, [userProfileTable]);
       assert.ok(await adapter.ddl.hasTable(userProfileTable));
@@ -702,4 +702,55 @@ it('creates distinct foreign keys for factura detail and collection tables withi
   } finally {
     await cleanupTestContext(context);
   }
+});
+
+it('finalizes public tableName at registration and uses it for SQL, associations, cache and late models', async () => {
+  class PublicParent extends Model {}
+  class PublicChild extends Model {}
+  class Explicit extends Model {}
+  PublicParent.init({ id: { type: DataTypes.INTEGER, primaryKey: true } }, { modelName: 'PublicParent', tableName: null, timestamps: false });
+  PublicChild.init({ id: { type: DataTypes.INTEGER, primaryKey: true }, parentId: { type: DataTypes.INTEGER } }, { modelName: 'PublicChild', timestamps: false });
+  const explicitName = testTable('Mi_Exacta');
+  Explicit.init({ id: { type: DataTypes.INTEGER, primaryKey: true } }, { modelName: 'PublicExplicit', tableName: explicitName, timestamps: false });
+  PublicParent.hasMany(PublicChild, { as: 'children', foreignKey: 'parentId' });
+  PublicChild.belongsTo(PublicParent, { as: 'parent', foreignKey: 'parentId' });
+  assert.equal(PublicParent.tableName, null);
+  assert.equal(PublicChild.tableName, undefined);
+  const context = await createTestContext({ models: [PublicParent, PublicChild, Explicit], cache: { ttl: 60000 },
+    adapterOptions: { naming: { prefix: 'PUB_', tables: 'snake_case', columns: 'snake_case', caseStyle: 'upper' } } });
+  const { seq, adapter } = context;
+  try {
+    assert.equal(PublicParent.tableName, 'PUB_PUBLIC_PARENT');
+    assert.equal(PublicChild.tableName, 'PUB_PUBLIC_CHILD');
+    assert.equal(Explicit.tableName, explicitName);
+    assert.equal(seq.models[PublicParent.tableName], PublicParent);
+    assert.equal(seq.models[PublicChild.tableName], PublicChild);
+    await seq.init();
+    assert.equal(PublicParent.tableName, 'PUB_PUBLIC_PARENT');
+    assert.equal(adapter.resolveTableName(PublicParent), PublicParent.tableName);
+    const Late = seq.define('PublicLate', { id: { type: DataTypes.INTEGER, primaryKey: true } }, { timestamps: false });
+    assert.equal(Late.tableName, 'PUB_PUBLIC_LATE');
+    assert.equal(seq.models[Late.tableName], Late);
+    await seq.sync();
+    const tables = await adapter.ddl.listTables();
+    for (const model of [PublicParent, PublicChild, Explicit, Late]) {
+      assert.ok(tables.includes(model.tableName));
+      assert.equal(seq.buildTableDefinition(model).tableName, model.tableName);
+    }
+    const fk = seq.buildTableDefinition(PublicChild).foreignKeys[0];
+    assert.equal(fk.references.table, PublicParent.tableName);
+    await PublicParent.create({ id: 1 });
+    await PublicChild.create({ id: 1, parentId: 1 });
+    await Explicit.create({ id: 1 });
+    await Late.create({ id: 1 });
+    assert.equal((await Late.findByPk(1)).getDataValue('id'), 1);
+    for (const eager of [false, true]) {
+      const parent = await PublicParent.findByPk(1, { include: [{ model: PublicChild, as: 'children', eager }] });
+      assert.equal(parent.getDataValue('children').length, 1);
+    }
+    await PublicChild.create({ id: 2, parentId: 1 });
+    const fresh = await PublicParent.findByPk(1, { include: [{ model: PublicChild, as: 'children', eager: false }] });
+    assert.equal(fresh.getDataValue('children').length, 2);
+    assert.equal((await Explicit.findByPk(1)).getDataValue('id'), 1);
+  } finally { await cleanupTestContext(context); }
 });

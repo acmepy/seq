@@ -47,7 +47,7 @@ try {
   const table = q(definition.tableName);
   const field = q(definition.attrToColumn.happenedAt);
   const expression = oracle ? "TO_CHAR(" + field + ", 'YYYY-MM-DD HH24:MI:SS')" : "DATE_FORMAT(" + field + ", '%Y-%m-%d %H:%i:%s')";
-  const readWallTime = async () => (await adapter.dml._executeGet('SELECT ' + expression + ' AS ' + q('wall_time') + ' FROM ' + table)).wall_time;
+  const readWallTime = async () => (await adapter.dml.executeGet('SELECT ' + expression + ' AS ' + q('wall_time') + ' FROM ' + table)).wall_time;
   console.log('Motor:', engine, '| Zona configurada:', timezone);
   console.log('Hora guardada en DB:       ', await readWallTime());
   console.log('JavaScript mostrado en -03:', localDisplay.format(date));
@@ -57,7 +57,7 @@ try {
   for (let index = 0; index < 3; index++) await record.save();
   assert.equal(await readWallTime(), '2026-11-10 14:30:00');
   console.log('Tras leer y guardar 3 veces:', await readWallTime());
-} //finally {
-  //try { if (created) await adapter.ddl.dropTable(Clock._resolvedTableName, { ifExists: true }); }
+} finally {
+  try { if (created) await adapter.ddl.dropTable(Clock.tableName, { ifExists: true }); }
   finally { await adapter.close(); }
-//}
+}

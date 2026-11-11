@@ -25,7 +25,7 @@ describe('Configured SQL timezone', { skip: !['mysql', 'oracle11', 'oracle12'].i
       const table = q(def.tableName);
       const column = attr => q(def.attrToColumn[attr]);
       const text = attr => oracle ? 'TO_CHAR(' + column(attr) + ", 'YYYY-MM-DD HH24:MI:SS')" : 'DATE_FORMAT(' + column(attr) + ", '%Y-%m-%d %H:%i:%s')";
-      const raw = async id => adapter.dml._executeGet('SELECT ' + text('happenedAt') + ' AS ' + q('local_time') + ' FROM ' + table + ' WHERE ' + column('id') + ' = ?', [id]);
+      const raw = async id => adapter.dml.executeGet('SELECT ' + text('happenedAt') + ' AS ' + q('local_time') + ' FROM ' + table + ' WHERE ' + column('id') + ' = ?', [id]);
       const created = await Clock.create({ id: 1, happenedAt: instant, nullableAt: null });
       assert.equal((await raw(1)).local_time, '2026-11-10 14:30:00');
       let found = await Clock.findByPk(1);
@@ -39,13 +39,13 @@ describe('Configured SQL timezone', { skip: !['mysql', 'oracle11', 'oracle12'].i
       }
       assert.equal((await Clock.findAll({ where: { happenedAt: instant } })).length, 1);
       const literal = oracle ? "TO_DATE('2026-11-10 14:30:00', 'YYYY-MM-DD HH24:MI:SS')" : "'2026-11-10 14:30:00'";
-      await adapter.dml._execute('INSERT INTO ' + table + ' (' + column('id') + ', ' + column('happenedAt') + ') VALUES (2, ' + literal + ')');
+      await adapter.dml.execute('INSERT INTO ' + table + ' (' + column('id') + ', ' + column('happenedAt') + ') VALUES (2, ' + literal + ')');
       const fromDatabase = await Clock.findByPk(2);
       assert.equal(fromDatabase.getDataValue('happenedAt').toISOString(), instant.toISOString());
       assert.equal(fromDatabase.getDataValue('fixedAt').toISOString(), instant.toISOString());
-      const dbNow = await adapter.dml._executeGet('SELECT ' + text('createdAt') + ' AS ' + q('created') + ' FROM ' + table + ' WHERE ' + column('id') + ' = 2');
+      const dbNow = await adapter.dml.executeGet('SELECT ' + text('createdAt') + ' AS ' + q('created') + ' FROM ' + table + ' WHERE ' + column('id') + ' = 2');
       assert.equal(dbNow.created, formatDateInTimezone(fromDatabase.getDataValue('createdAt'), '-03:00', 0));
-      const serverClock = await adapter.dml._executeGet(oracle
+      const serverClock = await adapter.dml.executeGet(oracle
         ? 'SELECT TO_CHAR(SYS_EXTRACT_UTC(SYSTIMESTAMP), ' + "'YYYY-MM-DD HH24:MI:SS') AS \"clock\" FROM DUAL"
         : "SELECT DATE_FORMAT(UTC_TIMESTAMP(), '%Y-%m-%d %H:%i:%s') AS clock");
       assert.ok(Math.abs(fromDatabase.getDataValue('createdAt').getTime() - new Date(serverClock.clock.replace(' ', 'T') + 'Z').getTime()) < 15000);

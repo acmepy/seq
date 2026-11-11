@@ -61,14 +61,14 @@ it('stores JSON values with the available MySQL column type on create and alter'
     assert.deepEqual(found.getDataValue('object'), { role: 'admin' });
     assert.deepEqual(found.getDataValue('items'), [1, 2]);
     await adapter.ddl.addColumns(def.tableName, { extra: { type: DataTypes.JSON, allowNull: true } });
-    const rows = await adapter.dml._executeQueryAll('SELECT COLUMN_NAME, DATA_TYPE FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ?', [def.tableName]);
+    const rows = await adapter.dml.executeQueryAll('SELECT COLUMN_NAME, DATA_TYPE FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ?', [def.tableName]);
     const types = new Map(rows.map(row => [row.COLUMN_NAME, row.DATA_TYPE]));
     const storage = adapter._supportsJson ? ['json', 'longtext'] : ['longtext'];
     for (const field of [def.attrToColumn.payload, def.attrToColumn.object, def.attrToColumn.items, 'extra']) {
       assert.ok(storage.includes(types.get(field)), field + ' should store JSON');
     }
   } finally {
-    try { await context.adapter.ddl.dropTable(JsonValues._resolvedTableName, { ifExists: true }); }
+    try { await context.adapter.ddl.dropTable(JsonValues.tableName, { ifExists: true }); }
     finally { await context.adapter.close(); }
   }
 });

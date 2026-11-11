@@ -29,7 +29,7 @@ export class ModelRegistry {
       });
     }
     this._models.set(name, modelClass);
-    const tableName = modelClass._resolvedTableName || modelClass.tableName;
+    const tableName = modelClass.tableName;
     if (tableName) {
       if (this._tableNames.has(tableName)) {
         throw new ModelError(

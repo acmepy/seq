@@ -10,7 +10,7 @@ import { SQLiteAdapter } from '../src/adapters/sqlite/SQLiteAdapter.js';
 import { cleanupTestContext, createTestContext, testAdapterName, testTable } from './shared/test-context.js';
 
 function physicalTableName(model) {
-  return model._resolvedTableName || model.tableName;
+  return model.tableName;
 }
 
 describe('Seq.sync', () => {
@@ -63,7 +63,7 @@ describe('Seq.sync', () => {
     const table = physicalTableName(User);
     const schema = adapter.schemas.get(table);
     const q = name => adapter._quoteIdentifier(name);
-    await adapter.dml._execute(`INSERT INTO ${q(table)} (${q(schema.attrToColumn.id)}, ${q(schema.attrToColumn.name)}) VALUES (?, ?)`, [900, 'Raw insert']);
+    await adapter.dml.execute(`INSERT INTO ${q(table)} (${q(schema.attrToColumn.id)}, ${q(schema.attrToColumn.name)}) VALUES (?, ?)`, [900, 'Raw insert']);
     const row = await User.findByPk(900, { plain: true });
     assert.ok(row.createdAt instanceof Date);
     assert.ok(row.updatedAt instanceof Date);
