@@ -1,3 +1,4 @@
+import { parseDateInTimezone } from '../../utils/timezone.js';
 import { primaryAttributes, valuesFor, keyObject } from '../../utils/keys.js';
 import { DMLAbstract } from '../abstract/DMLAbstract.js';
 import { ValidationError } from '../../core/errors/ValidationError.js';
@@ -160,23 +161,23 @@ export class Oracle11DML extends DMLAbstract {
     }));
   }
   _toAttrNames(record, schema) {
-    const result = {}; 
-    for (const [key, value] of Object.entries(record)) { 
-      const attr = schema.columnToAttr[key] || key; 
-      if (key === 'SEQ_ROWNUM') continue; 
-      const type = schema.columns[attr]?.type?.constructor?.name; 
-      if (['ArrayType', 'ObjectType', 'JSONType'].includes(type) && typeof value === 'string') { 
-        try { result[attr] = JSON.parse(value); } catch { result[attr] = value; } 
+    const result = {};
+    for (const [key, value] of Object.entries(record)) {
+      const attr = schema.columnToAttr[key] || key;
+      if (key === 'SEQ_ROWNUM') continue;
+      const type = schema.columns[attr]?.type?.constructor?.name;
+      if (['ArrayType', 'ObjectType', 'JSONType'].includes(type) && typeof value === 'string') {
+        try { result[attr] = JSON.parse(value); } catch { result[attr] = value; }
       } else if (type === 'BooleanType') {
         result[attr] = this._adapter.deserializeBoolean(value, schema.columns[attr]);
       }else if (type === 'DateType' && typeof value === 'string') {
-        result[attr] = new Date(value); 
+        result[attr] = this._adapter.timezone === undefined ? new Date(value) : parseDateInTimezone(value, this._adapter.timezone);
       }else if (type === 'IntegerType' || type === 'DecimalType' || type === 'NumberType') {
-        result[attr] = this._parseNumericValue(value, type); 
-      }else{ 
-        result[attr] = value; 
+        result[attr] = this._parseNumericValue(value, type);
+      }else{
+        result[attr] = value;
       }
-    } 
+    }
     return result;
   }
 }

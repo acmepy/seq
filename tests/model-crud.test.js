@@ -36,7 +36,7 @@ describe('Reading numeric attributes from text columns', () => {
     }, { modelName: 'Numeric', tableName: testTable('numeric_text'), timestamps: false });
     Numeric.hasMany(Numeric, { foreignKey: 'parentId', as: 'children' });
     context = await createTestContext({ models: [Numeric] });
-    definition = context.seq._buildTableDefinition(Numeric);
+    definition = context.seq.buildTableDefinition(Numeric);
     const columns = Object.fromEntries(Object.entries(definition.columns).map(([attr, column]) => [
       attr, { ...column, type: ['id', 'parentId'].includes(attr) ? column.type : DataTypes.STRING(100) }
     ]));

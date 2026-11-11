@@ -275,6 +275,6 @@ export class MySQLDDL extends DDLAbstract {
   }
 
   _formatDate(date) {
-    return date.toISOString().slice(0, 23).replace('T', ' ');
+    return this._adapter.dml._formatDate(date);
   }
 }

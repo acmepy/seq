@@ -1,3 +1,4 @@
+import { formatDateInTimezone, parseDateInTimezone } from '../../utils/timezone.js';
 import { DMLAbstract } from '../abstract/DMLAbstract.js';
 import { ValidationError } from '../../core/errors/ValidationError.js';
 import { MySQLError } from './MySQLError.js';
@@ -91,7 +92,7 @@ export class MySQLDML extends DMLAbstract {
   }
 
   _serializeValue(value) {
-    if (value instanceof Date) return this._formatDate(value);
+    if (value instanceof Date) return value;
     if (value === undefined) return null;
     if (typeof value === 'boolean') return value ? 1 : 0;
     if (Array.isArray(value) || (typeof value === 'object' && value !== null)) return JSON.stringify(value);
@@ -117,7 +118,7 @@ export class MySQLDML extends DMLAbstract {
         else result[attrName] = value === 1 || value === '1';
       } else if (typeName === 'DateType') {
         if (value instanceof Date) result[attrName] = value;
-        else if (typeof value === 'string') result[attrName] = new Date(value);
+        else if (typeof value === 'string') result[attrName] = parseDateInTimezone(value, this._adapter._connectionOptions.timezone);
         else result[attrName] = value;
       } else if (typeName === 'IntegerType' || typeName === 'DecimalType' || typeName === 'NumberType') {
         result[attrName] = this._parseNumericValue(value, typeName);
@@ -136,6 +137,6 @@ export class MySQLDML extends DMLAbstract {
   }
 
   _formatDate(date) {
-    return date.toISOString().slice(0, 23).replace('T', ' ');
+    return formatDateInTimezone(date, this._adapter._connectionOptions.timezone);
   }
 }

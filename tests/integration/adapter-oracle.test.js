@@ -96,7 +96,7 @@ it('reads Oracle boolean flags from VARCHAR2 columns', async () => {
   }, { modelName: 'Flag', tableName: testTable('bool_text'), timestamps: false });
   const context = await createTestContext({ models: [Flag] });
   try {
-    const definition = context.seq._buildTableDefinition(Flag);
+    const definition = context.seq.buildTableDefinition(Flag);
     await context.adapter.ddl.createTable({
       ...definition,
       columns: { ...definition.columns, enabled: { ...definition.columns.enabled, type: DataTypes.STRING(20) } }
@@ -138,7 +138,7 @@ it('uses configured Oracle boolean values for schema, writes, reads and filters'
   const context = await createTestContext({ models: [Flags], adapterOptions: { booleanValues: { true: 'S', false: 'N' } } });
   try {
     await context.seq.sync();
-    const definition = context.seq._buildTableDefinition(Flags);
+    const definition = context.seq.buildTableDefinition(Flags);
     const q = quoteTestIdentifier;
     const table = q(definition.tableName);
     const id = q(definition.attrToColumn.id);
@@ -187,9 +187,9 @@ it('uses configured Oracle boolean values for schema, writes, reads and filters'
     assert.equal((await Flags.findByPk(4)).getDataValue('override'), false);
     Flags.rawAttributes.added = { type: DataTypes.BOOLEAN, booleanValues: { true: 'ON', false: 'OFF' }, defaultValue: true };
     await context.seq.sync({ alter: true });
-    const addedColumn = q(context.seq._buildTableDefinition(Flags).attrToColumn.added);
+    const addedColumn = q(context.seq.buildTableDefinition(Flags).attrToColumn.added);
     const added = await context.adapter.dml._executeGet(`SELECT ${addedColumn} FROM ${table} WHERE ${id} = ?`, [1]);
-    assert.equal(added[context.seq._buildTableDefinition(Flags).attrToColumn.added], 'ON');
+    assert.equal(added[context.seq.buildTableDefinition(Flags).attrToColumn.added], 'ON');
     await Flags.destroy({ where: { override: true } });
     assert.equal(await Flags.count({ where: { override: true } }), 0);
   } finally {

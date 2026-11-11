@@ -191,7 +191,7 @@ describe('Naming Conventions', () => {
       });
       await seq.init();
 
-      const def = seq._buildTableDefinition(Product);
+      const def = seq.buildTableDefinition(Product);
       assert.equal(def.tableName, 'product');
     });
 
@@ -215,7 +215,7 @@ describe('Naming Conventions', () => {
       });
       await seq.init();
 
-      const def = seq._buildTableDefinition(User);
+      const def = seq.buildTableDefinition(User);
       assert.equal(def.tableName, 'app_user');
     });
 
@@ -238,7 +238,7 @@ describe('Naming Conventions', () => {
       });
       await seq.init();
 
-      const def = seq._buildTableDefinition(OrderItem);
+      const def = seq.buildTableDefinition(OrderItem);
       assert.equal(def.tableName, 'orderItem');
     });
 
@@ -261,7 +261,7 @@ describe('Naming Conventions', () => {
       });
       await seq.init();
 
-      const def = seq._buildTableDefinition(OrderItem);
+      const def = seq.buildTableDefinition(OrderItem);
       assert.equal(def.tableName, 'ORDER_ITEM');
     });
 
@@ -284,7 +284,7 @@ describe('Naming Conventions', () => {
       });
       await seq.init();
 
-      const def = seq._buildTableDefinition(UserProfile);
+      const def = seq.buildTableDefinition(UserProfile);
       assert.equal(def.tableName, 'userProfile');
     });
 
@@ -304,7 +304,7 @@ describe('Naming Conventions', () => {
       });
       await seq.init();
 
-      const def = seq._buildTableDefinition(MixedCaseTable);
+      const def = seq.buildTableDefinition(MixedCaseTable);
       assert.equal(def.tableName, 'MixedCaseTable');
     });
 
@@ -324,7 +324,7 @@ describe('Naming Conventions', () => {
       });
       await seq.init();
 
-      const def = seq._buildTableDefinition(UserProfile);
+      const def = seq.buildTableDefinition(UserProfile);
       assert.equal(def.tableName, 'userProfile');
     });
 
@@ -347,7 +347,7 @@ describe('Naming Conventions', () => {
       });
       await seq.init();
 
-      const def = seq._buildTableDefinition(User);
+      const def = seq.buildTableDefinition(User);
       assert.equal(def.tableName, 'tbl_users');
     });
 
@@ -370,7 +370,7 @@ describe('Naming Conventions', () => {
       });
       await seq.init();
 
-      const def = seq._buildTableDefinition(OrderItem);
+      const def = seq.buildTableDefinition(OrderItem);
       assert.equal(def.tableName, 'app_order_item');
     });
 
@@ -393,7 +393,7 @@ describe('Naming Conventions', () => {
       });
       await seq.init();
 
-      const def = seq._buildTableDefinition(VeryLongModelNameForTestingTableNameLimit);
+      const def = seq.buildTableDefinition(VeryLongModelNameForTestingTableNameLimit);
       assert.equal(def.tableName, 'very_l_limit');
     });
   });
@@ -418,7 +418,7 @@ describe('Naming Conventions', () => {
       });
       await seq.init();
 
-      const def = seq._buildTableDefinition(Product);
+      const def = seq.buildTableDefinition(Product);
       assert.equal(def.attrToColumn.productName, 'product_name');
       assert.equal(def.attrToColumn.unitPrice, 'unit_price');
       assert.equal(def.attrToColumn.inStock, 'in_stock');
@@ -441,7 +441,7 @@ describe('Naming Conventions', () => {
       });
       await seq.init();
 
-      const def = seq._buildTableDefinition(Product);
+      const def = seq.buildTableDefinition(Product);
       assert.equal(def.attrToColumn.productName, 'custom_name');
     });
 
@@ -466,7 +466,7 @@ describe('Naming Conventions', () => {
       });
       await seq.init();
 
-      const def = seq._buildTableDefinition(User);
+      const def = seq.buildTableDefinition(User);
       assert.equal(def.attrToColumn.firstName, 'firstName');
       assert.equal(def.attrToColumn.lastName, 'lastName');
     });
@@ -492,7 +492,7 @@ describe('Naming Conventions', () => {
       });
       await seq.init();
 
-      const def = seq._buildTableDefinition(User);
+      const def = seq.buildTableDefinition(User);
       assert.equal(def.attrToColumn.firstName, 'FIRST_NAME');
       assert.equal(def.attrToColumn.lastName, 'LAST_NAME');
     });
@@ -517,7 +517,7 @@ describe('Naming Conventions', () => {
       });
       await seq.init();
 
-      const def = seq._buildTableDefinition(User);
+      const def = seq.buildTableDefinition(User);
       assert.equal(def.attrToColumn.first_name, 'firstName');
     });
 
@@ -538,7 +538,7 @@ describe('Naming Conventions', () => {
       });
       await seq.init();
 
-      const def = seq._buildTableDefinition(Product);
+      const def = seq.buildTableDefinition(Product);
       assert.equal(def.attrToColumn.productName, 'productName');
     });
 
@@ -559,7 +559,7 @@ describe('Naming Conventions', () => {
       });
       await seq.init();
 
-      const def = seq._buildTableDefinition(Product);
+      const def = seq.buildTableDefinition(Product);
       assert.equal(def.attrToColumn.product_name, 'productName');
     });
 
@@ -583,7 +583,7 @@ describe('Naming Conventions', () => {
       });
       await seq.init();
 
-      const def = seq._buildTableDefinition(Product);
+      const def = seq.buildTableDefinition(Product);
       assert.equal(def.attrToColumn.veryLongProductDisplayName, 'very_lo_y_name');
     });
   });
@@ -667,7 +667,7 @@ describe('Naming Conventions', () => {
       open.push(context);
       await seq.sync();
 
-      const definition = seq._buildTableDefinition(UserProfile);
+      const definition = seq.buildTableDefinition(UserProfile);
       const physicalColumns = new Set((await adapter.ddl.describeTable(definition.tableName)).columns.map(column => column.name));
       assert.ok(physicalColumns.has(definition.attrToColumn.displayName));
 
@@ -693,7 +693,7 @@ it('creates distinct foreign keys for factura detail and collection tables withi
     adapterOptions: { naming: { caseStyle: 'upper', maxLength: 30, prefix: undefined, columns: 'snake_case' } } });
   try {
     await context.seq.sync();
-    const names = [Det, Cob].map(model => context.seq._buildTableDefinition(model).foreignKeys[0].constraintName);
+    const names = [Det, Cob].map(model => context.seq.buildTableDefinition(model).foreignKeys[0].constraintName);
     assert.deepEqual(names, ['FK_REP_FACTURAS_DET_FACTURA_ID', 'FK_REP_FACTURAS_COB_FACTURA_ID']);
     await Cab.create({ id: 1 });
     await Det.create({ id: 1, facturaId: 1 });

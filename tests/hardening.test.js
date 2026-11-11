@@ -142,7 +142,7 @@ describe('Schema introspection', () => {
     await seq.sync();
 
     Audit.options.indexes = [{ name: 'idx_audit_created_at', columns: ['createdAt'] }];
-    const definition = seq._buildTableDefinition(Audit);
+    const definition = seq.buildTableDefinition(Audit);
     const result = await seq.sync({ alter: true });
 
     assert.deepEqual(result.altered, [definition.tableName]);
@@ -214,7 +214,7 @@ describe('Schema introspection', () => {
     const context = await createTestContext({ models: [ReopenedUser], logging: false });
     open.push(context);
     const { seq, adapter } = context;
-    const definition = seq._buildTableDefinition(ReopenedUser);
+    const definition = seq.buildTableDefinition(ReopenedUser);
     const schema = adapter.schemas.get(definition.tableName);
     assert.ok(schema);
     assert.equal(schema.columns.added, undefined);
@@ -276,7 +276,7 @@ describe('Schema introspection', () => {
     const context = await createTestContext({ models: [ReopenedUser], logging: false });
     open.push(context);
     const { seq, adapter } = context;
-    const definition = seq._buildTableDefinition(ReopenedUser);
+    const definition = seq.buildTableDefinition(ReopenedUser);
     const schema = adapter.schemas.get(definition.tableName);
     assert.equal(schema.columns.createdAt, undefined);
     assert.equal(schema.columns.updatedAt, undefined);

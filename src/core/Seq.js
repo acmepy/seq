@@ -196,7 +196,7 @@ export class Seq {
 
     const existing = new Set(existingTables);
     const definitions = [
-      ...this._registry.all().map(modelClass => this._buildTableDefinition(modelClass)),
+      ...this._registry.all().map(modelClass => this.buildTableDefinition(modelClass)),
       ...this._buildJunctionTables().map(assoc => this._buildJunctionTableDefinition(assoc))
     ];
 
@@ -256,7 +256,7 @@ export class Seq {
     const result = { created: [], existing: [], altered: [], dropped: [] };
     const existingTables = new Set(await this._adapter.ddl.listTables());
     const definitions = [
-      ...this._registry.all().map(modelClass => this._buildTableDefinition(modelClass)),
+      ...this._registry.all().map(modelClass => this.buildTableDefinition(modelClass)),
       ...this._buildJunctionTables().map(assoc => this._buildJunctionTableDefinition(assoc))
     ];
     const uniqueDefinitions = [...new Map(definitions.map(definition => [definition.tableName, definition])).values()];
@@ -391,10 +391,9 @@ export class Seq {
   /**
    * Builds a table definition from a model class for DDL operations.
    * @param {import('../../types/index.d.ts').ModelStatic} modelClass
-   * @returns {object}
-   * @private
+   * @returns {import('../../types/index.d.ts').TableDefinition}
    */
-  _buildTableDefinition(modelClass) {
+  buildTableDefinition(modelClass) {
     return this._adapter.buildTableDefinition(modelClass, this._adapterDefinitionContext());
   }
 

@@ -2761,7 +2761,7 @@ class Seq {
 
     const existing = new Set(existingTables);
     const definitions = [
-      ...this._registry.all().map(modelClass => this._buildTableDefinition(modelClass)),
+      ...this._registry.all().map(modelClass => this.buildTableDefinition(modelClass)),
       ...this._buildJunctionTables().map(assoc => this._buildJunctionTableDefinition(assoc))
     ];
 
@@ -2821,7 +2821,7 @@ class Seq {
     const result = { created: [], existing: [], altered: [], dropped: [] };
     const existingTables = new Set(await this._adapter.ddl.listTables());
     const definitions = [
-      ...this._registry.all().map(modelClass => this._buildTableDefinition(modelClass)),
+      ...this._registry.all().map(modelClass => this.buildTableDefinition(modelClass)),
       ...this._buildJunctionTables().map(assoc => this._buildJunctionTableDefinition(assoc))
     ];
     const uniqueDefinitions = [...new Map(definitions.map(definition => [definition.tableName, definition])).values()];
@@ -2956,10 +2956,9 @@ class Seq {
   /**
    * Builds a table definition from a model class for DDL operations.
    * @param {import('../../types/index.d.ts').ModelStatic} modelClass
-   * @returns {object}
-   * @private
+   * @returns {import('../../types/index.d.ts').TableDefinition}
    */
-  _buildTableDefinition(modelClass) {
+  buildTableDefinition(modelClass) {
     return this._adapter.buildTableDefinition(modelClass, this._adapterDefinitionContext());
   }
 
@@ -6572,6 +6571,34 @@ class SQLiteAdapter extends BaseAdapter {
   }
 }
 
+function validateTimezone(value, allowLocal = false) {
+  if (value === undefined || value === 'Z' || allowLocal && value === 'local') return value;
+  const match = typeof value === 'string' && value.match(/^([+-])(\d{2}):(\d{2})$/);
+  const minutes = match ? (Number(match[2]) * 60 + Number(match[3])) * (match[1] === '-' ? -1 : 1) : NaN;
+  if (!match || Number(match[3]) > 59 || minutes < -720 || minutes > 840) {
+    throw new ConfigurationError('timezone must be Z or an offset between -12:00 and +14:00', { code: 'SEQ_INVALID_TIMEZONE', details: { timezone: value } });
+  }
+  return value;
+}
+
+function formatDateInTimezone(date, timezone = 'Z', precision = 3) {
+  if (timezone === 'local') {
+    const pad = (value, size = 2) => String(value).padStart(size, '0');
+    const value = pad(date.getFullYear(), 4) + '-' + pad(date.getMonth() + 1) + '-' + pad(date.getDate()) + ' ' + pad(date.getHours()) + ':' + pad(date.getMinutes()) + ':' + pad(date.getSeconds());
+    return precision ? value + '.' + pad(date.getMilliseconds(), 3) : value;
+  }
+  const minutes = timezone === 'Z' ? 0 : (Number(timezone.slice(1, 3)) * 60 + Number(timezone.slice(4))) * (timezone[0] === '-' ? -1 : 1);
+  return new Date(date.getTime() + minutes * 60000).toISOString().slice(0, precision ? 23 : 19).replace('T', ' ');
+}
+
+function parseDateInTimezone(value, timezone = 'Z') {
+  if (/^\d{4}-\d{2}-\d{2}(?:[ T]\d{2}:\d{2}:\d{2}(?:\.\d+)?)?$/.test(value)) {
+    const normalized = value.length === 10 ? value + 'T00:00:00' : value.replace(' ', 'T');
+    return new Date(normalized + (timezone === 'local' ? '' : timezone));
+  }
+  return new Date(value);
+}
+
 class MySQLError extends ErrorAbstract {
   constructor(message, options = {}) {
     super(message, options);
@@ -6925,7 +6952,7 @@ class MySQLDDL extends DDLAbstract {
   }
 
   _formatDate(date) {
-    return date.toISOString().slice(0, 23).replace('T', ' ');
+    return this._adapter.dml._formatDate(date);
   }
 }
 
@@ -7018,7 +7045,7 @@ class MySQLDML extends DMLAbstract {
   }
 
   _serializeValue(value) {
-    if (value instanceof Date) return this._formatDate(value);
+    if (value instanceof Date) return value;
     if (value === undefined) return null;
     if (typeof value === 'boolean') return value ? 1 : 0;
     if (Array.isArray(value) || (typeof value === 'object' && value !== null)) return JSON.stringify(value);
@@ -7044,7 +7071,7 @@ class MySQLDML extends DMLAbstract {
         else result[attrName] = value === 1 || value === '1';
       } else if (typeName === 'DateType') {
         if (value instanceof Date) result[attrName] = value;
-        else if (typeof value === 'string') result[attrName] = new Date(value);
+        else if (typeof value === 'string') result[attrName] = parseDateInTimezone(value, this._adapter._connectionOptions.timezone);
         else result[attrName] = value;
       } else if (typeName === 'IntegerType' || typeName === 'DecimalType' || typeName === 'NumberType') {
         result[attrName] = this._parseNumericValue(value, typeName);
@@ -7063,7 +7090,7 @@ class MySQLDML extends DMLAbstract {
   }
 
   _formatDate(date) {
-    return date.toISOString().slice(0, 23).replace('T', ' ');
+    return formatDateInTimezone(date, this._adapter._connectionOptions.timezone);
   }
 }
 
@@ -7142,7 +7169,9 @@ class MySQLAdapter extends BaseAdapter {
     this._lastConnectionUse = new WeakMap();
     this._validationIdleTimeout = this._normalizeValidationIdleTimeout(options.validationIdleTimeout ?? 15000);
     this._sessionTimeouts = this._normalizeSessionTimeouts(options);
+    validateTimezone(options.timezone, true);
     this._connectionOptions = this._normalizeConnectionOptions(options);
+    this._sessionTimezone = options.timezone === undefined || options.timezone === 'local' ? null : options.timezone === 'Z' ? '+00:00' : options.timezone;
     this.ddl = new MySQLDDL(this);
     this.dml = new MySQLDML(this);
     this.dcl = null;
@@ -7230,6 +7259,9 @@ class MySQLAdapter extends BaseAdapter {
     // whose server-side settings persist while it remains in the pool.
     const physicalConnection = connection.connection ?? connection;
     if (this._configuredConnections.has(physicalConnection)) return;
+    if (this._sessionTimezone) {
+      await this._measureSql('SET SESSION time_zone = ?', [this._sessionTimezone], () => connection.execute('SET SESSION time_zone = ?', [this._sessionTimezone]));
+    }
     const { waitTimeout, interactiveTimeout } = this._sessionTimeouts;
     await this._measureSql(`SET SESSION wait_timeout = ${waitTimeout}`, [], () => connection.execute(`SET SESSION wait_timeout = ${waitTimeout}`));
     await this._measureSql(`SET SESSION interactive_timeout = ${interactiveTimeout}`, [], () => connection.execute(`SET SESSION interactive_timeout = ${interactiveTimeout}`));
@@ -7408,10 +7440,10 @@ class Oracle11DDL extends DDLAbstract {
       }
     });
   }
-  async _executeGet(sql, params = []) { 
+  async _executeGet(sql, params = []) {
     return (await this._executeQueryAll(sql, params))[0] || null;
   }
-  
+
   _usesSequenceForAutoIncrement() { return true; }
 
   async _hasSequence(name) {
@@ -7440,7 +7472,7 @@ class Oracle11DDL extends DDLAbstract {
     for (const [attr, column] of Object.entries(def.columns)) {
       const name = column.field || attr;
       const parts = [this._q(name), this._adapter.mapDataType(column.type, column)];
-      if (column.defaultCurrentTimestamp) parts.push('DEFAULT SYSDATE');
+      if (column.defaultCurrentTimestamp) parts.push(this._adapter.timezone === undefined ? 'DEFAULT SYSDATE' : 'DEFAULT CURRENT_DATE');
       else if (column.defaultValue !== undefined && column.defaultValue !== null && typeof column.defaultValue !== 'function') parts.push(`DEFAULT ${this._formatDefaultValue(column.defaultValue, column)}`);
       if (!column.allowNull && !column.primaryKey) parts.push(`CONSTRAINT ${this._q(this._constraintName('nn', def.tableName, [name]))} NOT NULL`);
       columns.push(parts.join(' ')); if (column.primaryKey) primaryKeys.push(name);
@@ -7456,7 +7488,7 @@ class Oracle11DDL extends DDLAbstract {
     try { await this._execute(`DROP SEQUENCE ${this._q(this._adapter.sequenceName(tableName))}`); } catch (error) { if (!/ORA-02289/.test(error?.message || '')) throw error; }
     await super.dropTable(tableName, options);
   }
-  async truncateTable(tableName, options = {}) { 
+  async truncateTable(tableName, options = {}) {
     if (!options.ifExists || await this.hasTable(tableName)) await this._execute(`TRUNCATE TABLE ${this._q(tableName)}`);
   }
 
@@ -7464,10 +7496,10 @@ class Oracle11DDL extends DDLAbstract {
     return !!await this._executeGet('SELECT TABLE_NAME FROM USER_TABLES WHERE TABLE_NAME = ?', [tableName]);
   }
 
-  async listTables() { 
+  async listTables() {
     return (await this._executeQueryAll('SELECT TABLE_NAME FROM USER_TABLES union all select view_name from user_views')).map(row => row.TABLE_NAME);
   }
-  
+
   async describeTable(tableName) {
     if (!(await this.hasTable(tableName))) throw new AdapterError(`Table "${tableName}" does not exist`, { code: 'SEQ_ADAPTER_TABLE_NOT_FOUND' });
     const rows = await this._executeQueryAll('SELECT COLUMN_NAME, DATA_TYPE, DATA_LENGTH, NULLABLE, DATA_DEFAULT FROM USER_TAB_COLUMNS WHERE TABLE_NAME = ? ORDER BY COLUMN_ID', [tableName]);
@@ -7520,18 +7552,18 @@ class Oracle11DDL extends DDLAbstract {
       }
       if (!column.allowNull) parts.push(`CONSTRAINT ${this._q(this._constraintName('nn', tableName, [name]))} NOT NULL`);
       await this._execute(`ALTER TABLE ${this._q(tableName)} ADD (${parts.join(' ')})`);
-      schema.columns[attr] = column; 
-      schema.attrToColumn[attr] = name; 
+      schema.columns[attr] = column;
+      schema.attrToColumn[attr] = name;
       schema.columnToAttr[name] = attr;
     }
   }
-  async addUniqueConstraint(tableName, constraint) { 
+  async addUniqueConstraint(tableName, constraint) {
     await this._execute(`ALTER TABLE ${this._q(tableName)} ADD CONSTRAINT ${this._q(constraint.constraintName)} UNIQUE (${constraint.columns.map(column => this._q(column)).join(', ')})`);
     this._adapter.schemas.get(tableName).uniqueConstraints.push({ ...constraint });
   }
 
-  async addIndex(tableName, index) { 
-    await this._execute(`CREATE ${index.unique ? 'UNIQUE ' : ''}INDEX ${this._q(index.name)} ON ${this._q(tableName)} (${index.columns.map(column => this._q(column)).join(', ')})`); 
+  async addIndex(tableName, index) {
+    await this._execute(`CREATE ${index.unique ? 'UNIQUE ' : ''}INDEX ${this._q(index.name)} ON ${this._q(tableName)} (${index.columns.map(column => this._q(column)).join(', ')})`);
     this._adapter.schemas.get(tableName).indexes.push({ ...index });
   }
 
@@ -7543,12 +7575,12 @@ class Oracle11DDL extends DDLAbstract {
   }
   _formatDefaultValue(value, column) {
     if (typeof value === 'boolean') value = this._adapter.serializeBoolean(value, column);
-    if (value === null) return 'NULL'; 
-    if (value instanceof Date) return `TO_DATE('${value.toISOString().slice(0, 19).replace('T', ' ')}', 'YYYY-MM-DD HH24:MI:SS')`; 
-    if (typeof value === 'string') return `'${value.replaceAll("'", "''")}'`; 
-    if (typeof value === 'boolean') return value ? '1' : '0'; 
-    if (typeof value === 'number' && Number.isFinite(value)) return String(value); 
-    if (Array.isArray(value) || typeof value === 'object') return `'${JSON.stringify(value).replaceAll("'", "''")}'`; 
+    if (value === null) return 'NULL';
+    if (value instanceof Date) return `TO_DATE('${formatDateInTimezone(value, this._adapter.timezone, 0)}', 'YYYY-MM-DD HH24:MI:SS')`;
+    if (typeof value === 'string') return `'${value.replaceAll("'", "''")}'`;
+    if (typeof value === 'boolean') return value ? '1' : '0';
+    if (typeof value === 'number' && Number.isFinite(value)) return String(value);
+    if (Array.isArray(value) || typeof value === 'object') return `'${JSON.stringify(value).replaceAll("'", "''")}'`;
     throw new AdapterError('Unsupported Oracle default value', { code: 'SEQ_DDL_INVALID_DEFAULT' });
   }
 }
@@ -7710,23 +7742,23 @@ class Oracle11DML extends DMLAbstract {
     }));
   }
   _toAttrNames(record, schema) {
-    const result = {}; 
-    for (const [key, value] of Object.entries(record)) { 
-      const attr = schema.columnToAttr[key] || key; 
-      if (key === 'SEQ_ROWNUM') continue; 
-      const type = schema.columns[attr]?.type?.constructor?.name; 
-      if (['ArrayType', 'ObjectType', 'JSONType'].includes(type) && typeof value === 'string') { 
-        try { result[attr] = JSON.parse(value); } catch { result[attr] = value; } 
+    const result = {};
+    for (const [key, value] of Object.entries(record)) {
+      const attr = schema.columnToAttr[key] || key;
+      if (key === 'SEQ_ROWNUM') continue;
+      const type = schema.columns[attr]?.type?.constructor?.name;
+      if (['ArrayType', 'ObjectType', 'JSONType'].includes(type) && typeof value === 'string') {
+        try { result[attr] = JSON.parse(value); } catch { result[attr] = value; }
       } else if (type === 'BooleanType') {
         result[attr] = this._adapter.deserializeBoolean(value, schema.columns[attr]);
       }else if (type === 'DateType' && typeof value === 'string') {
-        result[attr] = new Date(value); 
+        result[attr] = this._adapter.timezone === undefined ? new Date(value) : parseDateInTimezone(value, this._adapter.timezone);
       }else if (type === 'IntegerType' || type === 'DecimalType' || type === 'NumberType') {
-        result[attr] = this._parseNumericValue(value, type); 
-      }else { 
-        result[attr] = value; 
+        result[attr] = this._parseNumericValue(value, type);
+      }else {
+        result[attr] = value;
       }
-    } 
+    }
     return result;
   }
 }
@@ -7767,6 +7799,7 @@ class Oracle11Adapter extends BaseAdapter {
   constructor(options = {}) {
     super({ fkStrategy: 'alter', ...options });
     this.booleanValues = this._validateBooleanValues(options.booleanValues);
+    this.timezone = validateTimezone(options.timezone);
     this._pool = null; this._connectionOptions = this._normalizeConnectionOptions(options);
     this.ddl = new Oracle11DDL(this); this.dml = new Oracle11DML(this); this.dcl = null; this.tcl = new Oracle11TCL(this);
   }
@@ -7917,17 +7950,20 @@ class Oracle11Adapter extends BaseAdapter {
   }
   _dependencyWarning(message) { if (this._seq) this._log('error', { type: 'dependency', message }); else console.error('[SEQ]', JSON.stringify({ type: 'dependency', message })); }
   _normalizeConnectionOptions(options) {
-    const { naming, fkStrategy, eager, booleanValues, afterConnect, connectString, user, password, poolMin, poolMax, poolIncrement, ...rest } = options;
-    if (afterConnect !== undefined) {
-      if (typeof afterConnect !== 'function') {
+    const { naming, fkStrategy, eager, booleanValues, afterConnect, timezone, connectString, user, password, poolMin, poolMax, poolIncrement, ...rest } = options;
+    if (afterConnect !== undefined || timezone !== undefined) {
+      if (afterConnect !== undefined && typeof afterConnect !== 'function') {
         throw new ConfigurationError('afterConnect must be a function', { code: 'SEQ_ORACLE_INVALID_AFTER_CONNECT' });
       }
       if (rest.sessionCallback !== undefined) {
-        throw new ConfigurationError('afterConnect cannot be combined with sessionCallback', { code: 'SEQ_ORACLE_INVALID_AFTER_CONNECT' });
+        throw new ConfigurationError('afterConnect or timezone cannot be combined with sessionCallback', { code: 'SEQ_ORACLE_INVALID_AFTER_CONNECT' });
       }
       // oracledb 5.5 invokes sessionCallback for new sessions and awaits done().
       rest.sessionCallback = (connection, requestedTag, done) => {
-        Promise.resolve().then(() => afterConnect(connection)).then(
+        Promise.resolve().then(async () => {
+          if (timezone !== undefined) await connection.execute(`ALTER SESSION SET TIME_ZONE = '${timezone === 'Z' ? '+00:00' : timezone}'`);
+          if (afterConnect) await afterConnect(connection);
+        }).then(
           () => done(),
           error => done(error instanceof Error ? error : new Error('Oracle afterConnect failed', { cause: error }))
         );

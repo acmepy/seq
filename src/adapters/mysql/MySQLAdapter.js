@@ -1,3 +1,4 @@
+import { validateTimezone } from '../../utils/timezone.js';
 import { BaseAdapter } from '../BaseAdapter.js';
 import { MySQLDDL } from './MySQLDDL.js';
 import { MySQLDML } from './MySQLDML.js';
@@ -22,7 +23,9 @@ export class MySQLAdapter extends BaseAdapter {
     this._lastConnectionUse = new WeakMap();
     this._validationIdleTimeout = this._normalizeValidationIdleTimeout(options.validationIdleTimeout ?? 15000);
     this._sessionTimeouts = this._normalizeSessionTimeouts(options);
+    validateTimezone(options.timezone, true);
     this._connectionOptions = this._normalizeConnectionOptions(options);
+    this._sessionTimezone = options.timezone === undefined || options.timezone === 'local' ? null : options.timezone === 'Z' ? '+00:00' : options.timezone;
     this.ddl = new MySQLDDL(this);
     this.dml = new MySQLDML(this);
     this.dcl = null;
@@ -110,6 +113,9 @@ export class MySQLAdapter extends BaseAdapter {
     // whose server-side settings persist while it remains in the pool.
     const physicalConnection = connection.connection ?? connection;
     if (this._configuredConnections.has(physicalConnection)) return;
+    if (this._sessionTimezone) {
+      await this._measureSql('SET SESSION time_zone = ?', [this._sessionTimezone], () => connection.execute('SET SESSION time_zone = ?', [this._sessionTimezone]));
+    }
     const { waitTimeout, interactiveTimeout } = this._sessionTimeouts;
     await this._measureSql(`SET SESSION wait_timeout = ${waitTimeout}`, [], () => connection.execute(`SET SESSION wait_timeout = ${waitTimeout}`));
     await this._measureSql(`SET SESSION interactive_timeout = ${interactiveTimeout}`, [], () => connection.execute(`SET SESSION interactive_timeout = ${interactiveTimeout}`));

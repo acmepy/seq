@@ -847,6 +847,15 @@ await seq.transaction(async transaction => {
 
 ## Sincronizacion
 
+Puedes obtener la definicion fisica de un modelo con `seq.buildTableDefinition(Modelo)`. El metodo construye los metadatos; no crea ni altera la tabla:
+
+```js
+await seq.init();
+const definition = seq.buildTableDefinition(User);
+console.log(definition.tableName, definition.columns);
+```
+
+
 ```js
 await seq.authenticate();
 await seq.sync();
@@ -902,6 +911,48 @@ El adapter Map guarda datos en memoria usando `Map`. Es util para pruebas, proto
 ### MySQLAdapter: almacenamiento JSON
 
 Al crear o agregar columnas `JSON`, `OBJECT` o `ARRAY`, el adaptador consulta la version del servidor y utiliza `JSON` si esta disponible, o `LONGTEXT` en versiones anteriores. La serializacion y lectura conservan los objetos y arrays del modelo. El almacenamiento `LONGTEXT` no agrega validacion JSON del motor ni funciones JSON a servidores que no las soportan.
+
+### Zona horaria en MySQL y Oracle
+
+Configura `timezone: '-03:00'` en el adaptador para interpretar las fechas sin zona de la base como hora de UTC-03:00:
+
+```js
+const mysql = new MySQLAdapter({
+  host: process.env.MYSQL_HOST,
+  user: process.env.MYSQL_USER,
+  password: process.env.MYSQL_PASSWORD,
+  database: process.env.MYSQL_DATABASE,
+  timezone: '-03:00'
+});
+
+const oracle = new Oracle11Adapter({
+  user: process.env.ORACLE_USER,
+  password: process.env.ORACLE_PASSWORD,
+  connectString: process.env.ORACLE_CONNECT_STRING,
+  timezone: '-03:00'
+});
+
+const date = new Date('2026-11-10T14:30:00-03:00');
+// Guardado en DATE/DATETIME: 2026-11-10 14:30:00
+// Al leer: Date con el mismo instante; date.toISOString() muestra 17:30:00Z.
+const display = new Intl.DateTimeFormat('sv-SE', {
+  timeZone: 'Etc/GMT+3', dateStyle: 'short', timeStyle: 'medium', hourCycle: 'h23'
+});
+console.log(display.format(date)); // 2026-11-10 14:30:00
+```
+
+En MySQL, un offset explicito o `Z` configura tanto el driver como `SET SESSION time_zone` para cada conexion fisica. `local` conserva el comportamiento nativo de mysql2 y no cambia la zona de sesion. En Oracle (oracledb 5.5), configura `ALTER SESSION SET TIME_ZONE` antes de `afterConnect`; no se puede combinar con un `sessionCallback` nativo. No se modifica la zona global de la base ni `process.env.TZ`.
+
+Se aceptan `Z` y offsets fijos entre `-12:00` y `+14:00`. La configuracion no cambia datos anteriores ni agrega una zona al tipo `Date` de JavaScript: para mostrar la misma hora local, indica la zona en el formateador o ejecuta Node en esa zona. Los `Date` de defaults explicitos tambien se formatean con el offset configurado. Con `timezone` configurado, los defaults SQL de timestamps de Oracle usan `CURRENT_DATE` en lugar de `SYSDATE`, que depende de la hora del servidor; las tablas existentes no se modifican automaticamente.
+
+Ejemplo completo contra las credenciales de `.env`:
+
+```sh
+npm run example:timezone -- mysql
+npm run example:timezone -- oracle11
+```
+
+El ejemplo crea y elimina una tabla exclusiva de demostracion, verifica la hora almacenada y comprueba que tres guardados sucesivos la conservan. Si la tabla ya existe, no la sobrescribe. Se verifico con los drivers reales y Node en UTC y Asia/Tokyo.
 
 ### Oracle11Adapter y Oracle12Adapter
 

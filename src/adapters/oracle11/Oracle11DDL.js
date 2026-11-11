@@ -1,3 +1,4 @@
+import { formatDateInTimezone } from '../../utils/timezone.js';
 import { DDLAbstract } from '../abstract/DDLAbstract.js';
 import { AdapterError } from '../../core/errors/AdapterError.js';
 import { Oracle11Error } from './Oracle11Error.js';
@@ -30,10 +31,10 @@ export class Oracle11DDL extends DDLAbstract {
       }
     });
   }
-  async _executeGet(sql, params = []) { 
+  async _executeGet(sql, params = []) {
     return (await this._executeQueryAll(sql, params))[0] || null;
   }
-  
+
   _usesSequenceForAutoIncrement() { return true; }
 
   async _hasSequence(name) {
@@ -62,7 +63,7 @@ export class Oracle11DDL extends DDLAbstract {
     for (const [attr, column] of Object.entries(def.columns)) {
       const name = column.field || attr;
       const parts = [this._q(name), this._adapter.mapDataType(column.type, column)];
-      if (column.defaultCurrentTimestamp) parts.push('DEFAULT SYSDATE');
+      if (column.defaultCurrentTimestamp) parts.push(this._adapter.timezone === undefined ? 'DEFAULT SYSDATE' : 'DEFAULT CURRENT_DATE');
       else if (column.defaultValue !== undefined && column.defaultValue !== null && typeof column.defaultValue !== 'function') parts.push(`DEFAULT ${this._formatDefaultValue(column.defaultValue, column)}`);
       if (!column.allowNull && !column.primaryKey) parts.push(`CONSTRAINT ${this._q(this._constraintName('nn', def.tableName, [name]))} NOT NULL`);
       columns.push(parts.join(' ')); if (column.primaryKey) primaryKeys.push(name);
@@ -78,7 +79,7 @@ export class Oracle11DDL extends DDLAbstract {
     try { await this._execute(`DROP SEQUENCE ${this._q(this._adapter.sequenceName(tableName))}`); } catch (error) { if (!/ORA-02289/.test(error?.message || '')) throw error; }
     await super.dropTable(tableName, options);
   }
-  async truncateTable(tableName, options = {}) { 
+  async truncateTable(tableName, options = {}) {
     if (!options.ifExists || await this.hasTable(tableName)) await this._execute(`TRUNCATE TABLE ${this._q(tableName)}`);
   }
 
@@ -86,10 +87,10 @@ export class Oracle11DDL extends DDLAbstract {
     return !!await this._executeGet('SELECT TABLE_NAME FROM USER_TABLES WHERE TABLE_NAME = ?', [tableName]);
   }
 
-  async listTables() { 
+  async listTables() {
     return (await this._executeQueryAll('SELECT TABLE_NAME FROM USER_TABLES union all select view_name from user_views')).map(row => row.TABLE_NAME);
   }
-  
+
   async describeTable(tableName) {
     if (!(await this.hasTable(tableName))) throw new AdapterError(`Table "${tableName}" does not exist`, { code: 'SEQ_ADAPTER_TABLE_NOT_FOUND' });
     const rows = await this._executeQueryAll('SELECT COLUMN_NAME, DATA_TYPE, DATA_LENGTH, NULLABLE, DATA_DEFAULT FROM USER_TAB_COLUMNS WHERE TABLE_NAME = ? ORDER BY COLUMN_ID', [tableName]);
@@ -142,18 +143,18 @@ export class Oracle11DDL extends DDLAbstract {
       }
       if (!column.allowNull) parts.push(`CONSTRAINT ${this._q(this._constraintName('nn', tableName, [name]))} NOT NULL`);
       await this._execute(`ALTER TABLE ${this._q(tableName)} ADD (${parts.join(' ')})`);
-      schema.columns[attr] = column; 
-      schema.attrToColumn[attr] = name; 
+      schema.columns[attr] = column;
+      schema.attrToColumn[attr] = name;
       schema.columnToAttr[name] = attr;
     }
   }
-  async addUniqueConstraint(tableName, constraint) { 
+  async addUniqueConstraint(tableName, constraint) {
     await this._execute(`ALTER TABLE ${this._q(tableName)} ADD CONSTRAINT ${this._q(constraint.constraintName)} UNIQUE (${constraint.columns.map(column => this._q(column)).join(', ')})`);
     this._adapter.schemas.get(tableName).uniqueConstraints.push({ ...constraint });
   }
 
-  async addIndex(tableName, index) { 
-    await this._execute(`CREATE ${index.unique ? 'UNIQUE ' : ''}INDEX ${this._q(index.name)} ON ${this._q(tableName)} (${index.columns.map(column => this._q(column)).join(', ')})`); 
+  async addIndex(tableName, index) {
+    await this._execute(`CREATE ${index.unique ? 'UNIQUE ' : ''}INDEX ${this._q(index.name)} ON ${this._q(tableName)} (${index.columns.map(column => this._q(column)).join(', ')})`);
     this._adapter.schemas.get(tableName).indexes.push({ ...index });
   }
 
@@ -165,12 +166,12 @@ export class Oracle11DDL extends DDLAbstract {
   }
   _formatDefaultValue(value, column) {
     if (typeof value === 'boolean') value = this._adapter.serializeBoolean(value, column);
-    if (value === null) return 'NULL'; 
-    if (value instanceof Date) return `TO_DATE('${value.toISOString().slice(0, 19).replace('T', ' ')}', 'YYYY-MM-DD HH24:MI:SS')`; 
-    if (typeof value === 'string') return `'${value.replaceAll("'", "''")}'`; 
-    if (typeof value === 'boolean') return value ? '1' : '0'; 
-    if (typeof value === 'number' && Number.isFinite(value)) return String(value); 
-    if (Array.isArray(value) || typeof value === 'object') return `'${JSON.stringify(value).replaceAll("'", "''")}'`; 
+    if (value === null) return 'NULL';
+    if (value instanceof Date) return `TO_DATE('${formatDateInTimezone(value, this._adapter.timezone, 0)}', 'YYYY-MM-DD HH24:MI:SS')`;
+    if (typeof value === 'string') return `'${value.replaceAll("'", "''")}'`;
+    if (typeof value === 'boolean') return value ? '1' : '0';
+    if (typeof value === 'number' && Number.isFinite(value)) return String(value);
+    if (Array.isArray(value) || typeof value === 'object') return `'${JSON.stringify(value).replaceAll("'", "''")}'`;
     throw new AdapterError('Unsupported Oracle default value', { code: 'SEQ_DDL_INVALID_DEFAULT' });
   }
 }

@@ -1,3 +1,4 @@
+import { validateTimezone } from '../../utils/timezone.js';
 import { BaseAdapter } from '../BaseAdapter.js';
 import { Oracle11DDL } from './Oracle11DDL.js';
 import { Oracle11DML } from './Oracle11DML.js';
@@ -20,6 +21,7 @@ export class Oracle11Adapter extends BaseAdapter {
   constructor(options = {}) {
     super({ fkStrategy: 'alter', ...options });
     this.booleanValues = this._validateBooleanValues(options.booleanValues);
+    this.timezone = validateTimezone(options.timezone);
     this._pool = null; this._connectionOptions = this._normalizeConnectionOptions(options);
     this.ddl = new Oracle11DDL(this); this.dml = new Oracle11DML(this); this.dcl = null; this.tcl = new Oracle11TCL(this);
   }
@@ -170,17 +172,20 @@ export class Oracle11Adapter extends BaseAdapter {
   }
   _dependencyWarning(message) { if (this._seq) this._log('error', { type: 'dependency', message }); else console.error('[SEQ]', JSON.stringify({ type: 'dependency', message })); }
   _normalizeConnectionOptions(options) {
-    const { naming, fkStrategy, eager, booleanValues, afterConnect, connectString, user, password, poolMin, poolMax, poolIncrement, ...rest } = options;
-    if (afterConnect !== undefined) {
-      if (typeof afterConnect !== 'function') {
+    const { naming, fkStrategy, eager, booleanValues, afterConnect, timezone, connectString, user, password, poolMin, poolMax, poolIncrement, ...rest } = options;
+    if (afterConnect !== undefined || timezone !== undefined) {
+      if (afterConnect !== undefined && typeof afterConnect !== 'function') {
         throw new ConfigurationError('afterConnect must be a function', { code: 'SEQ_ORACLE_INVALID_AFTER_CONNECT' });
       }
       if (rest.sessionCallback !== undefined) {
-        throw new ConfigurationError('afterConnect cannot be combined with sessionCallback', { code: 'SEQ_ORACLE_INVALID_AFTER_CONNECT' });
+        throw new ConfigurationError('afterConnect or timezone cannot be combined with sessionCallback', { code: 'SEQ_ORACLE_INVALID_AFTER_CONNECT' });
       }
       // oracledb 5.5 invokes sessionCallback for new sessions and awaits done().
       rest.sessionCallback = (connection, requestedTag, done) => {
-        Promise.resolve().then(() => afterConnect(connection)).then(
+        Promise.resolve().then(async () => {
+          if (timezone !== undefined) await connection.execute(`ALTER SESSION SET TIME_ZONE = '${timezone === 'Z' ? '+00:00' : timezone}'`);
+          if (afterConnect) await afterConnect(connection);
+        }).then(
           () => done(),
           error => done(error instanceof Error ? error : new Error('Oracle afterConnect failed', { cause: error }))
         );

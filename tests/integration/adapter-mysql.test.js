@@ -53,7 +53,7 @@ it('stores JSON values with the available MySQL column type on create and alter'
   try {
     await context.seq.sync();
     const { adapter, seq } = context;
-    const def = seq._buildTableDefinition(JsonValues);
+    const def = seq.buildTableDefinition(JsonValues);
     const payload = { text: 'x'.repeat(70000), nested: { active: true } };
     await JsonValues.create({ id: 1, payload, object: { role: 'admin' }, items: [1, 2] });
     const found = await JsonValues.findByPk(1);

@@ -38,7 +38,7 @@ test('Oracle boolean configuration validation', () => {
     class Invalid extends Model {}
     Invalid.init({ flag: { type: DataTypes.BOOLEAN, booleanValues: { true: 'x', false: 'x' } } }, { modelName: 'Invalid', timestamps: false });
     const seq = new Seq({ adapter, logging: false });
-    assert.throws(() => seq._buildTableDefinition(Invalid), { code: 'SEQ_ORACLE_INVALID_BOOLEAN_VALUES' });
+    assert.throws(() => seq.buildTableDefinition(Invalid), { code: 'SEQ_ORACLE_INVALID_BOOLEAN_VALUES' });
   }
 });
 
@@ -164,7 +164,7 @@ test('Oracle adapters', async t => {
     const seq = new Seq({ adapter, models: [ExplicitUser], logging: false });
     ExplicitUser.seq = seq;
     ExplicitUser._resolvedTableName = seq._resolveTableName(ExplicitUser);
-    const def = seq._buildTableDefinition(ExplicitUser);
+    const def = seq.buildTableDefinition(ExplicitUser);
 
     assert.equal(def.tableName, 'explicit_users');
     assert.equal(def.attrToColumn.firstName, 'first_name');

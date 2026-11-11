@@ -37,7 +37,7 @@ describe('DDL Phases', () => {
     seq = null;
   });
 
-  describe('_buildTableDefinition grouping', () => {
+  describe('buildTableDefinition grouping', () => {
     it('separates unique constraints from columns', async () => {
       class User extends Model {}
       User.init(
@@ -51,7 +51,7 @@ describe('DDL Phases', () => {
 
       await initSeq([User]);
 
-      const def = seq._buildTableDefinition(User);
+      const def = seq.buildTableDefinition(User);
 
       assert.ok(def.columns.email, 'email column exists');
       assert.equal(def.columns.email.unique, undefined, 'unique flag removed from column');
@@ -72,7 +72,7 @@ describe('DDL Phases', () => {
 
       await initSeq([User]);
 
-      const def = seq._buildTableDefinition(User);
+      const def = seq.buildTableDefinition(User);
       assert.ok(Array.isArray(def.indexes));
       assert.equal(def.indexes.length, 0);
     });
@@ -90,7 +90,7 @@ describe('DDL Phases', () => {
 
       await initSeq([User]);
 
-      const def = seq._buildTableDefinition(User);
+      const def = seq.buildTableDefinition(User);
       assert.equal(def.uniqueConstraints.length, 2);
       const names = def.uniqueConstraints.map(uk => uk.constraintName);
       assert.ok(names.includes(expectedUniqueName(physicalTableName(User), [physicalColumnName(User, 'email')])));
@@ -109,7 +109,7 @@ describe('DDL Phases', () => {
 
       await initSeq([User]);
 
-      const def = seq._buildTableDefinition(User);
+      const def = seq.buildTableDefinition(User);
       assert.equal(Object.keys(def.columns.email).includes('unique'), false);
     });
 
@@ -132,7 +132,7 @@ describe('DDL Phases', () => {
 
       await initSeq([User]);
 
-      const def = seq._buildTableDefinition(User);
+      const def = seq.buildTableDefinition(User);
       assert.ok(!def.columns.fullName);
       assert.ok(!def.attrToColumn.fullName);
       assert.ok(!def.columnToAttr.fullName);
@@ -273,7 +273,7 @@ describe('DDL Phases', () => {
       const schema1 = seq._adapter.schemas.get(physicalTableName(User));
       assert.equal(schema1.uniqueConstraints.length, 0);
 
-      const def = seq._buildTableDefinition(User);
+      const def = seq.buildTableDefinition(User);
       const changed = await seq._adapter.ddl.alterTable(physicalTableName(User), def);
       assert.equal(changed, false);
     });
@@ -302,7 +302,7 @@ describe('DDL Phases', () => {
     //   assert.equal(schemaBefore.foreignKeys.length, 0);
     //   User.hasMany(Task, { foreignKey: 'userId' });
     //   Task.belongsTo(User, { foreignKey: 'userId' });
-    //   const def = seq._buildTableDefinition(Task);
+    //   const def = seq.buildTableDefinition(Task);
     //   const changed = await seq._adapter.ddl.alterTable('tasks', def);
     //   assert.equal(changed, true);
     //   const schemaAfter = seq._adapter.schemas.get('tasks');

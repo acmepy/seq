@@ -206,6 +206,33 @@ export class Model<TValues = Record<string, unknown>> {
   destroy(options?: MutationOptions): Promise<void>;
 }
 
+/** Physical table metadata generated from a model; building it does not execute DDL. */
+export interface TableDefinition {
+  modelName: string;
+  tableName: string;
+  columns: Record<string, AttributeDefinition & { defaultCurrentTimestamp: boolean }>;
+  uniqueConstraints: Array<{ columns: string[]; constraintName: string }>;
+  indexes: Array<{ name: string; columns: string[]; unique: boolean }>;
+  foreignKeys: Array<{
+    attributeNames: string[]; columnNames: string[];
+    attributeName: string | null; columnName: string | null; constraintName: string;
+    references: { model: string; table: string; keys: string[]; columns: string[]; key: string | null; column: string | null };
+    onDelete: ForeignKeyAction; onUpdate: ForeignKeyAction;
+  }>;
+  primaryKey: string | null;
+  autoIncrement: string | null;
+  primaryKeyAttribute: string | null;
+  primaryKeyAttributes: string[];
+  primaryKeys: string[];
+  autoIncrementAttribute: string | null;
+  timestamps: boolean;
+  createdAt: string;
+  updatedAt: string;
+  virtualAttributes: string[];
+  attrToColumn: Record<string, string>;
+  columnToAttr: Record<string, string>;
+}
+
 export class Seq {
   constructor(options: SeqOptions);
 
@@ -219,6 +246,8 @@ export class Seq {
   define(modelName: string, attributes: AttributeMap, options?: ModelOptions): typeof Model;
   getModel(name: string): ModelStatic | undefined;
   hasModel(name: string): boolean;
+  /** Builds model table metadata without executing DDL. */
+  buildTableDefinition(modelClass: ModelStatic): TableDefinition;
   sync(options?: SyncOptions): Promise<SyncResult>;
   transaction<TResult>(callback: (transaction: Transaction) => Promise<TResult> | TResult): Promise<TResult>;
   close(): Promise<void>;
@@ -287,6 +316,7 @@ export interface MySQLAdapterOptions extends AdapterOptions {
   /** Session interactive inactivity timeout in seconds. Defaults to 300. */
   interactiveTimeout?: number;
   waitForConnections?: boolean;
+  /** Native mysql2 timezone. An explicit Z or fixed offset also initializes each session. Default: Z for the driver, no session override. */
   timezone?: string;
   ssl?: unknown;
 }
@@ -300,6 +330,8 @@ export class MySQLError extends ErrorAbstract {}
 export type BooleanValues = { true: string; false: string } | { true: number; false: number };
 
 export interface OracleAdapterOptions extends AdapterOptions {
+  /** Fixed offset, e.g. -03:00, or Z. Initializes each new session before afterConnect. Defaults to the driver session timezone. */
+  timezone?: string;
   /** Initializes each new pool session with the native oracledb connection before use. */
   afterConnect?: (connection: any) => void | Promise<void>;
   booleanValues?: BooleanValues;
