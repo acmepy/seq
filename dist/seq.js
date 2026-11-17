@@ -4428,12 +4428,12 @@ class DMLAbstract extends BaseAbstract {
   }
 
   _buildSelectList(attributes, schema, alias = null) {
-    if (!Array.isArray(attributes) || attributes.length === 0) return '*';
     const virtualAttributes = new Set(schema.virtualAttributes || []);
-    const columns = attributes
-      .filter(attr => !virtualAttributes.has(attr))
+    const selected = (Array.isArray(attributes) ? attributes : [])
+      .filter(attr => !virtualAttributes.has(attr));
+    const columns = (selected.length > 0 ? selected : Object.keys(schema.columns || {}))
       .map(attr => this._colRef(schema.attrToColumn[attr] || attr, alias));
-    return columns.length > 0 ? columns.join(', ') : '*';
+    return columns.join(', ');
   }
 
   _attributesWithRequired(attributes, required) {

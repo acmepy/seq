@@ -852,3 +852,66 @@ describe('Model CRUD', () => {
     });
   });*/
 });
+
+it('find operations select only declared physical columns while raw SQL still exposes extra columns', async () => {
+  class DeclaredColumns extends Model {}
+  DeclaredColumns.init({
+    id: { type: DataTypes.INTEGER, primaryKey: true, field: 'record_id' },
+    name: { type: DataTypes.STRING(60), field: 'display_name' },
+    parentId: { type: DataTypes.INTEGER, field: 'parent_ref' },
+    label: { type: DataTypes.VIRTUAL(DataTypes.STRING(60), ['name']), get() { return (this.getDataValue('name') || '').toUpperCase(); } }
+  }, { modelName: 'DeclaredColumns', tableName: testTable('model_columns'), timestamps: false });
+  DeclaredColumns.hasMany(DeclaredColumns, { as: 'children', foreignKey: 'parentId' });
+  const events = [];
+  const context = await createTestContext({ models: [DeclaredColumns], logging: {
+    info: false, trace: (...args) => events.push(args.at(-1)), warn: false, error: false
+  }, slowQueryMs: Number.MAX_VALUE, slowOperationMs: Number.MAX_VALUE });
+  try {
+    const { seq, adapter } = context;
+    await seq.sync();
+    const q = quoteTestIdentifier;
+    const table = q(DeclaredColumns.tableName);
+    const extra = 'physical_extra';
+    // Add a real legacy column without adding it to the model or ORM schema.
+    await adapter.ddl.execute('ALTER TABLE ' + table + ' ADD ' + q(extra) + ' ' + adapter.mapDataType(DataTypes.STRING(30)));
+    await DeclaredColumns.create({ id: 1, name: 'Parent' });
+    await DeclaredColumns.create({ id: 2, name: 'Child', parentId: 1 });
+    await adapter.dml.execute('UPDATE ' + table + ' SET ' + q(extra) + ' = ?', ['legacy']);
+    events.length = 0;
+    const rows = await DeclaredColumns.findAll({ order: [['id', 'ASC']] });
+    const one = await DeclaredColumns.findOne({ where: { id: 1 } });
+    const byPk = await DeclaredColumns.findByPk(1);
+    await assert.rejects(DeclaredColumns.findAll({ attributes: [] }), { code: 'SEQ_VALIDATION_ATTRIBUTES' });
+    for (const record of [...rows, one, byPk]) {
+      assert.equal(Object.hasOwn(record.dataValues, extra), false);
+      assert.equal(Object.hasOwn(record.toJSON(), extra), false);
+      assert.ok(['Parent', 'Child'].includes(record.getDataValue('name')));
+    }
+    assert.equal(rows.length, 2);
+    assert.equal(byPk.getDataValue('label'), 'PARENT');
+    const projected = await DeclaredColumns.findByPk(1, { attributes: ['name'] });
+    assert.deepEqual(projected.dataValues, { name: 'Parent' });
+    const virtual = await DeclaredColumns.findOne({ where: { id: 1 }, attributes: ['id', 'name', 'label'] });
+    assert.equal(virtual.getDataValue('label'), 'PARENT');
+    await DeclaredColumns.findAll({ attributes: ['label'] });
+    for (const eager of [false, true]) {
+      const parent = await DeclaredColumns.findByPk(1, { eager, include: [{ model: DeclaredColumns, as: 'children' }] });
+      assert.equal(parent.getDataValue('children')[0].getDataValue('name'), 'Child');
+      assert.equal(Object.hasOwn(parent.getDataValue('children')[0].toJSON(), extra), false);
+      const partial = await DeclaredColumns.findOne({ where: { id: 1 }, attributes: ['name'], eager,
+        include: [{ model: DeclaredColumns, as: 'children', attributes: ['name'] }] });
+      assert.equal(partial.getDataValue('children')[0].getDataValue('name'), 'Child');
+      assert.equal(partial.getDataValue('id'), undefined);
+    }
+    const selects = events.filter(event => event.type === 'sql' && /^SELECT /i.test(event.sql));
+    assert.ok(selects.length > 0);
+    for (const { sql } of selects) {
+      assert.doesNotMatch(sql, /physical_extra|\blabel\b/i);
+      assert.doesNotMatch(sql, new RegExp('SELECT\\s+\\*\\s+FROM\\s+' + table.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i'));
+    }
+    assert.ok(selects.some(event => /display_name/i.test(event.sql)));
+    const manual = await adapter.dml.executeGet('SELECT * FROM ' + table + ' WHERE ' + q('record_id') + ' = ?', [1]);
+    assert.equal(manual[extra], 'legacy');
+    assert.equal(manual.display_name, 'Parent');
+  } finally { await cleanupTestContext(context); }
+});
