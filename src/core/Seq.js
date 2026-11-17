@@ -110,7 +110,7 @@ export class Seq {
     this._runModelAssociations();
     await this._registerExistingSchemas();
     this._initialized = true;
-    this._log('info', 'Seq initialized');
+    this._log('info', { type: 'init', message: 'Seq initialized' });
   }
 
   /**
@@ -269,7 +269,7 @@ export class Seq {
         await this._adapter.ddl.createTable(definition);
         result.created.push(definition.tableName);
       }
-      this._log('info', 'Sync complete');
+      this._log('info', { type: 'sync', operation: 'sync', message: 'Sync complete' });
       return result;
     }
 
@@ -294,7 +294,7 @@ export class Seq {
       }
     }
 
-    this._log('info', 'Sync complete');
+    this._log('info', { type: 'sync', operation: 'sync', message: 'Sync complete' });
     return result;
   }
 
@@ -480,7 +480,10 @@ export class Seq {
     else if (payload.length === 1 && payload[0] && typeof payload[0] === 'object' && !Array.isArray(payload[0])) event = payload[0];
     else event = { message: payload[0], ...(payload.length > 1 ? { data: payload.length === 2 ? payload[1] : payload.slice(1) } : {}) };
     const prefix = txId ? ['[SEQ]', String(txId)] : ['[SEQ]'];
-    logger.call(target, ...prefix, sanitizeLogData(event));
+    const sanitized = sanitizeLogData(event);
+    const data = sanitized && typeof sanitized === 'object' && !Array.isArray(sanitized) ? sanitized : { data: sanitized };
+    if (typeof data.type !== 'string' || data.type.trim() === '') data.type = 'message';
+    logger.call(target, ...prefix, data);
   }
 }
 

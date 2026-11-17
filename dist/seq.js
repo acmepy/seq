@@ -23,7 +23,7 @@ function sanitizeLogData(event) {
       /password|passwd|token|secret|api[_-]?key/i.test(key) ? '[REDACTED]' : copy(nested)]));
   }
   try { return JSON.parse(JSON.stringify(copy(event))); }
-  catch { return { message: 'Unable to serialize log data' }; }
+  catch { return { type: 'logging-error', message: 'Unable to serialize log data' }; }
 }
 
 /**
@@ -2674,7 +2674,7 @@ class Seq {
     this._runModelAssociations();
     await this._registerExistingSchemas();
     this._initialized = true;
-    this._log('info', 'Seq initialized');
+    this._log('info', { type: 'init', message: 'Seq initialized' });
   }
 
   /**
@@ -2833,7 +2833,7 @@ class Seq {
         await this._adapter.ddl.createTable(definition);
         result.created.push(definition.tableName);
       }
-      this._log('info', 'Sync complete');
+      this._log('info', { type: 'sync', operation: 'sync', message: 'Sync complete' });
       return result;
     }
 
@@ -2858,7 +2858,7 @@ class Seq {
       }
     }
 
-    this._log('info', 'Sync complete');
+    this._log('info', { type: 'sync', operation: 'sync', message: 'Sync complete' });
     return result;
   }
 
@@ -3044,7 +3044,10 @@ class Seq {
     else if (payload.length === 1 && payload[0] && typeof payload[0] === 'object' && !Array.isArray(payload[0])) event = payload[0];
     else event = { message: payload[0], ...(payload.length > 1 ? { data: payload.length === 2 ? payload[1] : payload.slice(1) } : {}) };
     const prefix = txId ? ['[SEQ]', String(txId)] : ['[SEQ]'];
-    logger.call(target, ...prefix, sanitizeLogData(event));
+    const sanitized = sanitizeLogData(event);
+    const data = sanitized && typeof sanitized === 'object' && !Array.isArray(sanitized) ? sanitized : { data: sanitized };
+    if (typeof data.type !== 'string' || data.type.trim() === '') data.type = 'message';
+    logger.call(target, ...prefix, data);
   }
 }
 
@@ -6499,7 +6502,7 @@ class SQLiteAdapter extends BaseAdapter {
     this._db = new DatabaseConstructor(this._dbPath);
     this._db.pragma('journal_mode = WAL');
     this._db.pragma('foreign_keys = ON');
-    this._log('info', 'conectado');
+    this._log('info', { type: 'connection', operation: 'connect', message: 'conectado' });
   }
 
   async authenticate() {
@@ -6535,7 +6538,7 @@ class SQLiteAdapter extends BaseAdapter {
     if (this._db) {
       this._db.close();
       this._db = null;
-      this._log('info', 'desconectado');
+      this._log('info', { type: 'connection', operation: 'disconnect', message: 'desconectado' });
     }
   }
 
@@ -7185,7 +7188,7 @@ class MySQLAdapter extends BaseAdapter {
     if (this._pool) return;
     const mysql = await this._getClient();
     this._pool = mysql.createPool(this._connectionOptions);
-    this._log('info', 'conectado');
+    this._log('info', { type: 'connection', operation: 'connect', message: 'conectado' });
   }
 
   async authenticate() {
@@ -7199,7 +7202,7 @@ class MySQLAdapter extends BaseAdapter {
     if (this._pool) {
       await this._pool.end();
       this._pool = null;
-      this._log('info', 'desconectado');
+      this._log('info', { type: 'connection', operation: 'disconnect', message: 'desconectado' });
     }
   }
 
@@ -7812,7 +7815,7 @@ class Oracle11Adapter extends BaseAdapter {
     if (this._pool) return; 
     this._client = await this._getClient(); 
     this._pool = await this._client.createPool(this._connectionOptions); 
-    this._log('info', 'conectado'); 
+    this._log('info', { type: 'connection', operation: 'connect', message: 'conectado' });
   }
   
   async authenticate() { 
@@ -7826,7 +7829,7 @@ class Oracle11Adapter extends BaseAdapter {
     if (this._pool) { 
       await this._pool.close(0); 
       this._pool = null; 
-      this._log('info', 'desconectado'); 
+      this._log('info', { type: 'connection', operation: 'disconnect', message: 'desconectado' });
     } 
   }
   

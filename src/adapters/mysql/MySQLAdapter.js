@@ -46,7 +46,7 @@ export class MySQLAdapter extends BaseAdapter {
     if (this._pool) return;
     const mysql = await this._getClient();
     this._pool = mysql.createPool(this._connectionOptions);
-    this._log('info', 'conectado');
+    this._log('info', { type: 'connection', operation: 'connect', message: 'conectado' });
   }
 
   async authenticate() {
@@ -60,7 +60,7 @@ export class MySQLAdapter extends BaseAdapter {
     if (this._pool) {
       await this._pool.end();
       this._pool = null;
-      this._log('info', 'desconectado');
+      this._log('info', { type: 'connection', operation: 'disconnect', message: 'desconectado' });
     }
   }
 

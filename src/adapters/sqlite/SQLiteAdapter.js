@@ -39,7 +39,7 @@ export class SQLiteAdapter extends BaseAdapter {
     this._db = new DatabaseConstructor(this._dbPath);
     this._db.pragma('journal_mode = WAL');
     this._db.pragma('foreign_keys = ON');
-    this._log('info', 'conectado');
+    this._log('info', { type: 'connection', operation: 'connect', message: 'conectado' });
   }
 
   async authenticate() {
@@ -75,7 +75,7 @@ export class SQLiteAdapter extends BaseAdapter {
     if (this._db) {
       this._db.close();
       this._db = null;
-      this._log('info', 'desconectado');
+      this._log('info', { type: 'connection', operation: 'disconnect', message: 'desconectado' });
     }
   }
 

@@ -18,5 +18,5 @@ export function sanitizeLogData(event) {
       /password|passwd|token|secret|api[_-]?key/i.test(key) ? '[REDACTED]' : copy(nested)]));
   }
   try { return JSON.parse(JSON.stringify(copy(event))); }
-  catch { return { message: 'Unable to serialize log data' }; }
+  catch { return { type: 'logging-error', message: 'Unable to serialize log data' }; }
 }

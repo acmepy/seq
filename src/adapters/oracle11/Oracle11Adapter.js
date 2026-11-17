@@ -41,7 +41,7 @@ export class Oracle11Adapter extends BaseAdapter {
     if (this._pool) return; 
     this._client = await this._getClient(); 
     this._pool = await this._client.createPool(this._connectionOptions); 
-    this._log('info', 'conectado'); 
+    this._log('info', { type: 'connection', operation: 'connect', message: 'conectado' });
   }
   
   async authenticate() { 
@@ -55,7 +55,7 @@ export class Oracle11Adapter extends BaseAdapter {
     if (this._pool) { 
       await this._pool.close(0); 
       this._pool = null; 
-      this._log('info', 'desconectado'); 
+      this._log('info', { type: 'connection', operation: 'disconnect', message: 'desconectado' });
     } 
   }
   

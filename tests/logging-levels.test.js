@@ -30,13 +30,13 @@ describe('Logging levels', () => {
         seq._log(level, { type: 'test', request: txId });
       }
     })));
-    assert.deepEqual(calls[0].args, ['[SEQ]', { message: 'outside' }]);
+    assert.deepEqual(calls[0].args, ['[SEQ]', { message: 'outside', type: 'message' }]);
     for (const { args, event } of calls.slice(1)) {
       assert.deepEqual(args, ['[SEQ]', event.request, { type: 'test', request: event.request }]);
       assert.ok(!JSON.stringify(event).includes('private'));
     }
     storage.run({}, () => seq._log('info', 'no-id'));
-    assert.deepEqual(calls.at(-1).args, ['[SEQ]', { message: 'no-id' }]);
+    assert.deepEqual(calls.at(-1).args, ['[SEQ]', { message: 'no-id', type: 'message' }]);
   });
 
   it('preserves logger context and disables individual levels', () => {
@@ -57,9 +57,9 @@ describe('Logging levels', () => {
       seq._log('error', { type: 'error', message: 'failed' });
       new Seq({ adapter: new MapAdapter(), logging: { trace: console.debug } })._log('trace', { sql: 'SELECT 1' });
       assert.deepEqual(calls.map(call => call.args), [
-        ['[SEQ]', 'request', '{"message":"ready"}'],
+        ['[SEQ]', 'request', '{"message":"ready","type":"message"}'],
         ['[SEQ]', 'request', '{"type":"error","message":"failed"}'],
-        ['[SEQ]', '{"sql":"SELECT 1"}']
+        ['[SEQ]', '{"sql":"SELECT 1","type":"message"}']
       ]);
       assert.ok(calls.every(call => call.target === console));
     } finally { Object.assign(console, originals); }
@@ -87,7 +87,7 @@ describe('Logging levels', () => {
     seq._log('error', error);
     assert.equal(calls.at(-1).event.error.stack, error.stack);
     seq._log('info', 'message', { count: 1 }, ['a']);
-    assert.deepEqual(calls.at(-1).event, { message: 'message', data: [{ count: 1 }, ['a']] });
+    assert.deepEqual(calls.at(-1).event, { message: 'message', data: [{ count: 1 }, ['a']], type: 'message' });
   });
 
   it('logs sync errors with stack, validation details and operation data before rethrowing', async () => {
@@ -160,4 +160,37 @@ describe('Logging levels', () => {
     assert.equal(cache.hit, false);
     assert.equal(typeof cache.key, 'string');
   });
+});
+
+it('assigns types to connection, initialization and sync lifecycle events using the active adapter', async () => {
+  const { calls, logging } = capture();
+  const context = await createTestContext({ models: [], logging });
+  try {
+    assert.ok(calls.some(call => call.event.type === 'connection' && call.event.operation === 'connect'));
+    assert.ok(calls.some(call => call.event.type === 'init' && call.event.message === 'Seq initialized'));
+    await context.seq.sync();
+    await context.seq.sync({ force: true });
+    assert.equal(calls.filter(call => call.event.type === 'sync' && call.event.message === 'Sync complete').length, 2);
+  } finally { await cleanupTestContext(context); }
+  assert.ok(calls.some(call => call.event.type === 'connection' && call.event.operation === 'disconnect'));
+  assert.ok(calls.every(call => typeof call.event.type === 'string' && call.event.type.length > 0));
+});
+
+it('always emits a nonempty type even for generic data and serialization failures', () => {
+  const { calls, logging } = capture();
+  const seq = new Seq({ adapter: new MapAdapter(), logging });
+  for (const type of [undefined, null, '', ' ', 0, {}]) {
+    const event = { message: 'general', type };
+    seq._log('info', event);
+    assert.equal(calls.at(-1).event.type, 'message');
+    assert.equal(event.type, type);
+  }
+  seq._log('info', { type: 'custom', message: 'kept' });
+  assert.equal(calls.at(-1).event.type, 'custom');
+  seq._log('info', { toJSON() { return { message: 'serialized' }; } });
+  assert.equal(calls.at(-1).event.type, 'message');
+  seq._log('info', new Date('2026-01-01T00:00:00Z'));
+  assert.deepEqual(calls.at(-1).event, { type: 'message', data: '2026-01-01T00:00:00.000Z' });
+  seq._log('error', { get failed() { throw new Error('serialization failed'); } });
+  assert.equal(calls.at(-1).event.type, 'logging-error');
 });

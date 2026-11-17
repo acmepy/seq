@@ -122,7 +122,7 @@ export interface BuildOptions {
 
 /** Structured event delivered to custom log handlers. Timestamp and level belong to the logger. */
 export interface LogEvent {
-  type?: string;
+  type: string;
   message?: string;
   sql?: string;
   params?: unknown[];

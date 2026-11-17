@@ -270,7 +270,24 @@ Los handlers personalizados reciben el objeto sin serializar. Los handlers de co
 [SEQ] 5208b08d-c3db-4325-b54a-38f4fe7e9a61 {"type":"sql","sql":"SELECT ... WHERE id = ?","params":[1],"sqlDurationMs":2.4}
 ```
 
-Los eventos SQL incluyen `type: 'sql'`, `sql`, `params` y `sqlDurationMs`. Las operaciones de modelo incluyen `type: 'model-operation'`, `model`, `operation` y `operationDurationMs`. La cache emite `type: 'cache'`, `model`, `operation`, `key` y `hit`. Los mensajes generales usan `message`; los fallos incluyen `error` con el stack y los detalles disponibles.
+Los eventos SQL incluyen `type: 'sql'`, `sql`, `params` y `sqlDurationMs`. Las operaciones de modelo incluyen `type: 'model-operation'`, `model`, `operation` y `operationDurationMs`. La cache emite `type: 'cache'`, `model`, `operation`, `key` y `hit`. Todos los eventos incluyen un `type` no vacio. Los mensajes generales usan `type: 'message'` y `message`; los fallos incluyen `error` con el stack y los detalles disponibles.
+
+Tipos de evento:
+
+| `type` | Caso |
+| --- | --- |
+| `sql` | Ejecucion de SQL, incluido SELECT. |
+| `model-operation` | Operaciones de modelos. |
+| `cache` | Aciertos y fallos de cache. |
+| `connection` | Conexion y desconexion, con `operation: 'connect'` o `'disconnect'`. |
+| `init` | Inicializacion completada. |
+| `sync` | Sincronizacion completada o fallida. |
+| `dependency` | Diagnostico de dependencias del adaptador. |
+| `error` | Un objeto Error enviado directamente al log. |
+| `message` | Mensajes generales o eventos sin un tipo valido. |
+| `logging-error` | Fallo al serializar los datos del evento. |
+
+Los tipos personalizados no vacios se conservan. La fecha, el nivel y el encabezado siguen a cargo del logger.
 
 Los campos sensibles se ocultan con `[REDACTED]`. Los datos se copian sin modificar los originales; los valores `bigint` se representan como cadenas y las referencias circulares como `[Circular]`. Al serializar a JSON, los saltos de linea se escapan como `\n`.
 
