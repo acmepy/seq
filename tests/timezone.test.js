@@ -6,7 +6,7 @@ import { formatDateInTimezone } from '../src/utils/timezone.js';
 
 const engine = testAdapterName();
 const oracle = engine.startsWith('oracle');
-describe('Configured SQL timezone', { skip: !['mysql', 'oracle11', 'oracle12'].includes(engine) }, () => {
+describe('Configured SQL timezone', { skip: !['mysql', 'oracle11', 'oracle12', 'oracle26'].includes(engine) }, () => {
   it('preserves -03:00 wall time through native DATE/DATETIME, defaults, filters and repeated saves', async () => {
     const instant = new Date('2026-11-10T14:30:00-03:00');
     class Clock extends Model {}

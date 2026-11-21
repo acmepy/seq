@@ -1,6 +1,6 @@
 {
   "name": "seq",
-  "version": "1.5.2",
+  "version": "1.6.0",
   "description": "seq es un micro orm, modular, flexible y de facil integracion",
   "type": "module",
   "main": "dist/seq.js",
@@ -20,10 +20,11 @@
   "scripts": {
     "----------------------https://testcontainers.com/------------------": "",
     "test": "node scripts/run-unit-tests.js",
-    "test:all": "npm run test && npm run test:mysql && npm run test:oracle11 && npm run test:oracle12",
+    "test:all": "npm run test && npm run test:mysql && npm run test:oracle11 && npm run test:oracle12 && npm run test:oracle26",
     "test:mysql": "node --test tests/integration/mysql-suite.test.js",
     "test:oracle11": "node --test tests/integration/oracle11-suite.test.js",
     "test:oracle12": "node --test tests/integration/oracle12-suite.test.js",
+    "test:oracle26": "node --test tests/integration/oracle26-suite.test.js",
     "test:coverage": "node --test --experimental-test-coverage tests/*.test.js",
     "test:watch": "node --test --watch tests/*.test.js",
     "lint": "eslint src tests examples",
@@ -54,7 +55,7 @@
   "peerDependencies": {
     "better-sqlite3": "^12.11.1",
     "mysql2": "^3.14.0",
-    "oracledb": "^5.5.0"
+    "oracledb": "^5.5.0 || ^26.0.0"
   },
   "peerDependenciesMeta": {
     "better-sqlite3": {
@@ -72,7 +73,7 @@
     "dotenv": "^17.4.2",
     "eslint": "^10.7.0",
     "mysql2": "^3.14.0",
-    "oracledb": "5.5.0",
+    "oracledb": "26.0.0",
     "prettier": "^3.9.6",
     "rollup": "^4.46.2"
   },
@@ -83,6 +84,7 @@
   },
   "allowScripts": {
     "better-sqlite3@12.11.1": true,
-    "oracledb@5.5.0": true
+    "oracledb@5.5.0": true,
+    "oracledb@26.0.0": true
   }
 }

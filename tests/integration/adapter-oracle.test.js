@@ -1,14 +1,14 @@
 import 'dotenv/config';
 import assert from 'node:assert/strict';
 import { it } from 'node:test';
-import { DataTypes, Model, Op, Seq, Oracle11Adapter, Oracle12Adapter } from '../../src/index.js';
+import { DataTypes, Model, Op, Seq, Oracle11Adapter, Oracle12Adapter, Oracle26Adapter } from '../../src/index.js';
 import { runAdapterSuite } from '../shared/adapter-suite.js';
 import { cleanupTestContext, createTestContext, oracleTestOptions, quoteTestIdentifier, testTable } from '../shared/test-context.js';
 
 const version = process.env.SEQ_TEST_ADAPTER;
-const Adapter = version === 'oracle12' ? Oracle12Adapter : Oracle11Adapter;
-const name = version === 'oracle12' ? 'Oracle 12' : 'Oracle 11';
-const prefix = version === 'oracle12' ? 'adt12' : 'adt11';
+const Adapter = { oracle11: Oracle11Adapter, oracle12: Oracle12Adapter, oracle26: Oracle26Adapter }[version];
+const name = { oracle11: 'Oracle 11', oracle12: 'Oracle 12', oracle26: 'Oracle 26' }[version];
+const prefix = { oracle11: 'adt11', oracle12: 'adt12', oracle26: 'adt26' }[version];
 
 async function assertOracleAuthentication() {
   const adapter = new Adapter(oracleTestOptions());
@@ -30,6 +30,26 @@ async function cleanupOracle({ adapter }) {
 }
 
 await assertOracleAuthentication();
+
+if (version === 'oracle26') it('Oracle 26 blocks a failed pool until explicit close and reinitializes after reopening', async () => {
+  let attempts = 0;
+  const failure = new Error('Intentional initialization failure');
+  const adapter = new Adapter({ ...oracleTestOptions(), afterConnect() {
+    attempts++;
+    if (attempts === 1) throw failure;
+  } });
+  try {
+    await assert.rejects(() => adapter.authenticate(), error => error === failure);
+    await assert.rejects(() => adapter.authenticate(), error => error === failure);
+    await assert.rejects(() => adapter.dml.executeGet('SELECT 1 FROM dual'), error => error === failure);
+    assert.equal(attempts, 1);
+    await adapter.close();
+    assert.equal(await adapter.authenticate(), true);
+    assert.equal(attempts, 2);
+  } finally {
+    await adapter.close();
+  }
+});
 
 it('initializes Oracle pool sessions with afterConnect before use', async () => {
   const initialized = [];
@@ -79,6 +99,10 @@ it('rejects Oracle connections when afterConnect fails', async () => {
   });
   try {
     await assert.rejects(() => adapter.authenticate(), error => error === failure);
+    if (version === 'oracle26') {
+      await assert.rejects(() => adapter.authenticate(), error => error === failure);
+      await adapter.close();
+    }
     await adapter.authenticate();
     assert.equal(attempts, 2, 'A failed session must be dropped and initialized again');
   } finally {

@@ -43,7 +43,7 @@ describe('Logical Operators and API Improvements', () => {
   const sqlAdapterType = testAdapterName() === 'mysql' ? 'MySQLAdapter'
     : testAdapterName() === 'oracle11' ? 'Oracle11Adapter'
       : testAdapterName() === 'oracle12' ? 'Oracle12Adapter'
-        : 'SQLiteAdapter';
+        : testAdapterName() === 'oracle26' ? 'Oracle26Adapter' : 'SQLiteAdapter';
   for (const adapterType of [sqlAdapterType, 'MapAdapter']) {
     describe(`With ${adapterType}`, () => {
       let seq, adapter, context;

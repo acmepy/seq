@@ -1,7 +1,7 @@
-import 'dotenv/config';
+import '../shared/oracle-client.js';
 
-if (!['oracle11', 'oracle12'].includes(process.env.SEQ_TEST_ADAPTER)) {
-  throw new Error('SEQ_TEST_ADAPTER must be "oracle11" or "oracle12" for the Oracle integration suite.');
+if (!['oracle11', 'oracle12', 'oracle26'].includes(process.env.SEQ_TEST_ADAPTER)) {
+  throw new Error('SEQ_TEST_ADAPTER must be "oracle11", "oracle12" or "oracle26" for the Oracle integration suite.');
 }
 
 await import('./adapter-oracle.test.js');

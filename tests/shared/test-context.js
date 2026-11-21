@@ -1,6 +1,6 @@
 import 'dotenv/config';
 import assert from 'node:assert/strict';
-import { Seq, SQLiteAdapter, MySQLAdapter, Oracle11Adapter, Oracle12Adapter } from '../../src/index.js';
+import { Seq, SQLiteAdapter, MySQLAdapter, Oracle11Adapter, Oracle12Adapter, Oracle26Adapter } from '../../src/index.js';
 
 let tableCounter = 0;
 
@@ -31,7 +31,7 @@ export async function cleanupTestContext(context) {
   if (!context) return;
 
   try {
-    if (['MySQLAdapter', 'Oracle11Adapter', 'Oracle12Adapter'].includes(context.adapter?.constructor?.name) && !keepTestTables()) {
+    if (['MySQLAdapter', 'Oracle11Adapter', 'Oracle12Adapter', 'Oracle26Adapter'].includes(context.adapter?.constructor?.name) && !keepTestTables()) {
       const prefixes = [
         `${testTablePrefix()}_`,
         `${testTablePrefix().toUpperCase()}_`,
@@ -69,9 +69,9 @@ export function createTestAdapter(options = {}) {
     });
   }
 
-  if (testAdapterName() === 'oracle11' || testAdapterName() === 'oracle12') {
+  if (['oracle11', 'oracle12', 'oracle26'].includes(testAdapterName())) {
     const baseOptions = oracleOptions();
-    const Adapter = testAdapterName() === 'oracle12' ? Oracle12Adapter : Oracle11Adapter;
+    const Adapter = { oracle11: Oracle11Adapter, oracle12: Oracle12Adapter, oracle26: Oracle26Adapter }[testAdapterName()];
     return new Adapter({
       ...baseOptions,
       ...options,
@@ -129,6 +129,7 @@ function testTablePrefix() {
   if (testAdapterName() === 'mysql') return 'myt';
   if (testAdapterName() === 'oracle11') return 'o11';
   if (testAdapterName() === 'oracle12') return 'o12';
+  if (testAdapterName() === 'oracle26') return 'o26';
   return testAdapterName().replace(/[^a-z0-9]+/gi, '').toLowerCase().slice(0, 3).padEnd(3, 'x');
 }
 

@@ -90,6 +90,7 @@ import {
   SQLiteAdapter,
   Oracle11Adapter,
   Oracle12Adapter,
+  Oracle26Adapter,
   DataTypes,
   Op,
   SeqError,
@@ -1033,6 +1034,32 @@ Instala `oracledb` para usar Oracle. Oracle 11 y Oracle 12 paginan con `ROWNUM` 
 
 Los ejemplos aceptan `SEQ_EXAMPLE_ADAPTER=oracle11` o `oracle12`; por defecto usan SQLite. Las suites de integración se ejecutan con `npm run test:oracle11` y `npm run test:oracle12` usando las variables `ORACLE_USER`, `ORACLE_PASSWORD` y `ORACLE_CONNECT_STRING` de `.env.example`.
 
+### Oracle26Adapter
+
+`Oracle26Adapter` extiende `Oracle11Adapter` y conserva su SQL, paginacion con `ROWNUM`, secuencias y convenciones de nombres. Usa el driver oficial `oracledb` 26.x y valida esa dependencia antes de abrir el pool. La politica de versiones de `Oracle11Adapter` y `Oracle12Adapter` se mantiene sin cambios.
+
+```js
+import oracledb from 'oracledb';
+
+oracledb.initOracleClient({ libDir: process.env.ORACLE_CLIENT_LIB_DIR });
+
+const adapter = new Oracle26Adapter({
+  user: process.env.ORACLE_USER,
+  password: process.env.ORACLE_PASSWORD,
+  connectString: process.env.ORACLE_CONNECT_STRING
+});
+```
+
+`npm run test:oracle26` ejecuta la misma suite generica con este adaptador, incluidas asociaciones, claves compuestas, tenant, cache, transacciones y zona horaria. Usa las mismas variables de conexion de `.env.example`.
+
+Para las pruebas en modo Thick, configura `ORACLE_CLIENT_LIB_DIR` en `.env` con la carpeta de un Instant Client compatible. Se verifico el cliente 23.26.4.0.0; el driver 26 requiere cliente 19.1 o superior. Las suites Oracle llaman a `oracledb.initOracleClient()` cuando esa variable tiene valor; sin ella usan Thin. En una aplicacion, inicializa el cliente con la API nativa antes de abrir conexiones, como en el ejemplo.
+
+La suite generica con `Oracle26Adapter` paso sus 504 pruebas contra Oracle AI Database 26ai Free 23.26.4.0.0, usando `oracledb` 26.0.0 en modo Thick con Instant Client 23.26.4.0.0.
+
+En Thin con `oracledb` 26.0.0 se reprodujo sin SEQ que `connection.close({ drop: true })` reutiliza la sesion y que una inicializacion fallida puede omitirse en la siguiente adquisicion. `node scripts/check-oracle-sessions.js` comprueba ambos casos con el driver nativo, sin crear tablas; las dos comprobaciones pasan en Thick con Instant Client 23.26.4.0.0. La [documentacion del driver](https://node-oracledb.readthedocs.io/en/latest/api_manual/connection.html#connection.close) establece que `drop: true` debe descartar la conexion.
+
+Si falla la inicializacion de una sesion, `Oracle26Adapter` rechaza las operaciones siguientes con ese error hasta llamar a `adapter.close()`. Despues permite abrir un pool nuevo y volver a ejecutar la inicializacion.
+
 #### Secuencias para autoIncrement
 
 En los adaptadores Oracle 11 y Oracle 12, `autoIncrement: true` utiliza secuencias. El nombre aplica `naming.caseStyle` y `naming.maxLength`, truncando por el medio cuando es necesario; por defecto, `REP_FACTURAS_DET` usa `SEQ_REP_FACTURAS_DET`.
@@ -1135,6 +1162,7 @@ npm test
 npm run test:mysql
 npm run test:oracle11
 npm run test:oracle12
+npm run test:oracle26
 npm run test:watch
 npm run test:coverage
 npm run lint

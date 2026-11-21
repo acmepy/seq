@@ -12,6 +12,7 @@ export { MySQLError } from './adapters/mysql/MySQLError.js';
 export { Oracle11Adapter } from './adapters/oracle11/Oracle11Adapter.js';
 export { Oracle11Error } from './adapters/oracle11/Oracle11Error.js';
 export { Oracle12Adapter } from './adapters/oracle12/Oracle12Adapter.js';
+export { Oracle26Adapter } from './adapters/oracle26/Oracle26Adapter.js';
 export { DataTypes } from './data-types/index.js';
 export { Op } from './operators.js';
 

@@ -378,6 +378,11 @@ export class Oracle12Adapter extends Oracle11Adapter {
   constructor(options?: OracleAdapterOptions);
 }
 
+/** Oracle 26ai adapter using node-oracledb 26.x. */
+export class Oracle26Adapter extends Oracle11Adapter {
+  constructor(options?: OracleAdapterOptions);
+}
+
 export class Oracle11Error extends ErrorAbstract { sql?: string; }
 
 export class MapAdapter extends BaseAdapter {
