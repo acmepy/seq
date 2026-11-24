@@ -213,6 +213,8 @@ Defaults de naming:
 
 La prioridad de `eager` es: include individual, opcion de query, opcion del adapter, y finalmente `false`.
 
+Los nombres automaticos de constraints e indices unicos se construyen con el nombre fisico completo de la tabla, incluido su prefijo. Esto se aplica a FK, restricciones unicas y tablas intermedias, y a PK y NOT NULL en Oracle. Por ejemplo: `PK_REP_USERS_ID`, `UK_REP_USERS_EMAIL` y `FK_REP_FACTURAS_DET_FACTURA_ID`. Se mantienen la conversion de mayusculas/minusculas y el truncado por el medio segun `naming.maxLength`. Los nombres explicitos de indices y constraints se conservan. Este cambio afecta la generacion de nombres; no renombra objetos existentes.
+
 Los nombres automaticos de las claves foraneas siguen `FK_tabla_hija_columnas`, aplicando las mayusculas/minusculas y el limite de longitud configurados. Por ejemplo: `FK_REP_FACTURAS_DET_FACTURA_ID` y `FK_REP_FACTURAS_COB_FACTURA_ID`. La tabla referenciada no forma parte del nombre. Los nombres explicitos mediante `constraintName` se conservan.
 
 
@@ -1180,6 +1182,9 @@ npm run examples
 `npm run examples` ejecuta la cadena completa de ejemplos.
 
 ### Pruebas entre adaptadores
+
+`npm test` fija el adaptador activo en SQLite, incluso si `SEQ_TEST_ADAPTER` tiene otro valor. No ejecuta archivos especificos de MySQL u Oracle ni requiere sus servidores o drivers. Las integraciones se ejecutan explicitamente con `test:mysql`, `test:oracle11`, `test:oracle12` o `test:oracle26`; la validacion del driver Oracle 26 pertenece a su suite especifica.
+
 
 Las pruebas de comportamiento común deben ejecutarse con todos los adaptadores SQL: SQLite mediante `npm test`, MySQL mediante `npm run test:mysql`, y Oracle mediante `npm run test:oracle11` y `npm run test:oracle12`. Estas pruebas deben usar el adaptador activo de la suite; las pruebas exclusivas de un motor se reservan para sintaxis SQL o capacidades propias de ese motor.
 

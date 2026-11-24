@@ -57,22 +57,22 @@ test('Oracle adapters', async t => {
           optional: { field: 'OPCIONAL', type: DataTypes.STRING(100), allowNull: true }
         }
       });
-      assert.match(statements[0], /CONSTRAINT "PK_BIENES_ID_CODIGO" PRIMARY KEY \("ID", "CODIGO"\)/);
-      assert.match(statements[0], /"DESCRIPCION" VARCHAR2\(100\) CONSTRAINT "NN_BIENES_DESCRIPCION" NOT NULL/);
-      assert.doesNotMatch(statements[0], /NN_BIENES_(ID|CODIGO|OPCIONAL)/);
+      assert.match(statements[0], /CONSTRAINT "PK_AFI_BIENES_ID_CODIGO" PRIMARY KEY \("ID", "CODIGO"\)/);
+      assert.match(statements[0], /"DESCRIPCION" VARCHAR2\(100\) CONSTRAINT "NN_AFI_BIENES_DESCRIPCION" NOT NULL/);
+      assert.doesNotMatch(statements[0], /NN_AFI_BIENES_(ID|CODIGO|OPCIONAL)/);
 
       adapter.schemas.set('AFI_BIENES', { columns: {}, attrToColumn: {}, columnToAttr: {} });
       await adapter.ddl.addColumns('AFI_BIENES', {
         value: { field: 'VALOR', type: DataTypes.INTEGER, allowNull: false, defaultValue: 0 }
       });
-      assert.match(statements[1], /DEFAULT 0 CONSTRAINT "NN_BIENES_VALOR" NOT NULL/);
+      assert.match(statements[1], /DEFAULT 0 CONSTRAINT "NN_AFI_BIENES_VALOR" NOT NULL/);
     }
   });
 
   await t.test('Oracle constraint names respect case and truncate the middle', () => {
     const adapter = new Oracle11Adapter({ naming: { prefix: 'AFI_', caseStyle: 'lower', maxLength: 20 } });
-    assert.equal(adapter.ddl._constraintName('pk', 'AFI_BIENES', ['ID']), 'pk_bienes_id');
-    assert.equal(adapter.ddl._constraintName('nn', 'AFI_INVENTARIOS', ['DESCRIPCION']), 'nn_inventa_scripcion');
+    assert.equal(adapter.ddl._constraintName('pk', 'AFI_BIENES', ['ID']), 'pk_afi_bienes_id');
+    assert.equal(adapter.ddl._constraintName('nn', 'AFI_INVENTARIOS', ['DESCRIPCION']), 'nn_afi_inv_scripcion');
   });
 
   await t.test('reports a missing oracledb dependency', async () => {

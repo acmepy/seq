@@ -33,3 +33,5 @@ await import('../tenant.test.js');
 await import('../timezone.test.js');
 
 await import('../raw-execution.test.js');
+
+await import('../oracle-sequence-naming.test.js');

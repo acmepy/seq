@@ -321,3 +321,18 @@ it('only tolerates sequence creation races when the named sequence exists', asyn
     await adapter.close();
   }
 });
+
+it('keeps the physical table prefix in Oracle PK and NOT NULL constraints', async () => {
+  class Prefixed extends Model {}
+  Prefixed.init({ id: { type: DataTypes.INTEGER, primaryKey: true }, code: { type: DataTypes.STRING(20), allowNull: false } },
+    { modelName: 'Pfx', timestamps: false });
+  const prefix = testTable('pk').toUpperCase() + '_';
+  const context = await createTestContext({ models: [Prefixed], adapterOptions: { naming: { prefix } } });
+  try {
+    await context.seq.sync();
+    const constraints = await context.adapter.dml.executeQueryAll("SELECT CONSTRAINT_NAME FROM USER_CONSTRAINTS WHERE TABLE_NAME = ? AND CONSTRAINT_TYPE IN ('P', 'C')", [Prefixed.tableName]);
+    const names = constraints.map(row => row.CONSTRAINT_NAME);
+    assert.ok(names.includes('PK_' + Prefixed.tableName + '_ID'));
+    assert.ok(names.includes('NN_' + Prefixed.tableName + '_CODE'));
+  } finally { await cleanupTestContext(context); }
+});

@@ -54,8 +54,7 @@ export class Oracle11DDL extends DDLAbstract {
 
   _constraintName(kind, tableName, columns) {
     const naming = this._adapter.naming;
-    const table = naming.prefix ? tableName.replaceAll(naming.prefix, '') : tableName;
-    return truncateMiddle(applyCase(`${kind}_${table}_${columns.join('_')}`, naming.caseStyle), naming.maxLength);
+    return truncateMiddle(applyCase(`${kind}_${tableName}_${columns.join('_')}`, naming.caseStyle), naming.maxLength);
   }
 
   async createTableStructure(def) {

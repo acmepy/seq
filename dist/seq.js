@@ -3281,19 +3281,19 @@ class BaseAdapter {
   }
 
   uniqueConstraintName(tableName, columns) {
-    return truncateMiddle(applyCase(`uk_${tableName.replaceAll(this.naming.prefix, '')}_${columns.join('_')}`, this.naming.caseStyle), this.naming.maxLength);
+    return truncateMiddle(applyCase(`uk_${tableName}_${columns.join('_')}`, this.naming.caseStyle), this.naming.maxLength);
   }
 
   foreignKeyConstraintName(sourceTable, refTable, fkColumn) {
-    return truncateMiddle(applyCase(`fk_${this._constraintTableName(sourceTable).replaceAll(this.naming.prefix, '')}_${fkColumn}`, this.naming.caseStyle), this.naming.maxLength);
+    return truncateMiddle(applyCase(`fk_${this._constraintTableName(sourceTable)}_${fkColumn}`, this.naming.caseStyle), this.naming.maxLength);
   }
 
   junctionUniqueConstraintName(throughTable, fkColumn, otherKeyColumn) {
-    return truncateMiddle(applyCase(`uk_${throughTable.replaceAll(this.naming.prefix, '')}_${fkColumn}_${otherKeyColumn}`, this.naming.caseStyle), this.naming.maxLength);
+    return truncateMiddle(applyCase(`uk_${throughTable}_${fkColumn}_${otherKeyColumn}`, this.naming.caseStyle), this.naming.maxLength);
   }
 
   junctionForeignKeyConstraintName(throughTable, columnName) {
-    return truncateMiddle(applyCase(`fk_${throughTable.replaceAll(this.naming.prefix, '')}_${columnName}`, this.naming.caseStyle), this.naming.maxLength);
+    return truncateMiddle(applyCase(`fk_${throughTable}_${columnName}`, this.naming.caseStyle), this.naming.maxLength);
   }
 
   buildTableDefinition(modelClass, context) {
@@ -3504,11 +3504,7 @@ class BaseAdapter {
   }
 
   _constraintTableName(tableName) {
-    const prefix = this.naming?.prefix;
-    if (!prefix) return String(tableName);
-
-    const token = String(prefix).endsWith('_') ? String(prefix) : `${prefix}_`;
-    return String(tableName).replaceAll(token, '');
+    return String(tableName);
   }
 
   /**
@@ -7459,8 +7455,7 @@ class Oracle11DDL extends DDLAbstract {
 
   _constraintName(kind, tableName, columns) {
     const naming = this._adapter.naming;
-    const table = naming.prefix ? tableName.replaceAll(naming.prefix, '') : tableName;
-    return truncateMiddle(applyCase(`${kind}_${table}_${columns.join('_')}`, naming.caseStyle), naming.maxLength);
+    return truncateMiddle(applyCase(`${kind}_${tableName}_${columns.join('_')}`, naming.caseStyle), naming.maxLength);
   }
 
   async createTableStructure(def) {

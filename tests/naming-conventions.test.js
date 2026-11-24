@@ -754,3 +754,47 @@ it('finalizes public tableName at registration and uses it for SQL, associations
     assert.equal((await Explicit.findByPk(1)).getDataValue('id'), 1);
   } finally { await cleanupTestContext(context); }
 });
+
+it('keeps physical table prefixes in generated constraints and junction indexes', async () => {
+  const contexts = [];
+  try {
+    for (const prefix of ['PFXA_', 'PFXB_']) {
+      class Group extends Model {}
+      class Item extends Model {}
+      Group.init({ id: { type: DataTypes.INTEGER, primaryKey: true, autoIncrement: true } }, { modelName: 'Group', timestamps: false });
+      const explicitFK = 'CUSTOM_' + prefix + 'OTHER';
+      const explicitIndex = 'KEEP_' + prefix + 'G_ID';
+      Item.init({
+        id: { type: DataTypes.INTEGER, primaryKey: true },
+        code: { type: DataTypes.STRING(20), unique: true, allowNull: false },
+        groupId: { type: DataTypes.INTEGER, field: 'G_ID' },
+        otherId: { type: DataTypes.INTEGER, references: { model: 'Group', key: 'id', constraintName: explicitFK } }
+      }, { modelName: 'Item', timestamps: false, indexes: [{ name: explicitIndex, columns: ['groupId'] }] });
+      Item.belongsTo(Group, { foreignKey: 'groupId' });
+      const junction = prefix + 'LINK';
+      Group.belongsToMany(Item, { through: junction, as: 'items', foreignKey: 'gId', otherKey: 'iId' });
+      const context = await createTestContext({ models: [Group, Item], adapterOptions: {
+        naming: { prefix, tables: 'snake_case', columns: 'snake_case', caseStyle: 'upper', maxLength: 30 }
+      } });
+      contexts.push({ context, junction });
+      await context.seq.sync();
+      const def = context.seq.buildTableDefinition(Item);
+      assert.equal(def.tableName, prefix + 'ITEM');
+      assert.equal(def.uniqueConstraints[0].constraintName, 'UK_' + prefix + 'ITEM_CODE');
+      assert.equal(def.foreignKeys.find(fk => fk.columnName === 'G_ID').constraintName, 'FK_' + prefix + 'ITEM_G_ID');
+      assert.ok(def.foreignKeys.some(fk => fk.constraintName === explicitFK));
+      assert.equal(def.indexes[0].name, explicitIndex);
+      const through = context.adapter.schemas.get(junction);
+      assert.equal(through.uniqueConstraints[0].constraintName, 'UK_' + prefix + 'LINK_GID_IID');
+      assert.deepEqual(through.foreignKeys.map(fk => fk.constraintName).sort(), ['FK_' + prefix + 'LINK_GID', 'FK_' + prefix + 'LINK_IID']);
+      await Group.create({ id: 1 });
+      await Item.create({ id: 1, code: 'one', groupId: 1 });
+      await assert.rejects(Item.create({ id: 2, code: 'one', groupId: 1 }));
+    }
+  } finally {
+    for (const { context, junction } of contexts.reverse()) {
+      try { await context.adapter.ddl.dropTable(junction, { ifExists: true, ignoreForeignKeys: true }); }
+      finally { await cleanupTestContext(context); }
+    }
+  }
+});
