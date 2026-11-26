@@ -15,6 +15,15 @@ El paquete expone modelos, tipos de datos, asociaciones, operadores de consulta,
 npm install
 ```
 
+La distribucion Git incluye `dist` precompilado y los tipos. Instalar Seq como dependencia no ejecuta compilacion ni pruebas del ORM. Para desarrollar y regenerar los artefactos en este repositorio:
+
+```bash
+npm install
+npm run compile
+```
+
+`compile` ejecuta las pruebas y Rollup. `npm pack` no compila automaticamente; actualiza y versiona `dist` antes de subir o publicar una version. Los drivers siguen siendo peers opcionales: instala solamente el correspondiente al adaptador que uses.
+
 ## Inicio rapido con SQLite
 
 ```js
