@@ -5,6 +5,7 @@ import { ValidationError, ValidationWhereError, ValidationOrderError, Validation
 import { DataTypes } from '../data-types/index.js';
 import { normalizeInclude, resolveAssociation, resolveIncludeAlias } from '../utils/include.js';
 import { primaryAttributes, keyObject, valuesFor } from '../utils/keys.js';
+import { hasEffectiveWhere } from '../utils/where.js';
 import { modelTenant } from './TenantResolver.js';
 import { tenantQuery } from './TenantQueryScope.js';
 
@@ -452,7 +453,7 @@ export class Model {
    */
   static async upsert(values = {}, options = {}) {
     //this._log('trace', `${this.modelName}.upsert`, values, options);
-    if (options.where !== undefined && (typeof options.where !== 'object' || Array.isArray(options.where))) throw new ValidationWhereError();
+    if (options?.where !== undefined && !hasEffectiveWhere(options.where)) throw new ValidationWhereError();
     if (options.include) {
       const includes = normalizeInclude(options.include);
       this._validateIncludes(includes);
@@ -719,8 +720,8 @@ export class Model {
    * @returns {Promise<Model[]>}
    */
   static async update(values, options = {}) {
-    if (options.where !== undefined && (typeof options.where !== 'object' || Array.isArray(options.where)))throw new ValidationWhereError();
-    if (options.include) {
+    if (!options?.include && !hasEffectiveWhere(options?.where)) throw new ValidationWhereError();
+    if (options?.include) {
       const includes = normalizeInclude(options.include);
       this._validateIncludes(includes);
       const run = transaction => this._updateWithIncludes(values, { ...options, include: includes, transaction });
@@ -755,7 +756,10 @@ export class Model {
   }
 
   static _resolveNestedUpdateWhere(values, options) {
-    if (options.where) return options.where;
+    if (options?.where !== undefined) {
+      if (!hasEffectiveWhere(options.where)) throw new ValidationWhereError();
+      return options.where;
+    }
     const keys = primaryAttributes(this).length ? primaryAttributes(this) : ['id'];
     const pk = keys.join(', ');
     if (keys.some(key => values?.[key] === undefined || values[key] === null)) {
@@ -801,7 +805,7 @@ export class Model {
    * @returns {Promise<number>}
    */
   static async destroy(options = {}) {
-    if (options.where !== undefined && (typeof options.where !== 'object' || Array.isArray(options.where)))throw new ValidationWhereError();
+    if (!hasEffectiveWhere(options?.where)) throw new ValidationWhereError();
     //this._log('trace', `${this.modelName}.destroy`, options);
     if (options.hooks !== false) await this._runHooks('beforeDestroy', options);
     const result = await this._adapter.dml.delete(this, options);

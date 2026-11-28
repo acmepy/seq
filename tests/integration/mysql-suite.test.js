@@ -25,6 +25,7 @@ await import('../sync.test.js');
 await import('../transactions.test.js');
 await import('../unique-constraint.test.js');
 await import('../upsert.test.js');
+await import('../where-guard.test.js');
 
 await import('../composite-keys.test.js');
 await import('../tenant.test.js');

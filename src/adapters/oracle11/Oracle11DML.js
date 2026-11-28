@@ -95,6 +95,7 @@ export class Oracle11DML extends DMLAbstract {
   async update(model, values, options = {}) {
     this._assertTransaction(options);
     const { tableName, schema } = this._schema(model);
+    this._requireWhere(options.where, schema);
     const keys = primaryAttributes(model);
     const changed = keys.filter(key => Object.hasOwn(values, key));
     if (!changed.length) return super.update(model, values, options);

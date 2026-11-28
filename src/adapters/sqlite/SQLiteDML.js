@@ -124,7 +124,7 @@ export class SQLiteDML extends DMLAbstract {
       const colNames = cols.map(c => this._q(c)).join(', ');
       const placeholders = cols.map(() => '?').join(', ');
       const sql = `INSERT INTO ${this._q(tableName)} (${colNames}) VALUES (${placeholders})`;
-      const params = cols.map(c => this._serializeValue(colRecord[c]));
+      const params = cols.map(c => this._serializeValue(colRecord[c], schema.columns[schema.columnToAttr[c] || c]));
       const info = this.execute(sql, params);
 
       if (schema.autoIncrement && colRecord[schema.autoIncrement] == null) colRecord[schema.autoIncrement] = Number(info.lastInsertRowid);

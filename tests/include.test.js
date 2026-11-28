@@ -1,6 +1,6 @@
 import { describe, it, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
-import { Model, DataTypes } from '../src/index.js';
+import { Model, DataTypes, Op } from '../src/index.js';
 import { buildIncludeSqlAliasMap, normalizeInclude, resolveIncludeAlias, resolveEager } from '../src/utils/include.js';
 import { cleanupTestContext, createTestContext, quoteTestIdentifier, testAdapterName, testTable } from './shared/test-context.js';
 
@@ -108,6 +108,23 @@ describe('Aliases & Include', () => {
     await cleanupTestContext(context);
     context = null;
   });
+
+  for (const required of [false, true]) {
+    it(`[${testAdapterName()}] ignores empty eager include filters (required=${required})`, async () => {
+      const users = await User.findAll({
+        eager: true,
+        order: [['id', 'ASC']],
+        include: [
+          { model: Task, where: {}, required, include: [{ model: Comment, where: { [Op.and]: [] } }] },
+          { model: Role, where: { [Op.or]: [] }, required: false }
+        ]
+      });
+      assert.deepEqual(users.map(user => user.getDataValue('name')), ['Ana', 'Juan']);
+      assert.deepEqual(users.map(user => user.getDataValue('tasks').length), [2, 1]);
+      assert.equal(users[0].getDataValue('tasks').reduce((count, task) => count + task.getDataValue('comments').length, 0), 3);
+      assert.ok(users.every(user => user.getDataValue('roles').length === 0));
+    });
+  }
 
   // ---------------------------------------------------------------------------
   // Model alias

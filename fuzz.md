@@ -1,0 +1,6 @@
+[X] INSERT, UPDATE, DELETE y UPSERT: comprobar columnas, parámetros, valores nulos, claves compuestas y protección de operaciones sin WHERE.
+[ ] Asociaciones e include: joins anidados, alias, filtros, required, atributos y claves compuestas. Aquí hay muchas combinaciones todavía sin explorar.
+[ ] Más errores intencionales: invertir comparadores, perder condiciones anidadas, intercambiar parámetros, omitir una columna de una PK compuesta o generar un join incorrecto. Los seis actuales verifican detecciones puntuales.
+[ ] Comprobación semántica con SQLite en memoria: ejecutar consultas generadas y comparar resultados con una evaluación independiente del filtro en JS. Detectaría SQL válido que devuelve resultados incorrectos.
+[ ] Medir cobertura por rama de src: identificar operadores y rutas que el corpus nunca alcanza. El contador de cobertura de Jazzer ayuda a explorar, pero todavía no tenemos un informe que muestre esos huecos.
+[ ] Campañas más largas y semillas dirigidas: fechas límite, cadenas extensas, identificadores escapados y combinaciones profundas. Después, ampliar a sintaxis exclusiva de cada adaptador.

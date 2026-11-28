@@ -1,7 +1,9 @@
 import { modelTenant } from './TenantResolver.js';
 import { tenantQuery, tenantValues } from './TenantQueryScope.js';
 import { TenantError } from './errors/TenantError.js';
+import { ValidationWhereError } from './errors/ValidationError.js';
 import { primaryAttributes } from '../utils/keys.js';
+import { hasEffectiveWhere } from '../utils/where.js';
 
 /** Apply the same boundary to inherited and dialect-specific DML entry points. */
 export function installTenantDML(dml) {
@@ -17,7 +19,14 @@ export function installTenantDML(dml) {
       }
       return seq._tenants.run(async () => {
         const hasValues = ['insert', 'bulkInsert', 'update', 'upsert'].includes(operation);
-        const options = tenantQuery(model, args[hasValues ? 1 : 0] || {});
+        const rawOptions = args[hasValues ? 1 : 0] || {};
+        if ((operation === 'update' || operation === 'delete') && !hasEffectiveWhere(rawOptions.where)) {
+          throw new ValidationWhereError('where must be a non-empty object');
+        }
+        if (operation === 'upsert' && rawOptions.where !== undefined && !hasEffectiveWhere(rawOptions.where)) {
+          throw new ValidationWhereError('where must be a non-empty object');
+        }
+        const options = tenantQuery(model, rawOptions);
         seq._tenants.assertTransaction(options.transaction);
         this._assertTransaction(options);
         if (operation === 'truncate' && modelTenant(model)) {

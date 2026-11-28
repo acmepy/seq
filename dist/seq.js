@@ -1151,6 +1151,44 @@ function _pickAttributes(values, attributes) {
   return Object.fromEntries(attributes.filter(key => key in values).map(key => [key, values[key]]));
 }
 
+/**
+ * Resolves a where clause value into { op, value }.
+ * Scalar values → Op.eq.
+ * Objects with a single Symbol key → that operator.
+ * @param {*} value
+ * @returns {{ op: symbol, value: * }}
+ */
+function resolveWhereValue(value) {
+  if (value !== null && typeof value === 'object' && !Array.isArray(value)) {
+    const symbols = Object.getOwnPropertySymbols(value);
+    if (symbols.length === 1) {
+      return { op: symbols[0], value: value[symbols[0]] };
+    }
+  }
+  return { op: Op.eq, value };
+}
+
+function isPlainWhereObject(where) {
+  return Boolean(where) && typeof where === 'object' && !Array.isArray(where);
+}
+
+/**
+ * Returns true when a where object contains at least one effective predicate.
+ * @param {*} where
+ * @returns {boolean}
+ */
+function hasEffectiveWhere(where) {
+  if (!isPlainWhereObject(where)) return false;
+  if (Object.keys(where).length > 0) return true;
+  for (const sym of Object.getOwnPropertySymbols(where)) {
+    if (sym !== Op.and && sym !== Op.or) return true;
+    const children = where[sym];
+    if (!Array.isArray(children)) return true;
+    if (children.some(child => hasEffectiveWhere(child))) return true;
+  }
+  return false;
+}
+
 class TenantError extends SeqError {
   constructor(message, options = {}) {
     super(message, { code: 'SEQ_TENANT_ERROR', ...options });
@@ -1718,7 +1756,7 @@ class Model {
    */
   static async upsert(values = {}, options = {}) {
     //this._log('trace', `${this.modelName}.upsert`, values, options);
-    if (options.where !== undefined && (typeof options.where !== 'object' || Array.isArray(options.where))) throw new ValidationWhereError();
+    if (options?.where !== undefined && !hasEffectiveWhere(options.where)) throw new ValidationWhereError();
     if (options.include) {
       const includes = normalizeInclude(options.include);
       this._validateIncludes(includes);
@@ -1985,8 +2023,8 @@ class Model {
    * @returns {Promise<Model[]>}
    */
   static async update(values, options = {}) {
-    if (options.where !== undefined && (typeof options.where !== 'object' || Array.isArray(options.where)))throw new ValidationWhereError();
-    if (options.include) {
+    if (!options?.include && !hasEffectiveWhere(options?.where)) throw new ValidationWhereError();
+    if (options?.include) {
       const includes = normalizeInclude(options.include);
       this._validateIncludes(includes);
       const run = transaction => this._updateWithIncludes(values, { ...options, include: includes, transaction });
@@ -2021,7 +2059,10 @@ class Model {
   }
 
   static _resolveNestedUpdateWhere(values, options) {
-    if (options.where) return options.where;
+    if (options?.where !== undefined) {
+      if (!hasEffectiveWhere(options.where)) throw new ValidationWhereError();
+      return options.where;
+    }
     const keys = primaryAttributes(this).length ? primaryAttributes(this) : ['id'];
     const pk = keys.join(', ');
     if (keys.some(key => values?.[key] === undefined || values[key] === null)) {
@@ -2067,7 +2108,7 @@ class Model {
    * @returns {Promise<number>}
    */
   static async destroy(options = {}) {
-    if (options.where !== undefined && (typeof options.where !== 'object' || Array.isArray(options.where)))throw new ValidationWhereError();
+    if (!hasEffectiveWhere(options?.where)) throw new ValidationWhereError();
     //this._log('trace', `${this.modelName}.destroy`, options);
     if (options.hooks !== false) await this._runHooks('beforeDestroy', options);
     const result = await this._adapter.dml.delete(this, options);
@@ -4007,7 +4048,14 @@ function installTenantDML(dml) {
       }
       return seq._tenants.run(async () => {
         const hasValues = ['insert', 'bulkInsert', 'update', 'upsert'].includes(operation);
-        const options = tenantQuery(model, args[hasValues ? 1 : 0] || {});
+        const rawOptions = args[hasValues ? 1 : 0] || {};
+        if ((operation === 'update' || operation === 'delete') && !hasEffectiveWhere(rawOptions.where)) {
+          throw new ValidationWhereError('where must be a non-empty object');
+        }
+        if (operation === 'upsert' && rawOptions.where !== undefined && !hasEffectiveWhere(rawOptions.where)) {
+          throw new ValidationWhereError('where must be a non-empty object');
+        }
+        const options = tenantQuery(model, rawOptions);
         seq._tenants.assertTransaction(options.transaction);
         this._assertTransaction(options);
         if (operation === 'truncate' && modelTenant(model)) {
@@ -4099,23 +4147,6 @@ function installTenantTransactions(tcl) {
       });
     };
   }
-}
-
-/**
- * Resolves a where clause value into { op, value }.
- * Scalar values → Op.eq.
- * Objects with a single Symbol key → that operator.
- * @param {*} value
- * @returns {{ op: symbol, value: * }}
- */
-function resolveWhereValue(value) {
-  if (value !== null && typeof value === 'object' && !Array.isArray(value)) {
-    const symbols = Object.getOwnPropertySymbols(value);
-    if (symbols.length === 1) {
-      return { op: symbols[0], value: value[symbols[0]] };
-    }
-  }
-  return { op: Op.eq, value };
 }
 
 const requiredPageIncludes = Symbol('requiredPageIncludes');
@@ -4381,6 +4412,17 @@ class DMLAbstract extends BaseAbstract {
     return { sql: ` WHERE ${conditions.join(' AND ')}`, params };
   }
 
+  _requireWhere(where, schema, alias = null) {
+    if (!hasEffectiveWhere(where)) {
+      throw new ValidationWhereError('where must be a non-empty object');
+    }
+    const built = this._buildWhere(where, schema, alias);
+    if (!built.sql) {
+      throw new ValidationWhereError('where must contain at least one condition');
+    }
+    return built;
+  }
+
   /**
    * Builds an ORDER BY clause.
    * @param {Array} order - Array of [attr, direction] pairs
@@ -4553,7 +4595,7 @@ class DMLAbstract extends BaseAbstract {
         let onClause = `${this._colRef(junctionOtherKeyCol, junctionAlias)} = ${this._colRef(targetPKCol, joinAlias)}`;
         if (inc.where) {
           const where = this._buildConditions(inc.where, targetSchema, joinAlias);
-          onClause += ` AND ${where.conditions.join(' AND ')}`;
+          if (where.conditions.length) onClause += ` AND ${where.conditions.join(' AND ')}`;
           params.push(...where.params);
         }
         sql += ` ${joinType} ${this._tableWithAlias(targetTable, joinAlias)} ON ${onClause}`;
@@ -4566,7 +4608,7 @@ class DMLAbstract extends BaseAbstract {
         }).join(' AND ');
         if (inc.where) {
           const where = this._buildConditions(inc.where, targetSchema, joinAlias);
-          onClause += ` AND ${where.conditions.join(' AND ')}`;
+          if (where.conditions.length) onClause += ` AND ${where.conditions.join(' AND ')}`;
           params.push(...where.params);
         }
         sql += ` ${joinType} ${this._tableWithAlias(targetTable, joinAlias)} ON ${onClause}`;
@@ -4780,6 +4822,7 @@ class DMLAbstract extends BaseAbstract {
     this._assertTransaction(options);
     //this._log('DML.update', model.modelName, values, options);
     const { tableName, schema } = this._schema(model);
+    const where = this._requireWhere(options.where, schema);
     const colValues = this._toColumnNames(values, schema);
     this._applyTimestamps(colValues, schema);
     this._validateMutationValues(colValues, schema, model.modelName);
@@ -4793,15 +4836,13 @@ class DMLAbstract extends BaseAbstract {
     }
     const setClauses = Object.keys(colValues).map(k => `${this._q(k)} = ?`);
     const params = Object.entries(colValues).map(([col, value]) => this._serializeValue(value, schema.columns[schema.columnToAttr[col] || col]));
-    const where = this._buildWhere(options.where, schema);
     const sql = `UPDATE ${this._q(tableName)} SET ${setClauses.join(', ')}${where.sql}`;
     params.push(...where.params);
     await this.execute(sql, params);
     if (primaryKeys) {
       return this.selectAll(model, { ...options, where: tuplesWhere(pkAttrs, primaryKeys) });
     }
-    if (options.where) return await this.selectAll(model, options);
-    return [];
+    return await this.selectAll(model, options);
   }
 
   /**
@@ -4815,7 +4856,7 @@ class DMLAbstract extends BaseAbstract {
     //this._log('DML.delete', model.modelName, options);
     const { tableName, schema } = this._schema(model);
     const params = [];
-    const where = this._buildWhere(options.where, schema);
+    const where = this._requireWhere(options.where, schema);
     const sql = `DELETE FROM ${this._q(tableName)}${where.sql}`;
     params.push(...where.params);
     const info = await this.execute(sql, params);
@@ -4853,7 +4894,7 @@ class DMLAbstract extends BaseAbstract {
     const colNames = cols.map(c => this._q(c)).join(', ');
     const placeholders = cols.map(() => '?').join(', ');
     const sql = `INSERT INTO ${this._q(tableName)} (${colNames}) VALUES (${placeholders})`;
-    const params = cols.map(c => this._serializeValue(colRecord[c]));
+    const params = cols.map(c => this._serializeValue(colRecord[c], schema.columns[schema.columnToAttr[c] || c]));
     const info = await this.execute(sql, params);
     if (schema.autoIncrement && colRecord[schema.autoIncrement] == null) {
       colRecord[schema.autoIncrement] = Number(info.lastInsertRowid);
@@ -4929,8 +4970,11 @@ class DMLAbstract extends BaseAbstract {
   }
 
   _resolveUpsertWhere(model, values, options = {}, schema = null) {
-    if (options.where) return options.where;
     const upsertSchema = schema || this._schema(model).schema;
+    if (options.where !== undefined) {
+      this._requireWhere(options.where, upsertSchema);
+      return options.where;
+    }
     const fields = this._resolveUpsertConflictFields(model, values, options, upsertSchema);
     if (fields.length === 0) {
       throw new ValidationError(`Model "${model.modelName}" upsert requires options.where, options.conflictFields, or a primary key value`, {
@@ -5521,8 +5565,11 @@ class MapDML extends DMLAbstract {
     const updatedInstances = [];
     const now = new Date();
 
+    if (!hasEffectiveWhere(options.where)) {
+      throw new ValidationWhereError('where must be a non-empty object');
+    }
     const colValues = this._toColumnNames(values, schema);
-    const colWhere = options.where ? this._translateWhere(options.where, schema) : null;
+    const colWhere = this._translateWhere(options.where, schema);
 
     const toUpdate = [];
     for (const [key, record] of table) {
@@ -5589,7 +5636,12 @@ class MapDML extends DMLAbstract {
     const schema = this._adapter.schemas.get(tableName);
     let count = 0;
 
-    const colWhere = options.where ? this._translateWhere(options.where, schema) : null;
+    const colWhere = (() => {
+      if (!hasEffectiveWhere(options.where)) {
+        throw new ValidationWhereError('where must be a non-empty object');
+      }
+      return this._translateWhere(options.where, schema);
+    })();
 
     const keysToDelete = [];
     for (const [key, record] of table) {
@@ -6338,7 +6390,7 @@ class SQLiteDML extends DMLAbstract {
       const colNames = cols.map(c => this._q(c)).join(', ');
       const placeholders = cols.map(() => '?').join(', ');
       const sql = `INSERT INTO ${this._q(tableName)} (${colNames}) VALUES (${placeholders})`;
-      const params = cols.map(c => this._serializeValue(colRecord[c]));
+      const params = cols.map(c => this._serializeValue(colRecord[c], schema.columns[schema.columnToAttr[c] || c]));
       const info = this.execute(sql, params);
 
       if (schema.autoIncrement && colRecord[schema.autoIncrement] == null) colRecord[schema.autoIncrement] = Number(info.lastInsertRowid);
@@ -7019,7 +7071,7 @@ class MySQLDML extends DMLAbstract {
     const colNames = cols.map(c => this._q(c)).join(', ');
     const placeholders = cols.map(() => '?').join(', ');
     const sql = `INSERT INTO ${this._q(tableName)} (${colNames}) VALUES (${placeholders})`;
-    const params = cols.map(c => this._serializeValue(colRecord[c]));
+    const params = cols.map(c => this._serializeValue(colRecord[c], schema.columns[schema.columnToAttr[c] || c]));
     const info = await this.execute(sql, params);
     if (schema.autoIncrement && colRecord[schema.autoIncrement] == null) colRecord[schema.autoIncrement] = Number(info.lastInsertRowid);
     return new model(this._toAttrNames(colRecord, schema), { _isNew: false });
@@ -7667,6 +7719,7 @@ class Oracle11DML extends DMLAbstract {
   async update(model, values, options = {}) {
     this._assertTransaction(options);
     const { tableName, schema } = this._schema(model);
+    this._requireWhere(options.where, schema);
     const keys = primaryAttributes(model);
     const changed = keys.filter(key => Object.hasOwn(values, key));
     if (!changed.length) return super.update(model, values, options);

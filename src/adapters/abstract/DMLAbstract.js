@@ -3,9 +3,9 @@ import { installTenantDML } from '../../core/TenantDML.js';
 import { tenantWhere } from '../../core/TenantQueryScope.js';
 import { BaseAbstract } from './BaseAbstract.js';
 import { AdapterError } from '../../core/errors/AdapterError.js';
-import { ValidationError } from '../../core/errors/ValidationError.js';
+import { ValidationError, ValidationWhereError } from '../../core/errors/ValidationError.js';
 import { Op } from '../../operators.js';
-import { resolveWhereValue } from '../../utils/where.js';
+import { resolveWhereValue, hasEffectiveWhere } from '../../utils/where.js';
 import { buildIncludeSqlAliasMap, chunks, eagerNestedIncludes, loadIncludes, loadNestedLazyIncludes, processJoinedRows, resolveIncludeAlias, resolveEager, resolveAssociation, trimProjection } from '../../utils/include.js';
 
 const requiredPageIncludes = Symbol('requiredPageIncludes');
@@ -271,6 +271,17 @@ export class DMLAbstract extends BaseAbstract {
     return { sql: ` WHERE ${conditions.join(' AND ')}`, params };
   }
 
+  _requireWhere(where, schema, alias = null) {
+    if (!hasEffectiveWhere(where)) {
+      throw new ValidationWhereError('where must be a non-empty object');
+    }
+    const built = this._buildWhere(where, schema, alias);
+    if (!built.sql) {
+      throw new ValidationWhereError('where must contain at least one condition');
+    }
+    return built;
+  }
+
   /**
    * Builds an ORDER BY clause.
    * @param {Array} order - Array of [attr, direction] pairs
@@ -443,7 +454,7 @@ export class DMLAbstract extends BaseAbstract {
         let onClause = `${this._colRef(junctionOtherKeyCol, junctionAlias)} = ${this._colRef(targetPKCol, joinAlias)}`;
         if (inc.where) {
           const where = this._buildConditions(inc.where, targetSchema, joinAlias);
-          onClause += ` AND ${where.conditions.join(' AND ')}`;
+          if (where.conditions.length) onClause += ` AND ${where.conditions.join(' AND ')}`;
           params.push(...where.params);
         }
         sql += ` ${joinType} ${this._tableWithAlias(targetTable, joinAlias)} ON ${onClause}`;
@@ -456,7 +467,7 @@ export class DMLAbstract extends BaseAbstract {
         }).join(' AND ');
         if (inc.where) {
           const where = this._buildConditions(inc.where, targetSchema, joinAlias);
-          onClause += ` AND ${where.conditions.join(' AND ')}`;
+          if (where.conditions.length) onClause += ` AND ${where.conditions.join(' AND ')}`;
           params.push(...where.params);
         }
         sql += ` ${joinType} ${this._tableWithAlias(targetTable, joinAlias)} ON ${onClause}`;
@@ -670,6 +681,7 @@ export class DMLAbstract extends BaseAbstract {
     this._assertTransaction(options);
     //this._log('DML.update', model.modelName, values, options);
     const { tableName, schema } = this._schema(model);
+    const where = this._requireWhere(options.where, schema);
     const colValues = this._toColumnNames(values, schema);
     this._applyTimestamps(colValues, schema);
     this._validateMutationValues(colValues, schema, model.modelName);
@@ -683,15 +695,13 @@ export class DMLAbstract extends BaseAbstract {
     }
     const setClauses = Object.keys(colValues).map(k => `${this._q(k)} = ?`);
     const params = Object.entries(colValues).map(([col, value]) => this._serializeValue(value, schema.columns[schema.columnToAttr[col] || col]));
-    const where = this._buildWhere(options.where, schema);
     const sql = `UPDATE ${this._q(tableName)} SET ${setClauses.join(', ')}${where.sql}`;
     params.push(...where.params);
     await this.execute(sql, params);
     if (primaryKeys) {
       return this.selectAll(model, { ...options, where: tuplesWhere(pkAttrs, primaryKeys) });
     }
-    if (options.where) return await this.selectAll(model, options);
-    return [];
+    return await this.selectAll(model, options);
   }
 
   /**
@@ -705,7 +715,7 @@ export class DMLAbstract extends BaseAbstract {
     //this._log('DML.delete', model.modelName, options);
     const { tableName, schema } = this._schema(model);
     const params = [];
-    const where = this._buildWhere(options.where, schema);
+    const where = this._requireWhere(options.where, schema);
     const sql = `DELETE FROM ${this._q(tableName)}${where.sql}`;
     params.push(...where.params);
     const info = await this.execute(sql, params);
@@ -743,7 +753,7 @@ export class DMLAbstract extends BaseAbstract {
     const colNames = cols.map(c => this._q(c)).join(', ');
     const placeholders = cols.map(() => '?').join(', ');
     const sql = `INSERT INTO ${this._q(tableName)} (${colNames}) VALUES (${placeholders})`;
-    const params = cols.map(c => this._serializeValue(colRecord[c]));
+    const params = cols.map(c => this._serializeValue(colRecord[c], schema.columns[schema.columnToAttr[c] || c]));
     const info = await this.execute(sql, params);
     if (schema.autoIncrement && colRecord[schema.autoIncrement] == null) {
       colRecord[schema.autoIncrement] = Number(info.lastInsertRowid);
@@ -819,8 +829,11 @@ export class DMLAbstract extends BaseAbstract {
   }
 
   _resolveUpsertWhere(model, values, options = {}, schema = null) {
-    if (options.where) return options.where;
     const upsertSchema = schema || this._schema(model).schema;
+    if (options.where !== undefined) {
+      this._requireWhere(options.where, upsertSchema);
+      return options.where;
+    }
     const fields = this._resolveUpsertConflictFields(model, values, options, upsertSchema);
     if (fields.length === 0) {
       throw new ValidationError(`Model "${model.modelName}" upsert requires options.where, options.conflictFields, or a primary key value`, {

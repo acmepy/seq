@@ -1,6 +1,6 @@
 export default [
   {
-    files: ['src/**/*.js', 'tests/**/*.js', 'examples/**/*.js'],
+    files: ['src/**/*.js', 'tests/**/*.js', 'examples/**/*.js', 'fuzz/**/*.js', 'scripts/*fuzz.js'],
     languageOptions: {
       ecmaVersion: 'latest',
       sourceType: 'module'

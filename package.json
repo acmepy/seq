@@ -1,6 +1,6 @@
 {
   "name": "seq",
-  "version": "1.6.1",
+  "version": "1.6.3",
   "description": "seq es un micro orm, modular, flexible y de facil integracion",
   "type": "module",
   "main": "dist/seq.js",
@@ -27,7 +27,7 @@
     "test:oracle26": "node --test tests/integration/oracle26-suite.test.js",
     "test:coverage": "node --test --experimental-test-coverage tests/*.test.js",
     "test:watch": "node --test --watch tests/*.test.js",
-    "lint": "eslint src tests examples",
+    "lint": "eslint src tests examples fuzz scripts/run-fuzz.js scripts/verify-fuzz.js",
     "format": "prettier --write src tests examples types README.md package.json",
     "precompile": "node -e \"require('fs').rmSync('dist',{recursive:true,force:true})\"",
     "compile": "npm run test && rollup -c",
@@ -41,7 +41,13 @@
     "example:virtual": "node examples/virtual.js",
     "example:cache": "node examples/cache.js",
     "example:timezone": "node examples/timezone.js",
-    "examples": "npm run example:basic && npm run example:associations && npm run example:find && npm run example:include && npm run example:belongs-to-many && npm run example:hooks && npm run example:virtual && npm run example:cache"
+    "examples": "npm run example:basic && npm run example:associations && npm run example:find && npm run example:include && npm run example:belongs-to-many && npm run example:hooks && npm run example:virtual && npm run example:cache",
+    "fuzz:sql": "node scripts/run-fuzz.js",
+    "fuzz:smoke": "node scripts/run-fuzz.js smoke",
+    "fuzz:regression": "node scripts/run-fuzz.js regression",
+    "fuzz:replay": "node scripts/run-fuzz.js replay",
+    "fuzz:verify": "node scripts/verify-fuzz.js",
+    "fuzz:coverage": "node scripts/run-fuzz.js coverage"
   },
   "keywords": [
     "orm",
@@ -68,6 +74,7 @@
     }
   },
   "devDependencies": {
+    "@jazzer.js/core": "^4.0.0",
     "better-sqlite3": "^12.11.1",
     "dotenv": "^17.4.2",
     "eslint": "^10.7.0",

@@ -1,10 +1,11 @@
 import { tupleKey, valuesFor } from '../../utils/keys.js';
 import { AdapterError } from '../../core/errors/AdapterError.js';
-import { ValidationError } from '../../core/errors/ValidationError.js';
+import { ValidationError, ValidationWhereError } from '../../core/errors/ValidationError.js';
 import { clone } from '../../utils/clone.js';
 import { DMLAbstract } from '../abstract/DMLAbstract.js';
 import { loadIncludes, trimProjection } from '../../utils/include.js';
 import { Op } from '../../operators.js';
+import { hasEffectiveWhere } from '../../utils/where.js';
 
 /**
  * DML operations for the MapAdapter.
@@ -288,8 +289,11 @@ export class MapDML extends DMLAbstract {
     const updatedInstances = [];
     const now = new Date();
 
+    if (!hasEffectiveWhere(options.where)) {
+      throw new ValidationWhereError('where must be a non-empty object');
+    }
     const colValues = this._toColumnNames(values, schema);
-    const colWhere = options.where ? this._translateWhere(options.where, schema) : null;
+    const colWhere = this._translateWhere(options.where, schema);
 
     const toUpdate = [];
     for (const [key, record] of table) {
@@ -356,7 +360,12 @@ export class MapDML extends DMLAbstract {
     const schema = this._adapter.schemas.get(tableName);
     let count = 0;
 
-    const colWhere = options.where ? this._translateWhere(options.where, schema) : null;
+    const colWhere = (() => {
+      if (!hasEffectiveWhere(options.where)) {
+        throw new ValidationWhereError('where must be a non-empty object');
+      }
+      return this._translateWhere(options.where, schema);
+    })();
 
     const keysToDelete = [];
     for (const [key, record] of table) {

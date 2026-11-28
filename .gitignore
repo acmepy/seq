@@ -24,3 +24,7 @@ examples/*.sqlite-*
 .idea/
 .DS_Store
 Thumbs.db
+
+# Fuzzing output and local npm cache
+.fuzz/
+.cache/

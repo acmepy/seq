@@ -1197,6 +1197,43 @@ npm run examples
 
 Las pruebas de comportamiento común deben ejecutarse con todos los adaptadores SQL: SQLite mediante `npm test`, MySQL mediante `npm run test:mysql`, y Oracle mediante `npm run test:oracle11` y `npm run test:oracle12`. Estas pruebas deben usar el adaptador activo de la suite; las pruebas exclusivas de un motor se reservan para sintaxis SQL o capacidades propias de ese motor.
 
+### Fuzzing del generador SQL
+
+La dependencia de desarrollo [Jazzer.js](https://github.com/CodeIntelligenceTesting/jazzer.js/) genera entradas guiadas por cobertura para los generadores reales de SQLite, MySQL y Oracle 11. No abre conexiones ni requiere `.env` o servidores. Estas pruebas son independientes de `npm test`, que sigue ejecutando SQLite.
+
+```sh
+npm run fuzz:smoke
+npm run fuzz:sql -- -max_total_time=60 -seed=42
+npm run fuzz:regression
+npm run fuzz:verify
+npm run fuzz:coverage
+npm run fuzz:replay -- .fuzz/artifacts/crash-<hash>
+```
+
+- `fuzz:smoke`: ejecuta 10.000 casos.
+- `fuzz:sql`: busca casos nuevos; sin limite de tiempo o ejecuciones continua hasta interrumpirlo. Acepta opciones de libFuzzer despues de `--`.
+- `fuzz:regression`: reproduce las semillas y el corpus aprendido.
+- `fuzz:verify`: verifica 15 controles negativos usando solo las semillas versionadas. Primero exige que el generador sano pase; despues introduce fallos aislados en procesos separados: interpolacion de valores, parametro perdido, parentesis sobrante, conversion incorrecta de booleanos de Oracle, cambio de `OR` por `AND`, numeracion repetida de binds, columna omitida en INSERT, parametros intercambiados en UPDATE, ausencia de proteccion de WHERE, clave compuesta incompleta en UPSERT o JOIN, tipo de JOIN incorrecto, perdida de claves en la proyeccion o en un EXISTS y AND vacio en un JOIN. Cada fallo debe producir una asercion relacionada con el defecto; un fallo de arranque no cuenta como deteccion. El comando falla si sobrevive alguna mutacion. No modifica archivos de `src` ni activa estos defectos en las ejecuciones normales.
+- `fuzz:coverage`: reproduce el corpus y genera un informe HTML en `.fuzz/coverage/index.html`, un resumen JSON y porcentajes de lineas, funciones y ramas. Mide los archivos instrumentados que carga este objetivo; no representa la cobertura de toda la suite del ORM.
+- `fuzz:replay`: reproduce un archivo concreto, por ejemplo un fallo guardado.
+
+El objetivo `fuzz/sql-generator.fuzz.js` comprueba:
+
+- Parametrizacion: los valores no aparecen en el SQL, modificar cadenas no cambia su estructura, y el orden y la cantidad de parametros coinciden. Incluye cadenas con intentos de inyeccion, Unicode y caracteres nulos.
+- Condiciones anidadas `AND`/`OR`, comparaciones, `LIKE`, `IN`, `BETWEEN`, listas vacias, orden y paginacion.
+- Conversion de fechas, numeros, booleanos, JSON, `null` y `undefined`; rechazo de entradas invalidas e identificadores escapados.
+- Proyeccion de atributos, nombres fisicos y exclusion de virtuales.
+- Diferencias de serializacion entre adaptadores y numeracion de binds de Oracle.
+- SQL emitido por los metodos reales de INSERT, UPDATE, DELETE y las dos ramas de UPSERT, con claves compuestas, columnas fisicas, orden de parametros y rechazo de modificaciones sin condiciones efectivas. La captura detiene la operacion antes de ejecutar SQL; para las lecturas previas de UPDATE/UPSERT se suministra una fila fija de entrada, sin verificar resultados de una base simulada.
+- Asociaciones `hasMany`, `hasOne` y `belongsTo` con claves compuestas, hasta tres niveles de includes, filtros vacios o parametrizados, JOIN opcional u obligatorio, colisiones de alias, proyeccion y condiciones `EXISTS` de includes requeridos.
+- Invariantes estructurales: comillas y parentesis balanceados, ausencia de comentarios o sentencias adicionales fuera de identificadores, y ausencia de grupos o clausulas incompletas conocidas.
+
+Las entradas estan limitadas a 2.048 bytes, con condiciones de hasta cuatro niveles, 24 nodos y listas de cinco elementos. Las semillas versionadas estan en `fuzz/corpus/sql-generator`; el corpus aprendido y los fallos se guardan en `.fuzz/corpus/sql-generator` y `.fuzz/artifacts`, excluidos de Git. Tras corregir un fallo, su entrada puede copiarse al directorio de semillas para conservar la regresion.
+
+Se instrumenta `src` para medir cobertura. Los detectores integrados de Jazzer para operaciones de sistema y red estan desactivados en este objetivo puro; las comprobaciones de SQL son las aserciones del objetivo. Una excepcion inesperada o una asercion fallida detiene la ejecucion y conserva la entrada.
+
+El fuzzing no sustituye un parser SQL completo o las integraciones con motores reales. No verifica resultados de consultas, que el servidor acepte cada consulta o valor, ni el comportamiento de los drivers. Aun no explora `belongsToMany`, autoincrementos, inserciones masivas ni la carga de filas de asociaciones. Una ejecucion sin fallos no garantiza ausencia de vulnerabilidades.
+
 ## Estructura
 
 ```text
